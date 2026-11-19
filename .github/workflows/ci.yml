@@ -44,33 +44,11 @@ jobs:
       - name: Typecheck and build
         run: pnpm build
 
-      - name: Channel pagination regression
-        run: |
-          if node -e "process.exit(require('./package.json').scripts['test:channel-pagination'] ? 0 : 1)"; then
-            pnpm test:channel-pagination
-          else
-            echo "test:channel-pagination not present on this branch yet; skipped until PR #48 lands"
-          fi
-
       - name: API loading states
         run: pnpm test:api-loading
 
-      - name: Mobile layout
-        run: pnpm test:mobile-layout
-
-      - name: iOS material UI and overlay interactions
-        run: |
-          pnpm test:ios-ui
-          pnpm test:ios-overlays
-
-      - name: Diagnostic copy
-        run: pnpm test:diagnostic-copy
-
-      - name: Storage migration
-        run: pnpm test:storage-migration
-
-      - name: Playback diagnostics
-        run: pnpm test:playback
+      - name: Full application test suite
+        run: pnpm test
 
       - name: Upload test artifacts
         if: always()
