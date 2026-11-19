@@ -195,16 +195,22 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           set -euo pipefail
-          if [ -z "${KEYSTORE_BASE64:-}" ]; then
-            echo "::notice::No ANDROID_KEY_BASE64 secret; generating self-signed release keystore"
-            KS="$RUNNER_TEMP/release.keystore"
+          KS="$RUNNER_TEMP/release.keystore"
+          if [ -n "${KEYSTORE_BASE64:-}" ]; then
+            echo "Using secret-provided keystore"
+            echo "$KEYSTORE_BASE64" | base64 -d > "$KS"
+          elif [ -f "scripts/release.keystore" ]; then
+            echo "Using permanent repository keystore scripts/release.keystore"
+            cp "scripts/release.keystore" "$KS"
+            KEY_ALIAS="${KEY_ALIAS:-}"
+            STORE_PASSWORD="${STORE_PASSWORD:-}"
+            KEY_PASSWORD="${KEY_PASSWORD:-}"
+          else
+            echo "::notice::No keystore found; generating self-signed release keystore"
             keytool -genkey -v -keystore "$KS" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=AuraStream,O=AuraStream,C=US"
             KEY_ALIAS="androiddebugkey"
             STORE_PASSWORD="android"
             KEY_PASSWORD="android"
-          else
-            KS="$RUNNER_TEMP/release.keystore"
-            echo "$KEYSTORE_BASE64" | base64 -d > "$KS"
           fi
           BT="$(ls "$ANDROID_SDK_ROOT/build-tools" | sort -V | tail -1)"
           APKSIGNER="$ANDROID_SDK_ROOT/build-tools/$BT/apksigner"
