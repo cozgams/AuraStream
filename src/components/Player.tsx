@@ -283,7 +283,7 @@ export default function Player({
 
       {!playing && !waiting && (
         <Button onClick={toggle} aria-label="Play"
-          className="absolute inset-0 flex items-center justify-center">
+          className="absolute inset-0 z-20 flex items-center justify-center">
           <span className="w-16 h-16 rounded-full bg-black/45 backdrop-blur-sm flex items-center justify-center elev-2 pressable">
             <IPlayF size={26} className="text-white ml-0.5" />
           </span>
@@ -291,7 +291,7 @@ export default function Player({
       )}
 
       {controls && (
-        <div className="player-inline-controls absolute inset-x-0 bottom-0 px-3 pb-2 pt-8 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="player-inline-controls absolute inset-x-0 bottom-0 z-20 px-3 pb-2 pt-8 opacity-0 group-hover:opacity-100 transition-opacity">
           <Input aria-label="Playback progress" type="range" {...seek.inputProps}
             className="hg-range w-full" style={{ ...seek.inputProps.style, "--fill": `${pct}%` } as React.CSSProperties} />
           <div className="flex items-center gap-3 mt-1 text-white">
