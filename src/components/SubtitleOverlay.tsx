@@ -243,16 +243,19 @@ export default function SubtitleOverlay({
         : `calc(var(--sab, 0px) + ${(bottomOffset !== undefined ? bottomOffset : 124) + 140}px)`,
     };
   } else {
-    // "bottom" -> Anchored on the downside (lower portion of active video frame)
+    // "bottom" -> Anchored on the downside (lower portion of active video frame, non-overlapping with metadata)
     if (isDesktop) {
       positionStyle = { bottom: "48px" };
     } else if (clean || fs) {
       positionStyle = {
-        bottom: videoFrameBottom !== null ? `${videoFrameBottom}px` : "calc(var(--sab, 0px) + 20px)",
+        bottom: videoFrameBottom !== null ? `${videoFrameBottom}px` : "calc(var(--sab, 0px) + 24px)",
       };
     } else {
+      const baseOffset = bottomOffset !== undefined ? bottomOffset : 54;
       positionStyle = {
-        bottom: videoFrameBottom !== null ? `${videoFrameBottom}px` : "calc(var(--sab, 0px) + 76px)",
+        bottom: videoFrameBottom !== null && videoFrameBottom > baseOffset + 112
+          ? `${videoFrameBottom}px`
+          : `calc(var(--sab, 0px) + ${baseOffset + 112}px)`,
       };
     }
   }
