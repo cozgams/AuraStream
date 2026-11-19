@@ -2,7 +2,7 @@ import { Button, Input } from "./ios/controls";
 import { Loader } from "./ios/effects";
 import React, { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
-import { fmtTime, platform, playlist } from "../api";
+import { fmtTime, isLocalMedia, platform, playlist } from "../api";
 import { mediaErrorMessage } from "../mediaErrors";
 import { mediaHost, mediaResource, observeHls, usePlayerDiagnostics } from "../playbackDiagnostics";
 import { usePlaybackActivity } from "../usePlaybackActivity";
@@ -90,12 +90,16 @@ export default function Player({
     setWaiting(false);
     recoverCountRef.current = 0;
     const resume = proxyRecovery.resume();
-    const url = playlist(src);
-    trace("source.load", { engine: Hls.isSupported() ? "hls.js" : "native", auto_play: autoPlay, resource: mediaResource(src), host: mediaHost(src) });
+    const isBlob = src.startsWith("blob:");
+    const isHlsBlob = isBlob && (src.includes(".m3u8") || src.includes("type=hls") || src.includes("#.m3u8"));
+    const proxied = isLocalMedia(src) || isBlob;
+    const url = isBlob ? src : (proxied ? src : playlist(src));
+    const useHls = (isHlsBlob || !isBlob) && !url.includes("/seg?u=");
+    trace("source.load", { engine: useHls && Hls.isSupported() ? "hls.js" : "native", auto_play: autoPlay, resource: mediaResource(src), host: mediaHost(src) });
 
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
 
-    if (Hls.isSupported()) {
+    if (useHls && Hls.isSupported()) {
       const hls = new Hls({
         // Disable direct steering URLs
         interstitialsController: undefined,

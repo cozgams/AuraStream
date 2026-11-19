@@ -93,6 +93,14 @@ jobs:
       - name: Generate Android project
         run: pnpm tauri android init --ci
 
+      - name: Patch Android performance flags (largeHeap & hardwareAccelerated)
+        run: |
+          MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            sed -i 's/<application/<application android:largeHeap="true" android:hardwareAccelerated="true"/' "$MANIFEST"
+            echo "Patched $MANIFEST with largeHeap=true and hardwareAccelerated=true"
+          fi
+
       - name: Build APK (split by ABI)
         run: |
           pnpm tauri android build --apk --split-per-abi --target aarch64 armv7 x86_64

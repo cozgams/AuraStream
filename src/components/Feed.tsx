@@ -2704,7 +2704,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         videoId={curId}
         currentEpisode={curEp}
         totalEpisodes={episodes.length || detail?.episodes?.length || detail?.episode_count || detail?.total_episodes || meta.episodes?.length || 10}
-        title={formatDramaTitle(meta.title) || title || `Series #${curId}`}
+        title={formatDramaTitle(meta?.title) || formatDramaTitle(detail?.title) || formatDramaTitle(title) || `Series #${curId}`}
         coverUrl={meta.cover || ""}
         isDownloaded={isDownloaded}
         isDownloading={Boolean(isDownloadingCurrent)}
@@ -2736,7 +2736,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
             await startEpisodeDownload(
               curId,
               epToDownload,
-              formatDramaTitle(meta.title) || `Episode ${epToDownload}`,
+              formatDramaTitle(meta?.title) || formatDramaTitle(detail?.title) || formatDramaTitle(title) || `Drama #${curId}`,
               posterUrl || meta.cover || "",
               url,
               false,
@@ -2756,13 +2756,13 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         onClose={() => setExportModalOpen(false)}
         videoId={curId}
         episode={curEp}
-        title={formatDramaTitle(meta.title) || title || `Series #${curId}`}
+        title={formatDramaTitle(meta?.title) || formatDramaTitle(detail?.title) || formatDramaTitle(title) || `Series #${curId}`}
       />
       <BatchDownloadSheet
         isOpen={batchDownloadOpen}
         onClose={() => setBatchDownloadOpen(false)}
         videoId={curId}
-        title={formatDramaTitle(meta.title) || title || `Series #${curId}`}
+        title={formatDramaTitle(meta?.title) || formatDramaTitle(detail?.title) || formatDramaTitle(title) || `Series #${curId}`}
         cover={meta.cover || ""}
         totalEpisodes={episodes.length || detail?.episodes?.length || detail?.episode_count || detail?.total_episodes || meta.episodes?.length || 10}
       />

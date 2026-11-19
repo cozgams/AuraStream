@@ -210,15 +210,17 @@ export async function syncOfflineEpisodesFromIndexedDB(): Promise<OfflineEpisode
     return new Promise((resolve) => {
       const tx = db.transaction(STORE_NAME, "readonly");
       const store = tx.objectStore(STORE_NAME);
-      const req = store.getAll();
-      req.onsuccess = () => {
-        const records = req.result || [];
-        const currentList = getOfflineEpisodes();
-        const map = new Map<string, OfflineEpisode>();
-        for (const it of currentList) map.set(it.id, it);
-        let changed = false;
-        for (const rec of records) {
-          if (!map.has(rec.id)) {
+      const currentList = getOfflineEpisodes();
+      const map = new Map<string, OfflineEpisode>();
+      for (const it of currentList) map.set(it.id, it);
+      let changed = false;
+
+      const req = store.openCursor();
+      req.onsuccess = (e: any) => {
+        const cursor: IDBCursorWithValue | null = e.target.result;
+        if (cursor) {
+          const rec = cursor.value;
+          if (rec && rec.id && !map.has(rec.id)) {
             map.set(rec.id, {
               id: rec.id,
               videoId: rec.videoId,
@@ -226,21 +228,28 @@ export async function syncOfflineEpisodesFromIndexedDB(): Promise<OfflineEpisode
               title: rec.title,
               cover: rec.cover || "",
               sizeBytes: rec.sizeBytes || 0,
-              downloadedAt: Date.now(),
+              downloadedAt: rec.downloadedAt || Date.now(),
               cues: rec.cues || [],
               quality: rec.quality,
               isHevc: rec.isHevc,
             });
             changed = true;
           }
+          cursor.continue();
+        } else {
+          // Completed cursor scan
+          db.close();
+          const merged = Array.from(map.values());
+          if (changed) {
+            saveOfflineEpisodesList(merged);
+          }
+          resolve(merged);
         }
-        const merged = Array.from(map.values());
-        if (changed) {
-          saveOfflineEpisodesList(merged);
-        }
-        resolve(merged);
       };
-      req.onerror = () => resolve(getOfflineEpisodes());
+      req.onerror = () => {
+        db.close();
+        resolve(getOfflineEpisodes());
+      };
     });
   } catch {
     return getOfflineEpisodes();
@@ -513,11 +522,21 @@ export async function getOfflinePlaybackUrl(videoId: number, episode: number): P
     revokeOfflinePlaybackUrls();
 
     if (record.isHls && record.playlistText && record.segments) {
-      // Recreate blob URLs for each segment inside m3u8 playlist
+      // Recreate blob URLs for AES-128 key (if encrypted) and each segment
+      let offlineKeyUrl = "";
+      if (record.keyBuffer) {
+        const keyBlob = new Blob([record.keyBuffer], { type: "application/octet-stream" });
+        offlineKeyUrl = URL.createObjectURL(keyBlob);
+        activeOfflineUrls.add(offlineKeyUrl);
+      }
+
       const lines = record.playlistText.split("\n");
       let segIndex = 0;
       const newLines = lines.map((line: string) => {
         const trimmed = line.trim();
+        if (trimmed.startsWith("#EXT-X-KEY:") && offlineKeyUrl) {
+          return line.replace(/URI="[^"]+"/, `URI="${offlineKeyUrl}"`);
+        }
         if (trimmed && !trimmed.startsWith("#")) {
           const segData = record.segments[segIndex++];
           if (segData) {
@@ -687,22 +706,42 @@ async function fetchWithRetry(
   url: string,
   signal?: AbortSignal,
   maxRetries = 3,
-  baseDelay = 350
+  baseDelay = 350,
+  timeoutMs = 15000
 ): Promise<Response> {
   let lastError: any = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (signal?.aborted) throw new Error("aborted");
+
+    const timeoutCtrl = new AbortController();
+    const timer = setTimeout(() => {
+      timeoutCtrl.abort("timeout");
+    }, timeoutMs);
+
+    let onAbort: (() => void) | null = null;
+    if (signal) {
+      onAbort = () => timeoutCtrl.abort("aborted");
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+
     try {
-      const res = await fetch(url, { signal });
+      const res = await fetch(url, { signal: timeoutCtrl.signal });
+      clearTimeout(timer);
+      if (onAbort && signal) signal.removeEventListener("abort", onAbort);
       if (res.ok) return res;
       if (res.status >= 400 && res.status < 500 && res.status !== 429) {
         throw new Error(`HTTP ${res.status}`);
       }
       lastError = new Error(`HTTP ${res.status}`);
     } catch (err: any) {
-      if (signal?.aborted || err?.name === "AbortError") throw err;
+      clearTimeout(timer);
+      if (onAbort && signal) signal.removeEventListener("abort", onAbort);
+      if (signal?.aborted || err === "aborted" || (err?.name === "AbortError" && signal?.aborted)) {
+        throw new Error("aborted");
+      }
       lastError = err;
     }
+
     if (attempt < maxRetries) {
       const delay = baseDelay * Math.pow(1.5, attempt) + Math.random() * 150;
       await new Promise((r) => setTimeout(r, delay));
@@ -828,13 +867,17 @@ export async function startEpisodeDownload(
     const isHls = /\.m3u8(\?|$)/i.test(streamUrl) || streamUrl.includes("/hls?u=");
     let playlistText = "";
 
+    let keyBuffer: ArrayBuffer | undefined = undefined;
+    let keyMethod: string | undefined = undefined;
+    let keyIv: string | undefined = undefined;
+
     if (isHls) {
       mime = "video/mp2t";
       let plUrl = streamUrl.startsWith(`${LOCAL}/hls`) || streamUrl.startsWith(`${LOCAL}/seg`)
         ? streamUrl
         : `${LOCAL}/hls?u=${encodeURIComponent(streamUrl)}`;
 
-      let plRes = await fetchWithRetry(plUrl, controller.signal, 3, 300);
+      let plRes = await fetchWithRetry(plUrl, controller.signal, 3, 300, 15000);
       if (!plRes.ok) {
         throw new Error(`Failed to load playlist: HTTP ${plRes.status}`);
       }
@@ -849,7 +892,7 @@ export async function startEpisodeDownload(
           if (!variantUrl.startsWith("http://") && !variantUrl.startsWith("https://") && !variantUrl.startsWith("hg://")) {
             variantUrl = variantUrl.startsWith("/") ? `${LOCAL}${variantUrl}` : `${LOCAL}/${variantUrl}`;
           }
-          plRes = await fetchWithRetry(variantUrl, controller.signal, 3, 300);
+          plRes = await fetchWithRetry(variantUrl, controller.signal, 3, 300, 15000);
           if (plRes.ok) {
             playlistText = await plRes.text();
           }
@@ -857,6 +900,30 @@ export async function startEpisodeDownload(
       }
 
       const lines = playlistText.split("\n").map((l) => l.trim()).filter(Boolean);
+
+      // Check for AES-128 Encryption Key in the HLS playlist
+      const keyLine = lines.find((l) => l.startsWith("#EXT-X-KEY:"));
+      if (keyLine) {
+        const matchUri = /URI="([^"]+)"/.exec(keyLine);
+        const matchMethod = /METHOD=([^,]+)/.exec(keyLine);
+        const matchIv = /IV=([^,]+)/.exec(keyLine);
+        if (matchMethod) keyMethod = matchMethod[1];
+        if (matchIv) keyIv = matchIv[1];
+        if (matchUri && matchUri[1]) {
+          let rawKeyUrl = matchUri[1];
+          if (!rawKeyUrl.startsWith("http://") && !rawKeyUrl.startsWith("https://") && !rawKeyUrl.startsWith("hg://")) {
+            rawKeyUrl = rawKeyUrl.startsWith("/") ? `${LOCAL}${rawKeyUrl}` : `${LOCAL}/${rawKeyUrl}`;
+          }
+          try {
+            const keyRes = await fetchWithRetry(rawKeyUrl, controller.signal, 3, 250, 12000);
+            if (keyRes.ok) {
+              keyBuffer = await keyRes.arrayBuffer();
+            }
+          } catch {
+            // key fallback if network issue
+          }
+        }
+      }
 
       // Find segment URLs
       const segUrls = lines.filter((l) => !l.startsWith("#"));
@@ -868,8 +935,32 @@ export async function startEpisodeDownload(
       segmentBuffers = new Array(totalSegments);
       let completedSegments = 0;
       let nextIndex = 0;
-      // Turbo Multi-Threading: 8 parallel download threads on Wi-Fi to maximize throughput (3 on cellular)
-      const CONCURRENCY = isCellularConnection() ? 3 : 8;
+
+      // Mobile network stability: 3 concurrent downloads on Wi-Fi, 2 on cellular to avoid socket starvation
+      const CONCURRENCY = isCellularConnection() ? 2 : 3;
+
+      // Provide immediate feedback with initial total size estimation (~1.8MB per segment)
+      const initialEstBytes = totalSegments * 1.8 * 1024 * 1024;
+      activeProgress.set(id, {
+        id,
+        videoId,
+        episode,
+        title,
+        cover,
+        progress: 1,
+        downloadedBytes: 0,
+        totalBytes: initialEstBytes,
+        speedBytesPerSec: 0,
+        speedFormatted: "Connecting...",
+        etaSeconds: Math.round(initialEstBytes / (1.5 * 1024 * 1024)),
+        etaFormatted: formatEta(Math.round(initialEstBytes / (1.5 * 1024 * 1024))),
+        status: "downloading",
+        streamUrl,
+      });
+      notifyProgress();
+      maybeNotifyNative(1, "Connecting...", 0, initialEstBytes);
+
+      const failedIndices: number[] = [];
 
       const worker = async () => {
         while (nextIndex < totalSegments && !controller.signal.aborted) {
@@ -878,53 +969,79 @@ export async function startEpisodeDownload(
           if (!segUrl.startsWith("http://") && !segUrl.startsWith("https://") && !segUrl.startsWith("hg://")) {
             segUrl = segUrl.startsWith("/") ? `${LOCAL}${segUrl}` : `${LOCAL}/${segUrl}`;
           }
-          const segRes = await fetchWithRetry(segUrl, controller.signal, 3, 300);
-          if (!segRes.ok) throw new Error(`Segment ${i + 1}/${totalSegments} failed: HTTP ${segRes.status}`);
-          const segBuf = await segRes.arrayBuffer();
-          segmentBuffers[i] = segBuf;
-          receivedBytes += segBuf.byteLength;
-          completedSegments++;
+          try {
+            const segRes = await fetchWithRetry(segUrl, controller.signal, 3, 300, 15000);
+            if (!segRes.ok) throw new Error(`HTTP ${segRes.status}`);
+            const segBuf = await segRes.arrayBuffer();
+            segmentBuffers[i] = segBuf;
+            receivedBytes += segBuf.byteLength;
+            completedSegments++;
 
-          // Estimated total bytes based on average segment size so far
-          const avgSegBytes = receivedBytes / completedSegments;
-          const estTotalBytes = Math.round(avgSegBytes * totalSegments);
+            // Estimated total bytes based on average segment size so far
+            const avgSegBytes = receivedBytes / completedSegments;
+            const estTotalBytes = Math.round(avgSegBytes * totalSegments);
 
-          const { speedBytesPerSec, speedFormatted, etaSeconds, etaFormatted } = computeSpeedAndEta(
-            receivedBytes,
-            estTotalBytes
-          );
+            const { speedBytesPerSec, speedFormatted, etaSeconds, etaFormatted } = computeSpeedAndEta(
+              receivedBytes,
+              estTotalBytes
+            );
 
-          const pct = Math.min(99, Math.round((completedSegments / totalSegments) * 100));
-          activeProgress.set(id, {
-            id,
-            videoId,
-            episode,
-            title,
-            cover,
-            progress: pct,
-            downloadedBytes: receivedBytes,
-            totalBytes: estTotalBytes,
-            speedBytesPerSec,
-            speedFormatted,
-            etaSeconds,
-            etaFormatted,
-            status: "downloading",
-            streamUrl,
-          });
-          notifyProgress();
-          maybeNotifyNative(pct, speedFormatted, receivedBytes, estTotalBytes);
+            const pct = Math.min(99, Math.max(1, Math.round((completedSegments / totalSegments) * 100)));
+            activeProgress.set(id, {
+              id,
+              videoId,
+              episode,
+              title,
+              cover,
+              progress: pct,
+              downloadedBytes: receivedBytes,
+              totalBytes: estTotalBytes,
+              speedBytesPerSec,
+              speedFormatted,
+              etaSeconds,
+              etaFormatted,
+              status: "downloading",
+              streamUrl,
+            });
+            notifyProgress();
+            maybeNotifyNative(pct, speedFormatted, receivedBytes, estTotalBytes);
+          } catch (segErr) {
+            if (controller.signal.aborted) return;
+            failedIndices.push(i);
+          }
         }
       };
 
       const workers = Array.from({ length: Math.min(CONCURRENCY, totalSegments) }, () => worker());
       await Promise.all(workers);
+
+      // Retry any segments that failed during parallel worker phase
+      if (failedIndices.length > 0 && !controller.signal.aborted) {
+        for (const i of failedIndices) {
+          if (controller.signal.aborted) break;
+          let segUrl = segUrls[i];
+          if (!segUrl.startsWith("http://") && !segUrl.startsWith("https://") && !segUrl.startsWith("hg://")) {
+            segUrl = segUrl.startsWith("/") ? `${LOCAL}${segUrl}` : `${LOCAL}/${segUrl}`;
+          }
+          const segRes = await fetchWithRetry(segUrl, controller.signal, 3, 400, 15000);
+          if (!segRes.ok) throw new Error(`Segment ${i + 1}/${totalSegments} failed: HTTP ${segRes.status}`);
+          const segBuf = await segRes.arrayBuffer();
+          segmentBuffers[i] = segBuf;
+          receivedBytes += segBuf.byteLength;
+          completedSegments++;
+        }
+      }
+
+      if (completedSegments < totalSegments && !controller.signal.aborted) {
+        throw new Error(`Incomplete download: ${completedSegments}/${totalSegments} segments retrieved`);
+      }
     } else {
       // Direct video stream (mp4 / m4v / webm)
       const downloadUrl = streamUrl.startsWith(`${LOCAL}/`) || streamUrl.startsWith("hg://")
         ? streamUrl
         : `${LOCAL}/seg?u=${encodeURIComponent(streamUrl)}`;
 
-      const response = await fetchWithRetry(downloadUrl, controller.signal, 3, 400);
+      const response = await fetchWithRetry(downloadUrl, controller.signal, 3, 400, 20000);
       if (!response.ok) {
         throw new Error(`Failed to download stream: HTTP ${response.status}`);
       }
@@ -997,6 +1114,9 @@ export async function startEpisodeDownload(
         isHls,
         playlistText: isHls ? playlistText : undefined,
         segments: isHls ? segmentBuffers : undefined,
+        keyBuffer,
+        keyMethod,
+        keyIv,
         blob: finalBlob || undefined,
         sizeBytes: totalSize,
         cues,
@@ -1004,8 +1124,14 @@ export async function startEpisodeDownload(
         isHevc,
       };
       const req = store.put(record);
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
+      req.onsuccess = () => {
+        db.close();
+        resolve();
+      };
+      req.onerror = () => {
+        db.close();
+        reject(req.error);
+      };
     });
 
     // 4. Update metadata

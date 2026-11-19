@@ -616,7 +616,11 @@ export default function Profile({ wide }: { wide: boolean }) {
                           {ad.progress}% · {formatBytes(ad.downloadedBytes)} / {ad.totalBytes > 0 ? formatBytes(ad.totalBytes) : "calculating..."}
                         </span>
                         <span className="text-mut font-medium">
-                          {ad.status === "paused" ? "Paused" : `${ad.speedFormatted} · ${ad.etaFormatted} remaining`}
+                          {ad.status === "paused"
+                            ? "Paused"
+                            : ad.speedBytesPerSec > 0
+                            ? `${ad.speedFormatted} · ${ad.etaFormatted} remaining`
+                            : ad.speedFormatted || "Connecting..."}
                         </span>
                       </div>
                     </div>
@@ -629,7 +633,22 @@ export default function Profile({ wide }: { wide: boolean }) {
                 <div className="flex flex-col gap-4">
                   {dramaGroups.map((group) => (
                     <div key={group.videoId} className="rounded-2xl bg-s2 border border-edge/60 overflow-hidden">
-                      <div className="p-3.5 flex items-center gap-3 bg-s3/50 border-b border-edge/60">
+                      <div
+                        onClick={() => {
+                          if (!selectMode && group.episodes[0]) {
+                            push({
+                              kind: "feed",
+                              videoIds: [group.videoId],
+                              index: 0,
+                              title: formatDramaTitle(group.title),
+                              startEp: group.episodes[0].episode,
+                            });
+                          }
+                        }}
+                        className={`p-3.5 flex items-center gap-3 bg-s3/50 border-b border-edge/60 ${
+                          selectMode ? "" : "cursor-pointer pressable hover:bg-s3/80 transition-colors"
+                        }`}
+                      >
                         <div className="w-12 h-16 rounded-lg overflow-hidden shrink-0 shadow-xs border border-edge/40">
                            <img src={getCoverUrl(group.cover, 160)} className="w-full h-full object-cover" />
                         </div>
@@ -647,50 +666,58 @@ export default function Profile({ wide }: { wide: boolean }) {
                         return (
                           <div
                             key={item.id}
-                            onClick={selectMode ? () => toggleSelect(`${item.videoId}_${item.episode}`) : undefined}
-                            className={`p-3.5 flex items-center gap-3 border-b border-edge/30 last:border-b-0 transition-colors ${
-                              selectMode ? "cursor-pointer" : ""
-                            } ${isChecked ? "bg-primary/10" : "hover:bg-s3/30"}`}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => {
+                              if (selectMode) {
+                                toggleSelect(`${item.videoId}_${item.episode}`);
+                              } else {
+                                push({
+                                  kind: "feed",
+                                  videoIds: [item.videoId],
+                                  index: 0,
+                                  title: formatDramaTitle(item.title),
+                                  startEp: item.episode,
+                                });
+                              }
+                            }}
+                            className={`p-3.5 flex items-center gap-3 border-b border-edge/30 last:border-b-0 transition-colors cursor-pointer pressable ${
+                              isChecked ? "bg-primary/10" : "hover:bg-s3/30 active:bg-s3/50"
+                            }`}
                           >
-                            {selectMode && (
+                            {selectMode ? (
                               <div className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 border ${isChecked ? "bg-primary border-primary" : "border-edge"}`}>
                                 {isChecked && <ICheck size={13} className="text-black" strokeWidth={3} />}
                               </div>
+                            ) : (
+                              <div className="w-6 h-6 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                                <IPlayF size={10} />
+                              </div>
                             )}
                             
-                            <div className="flex-1 min-w-0 flex items-center gap-3" onClick={() => {
-                                if (!selectMode) {
-                                  push({
-                                    kind: "feed",
-                                    videoIds: [item.videoId],
-                                    index: 0,
-                                    title: formatDramaTitle(item.title),
-                                    startEp: item.episode,
-                                  });
-                                }
-                            }}>
-                              <div className="text-[13px] font-medium text-mut w-6 text-right">Ep {item.episode}</div>
-                              <div className="flex-1 min-w-0">
-                                <div className="text-[14px] font-semibold text-on truncate">{formatDramaTitle(item.title)}</div>
-                                <div className="text-[11px] text-mut tabular-nums">{sizeMB} MB</div>
-                              </div>
-                              <Button
-                                onClick={(e) => { e.stopPropagation(); openSingleExport(item.videoId, item.episode, item.title); }}
-                                className="ios-icon-button"
-                              >
-                                <IExport size={14} />
-                              </Button>
-                              <Button
-                                onClick={async (e) => { 
-                                  e.stopPropagation();
-                                  await deleteOfflineEpisode(item.videoId, item.episode);
-                                  setDownloads(getOfflineEpisodes());
-                                }}
-                                className="ios-icon-button"
-                              >
-                                <ITrash size={14} />
-                              </Button>
+                            <div className="text-[13px] font-medium text-mut w-7 text-right">Ep {item.episode}</div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[14px] font-semibold text-on truncate">{formatDramaTitle(item.title)}</div>
+                              <div className="text-[11px] text-mut tabular-nums">{sizeMB} MB</div>
                             </div>
+                            <Button
+                              onClick={(e) => { e.stopPropagation(); openSingleExport(item.videoId, item.episode, item.title); }}
+                              className="ios-icon-button shrink-0"
+                              title="Export MP4"
+                            >
+                              <IExport size={14} />
+                            </Button>
+                            <Button
+                              onClick={async (e) => { 
+                                e.stopPropagation();
+                                await deleteOfflineEpisode(item.videoId, item.episode);
+                                setDownloads(getOfflineEpisodes());
+                              }}
+                              className="ios-icon-button shrink-0"
+                              title="Delete Download"
+                            >
+                              <ITrash size={14} />
+                            </Button>
                           </div>
                         );
                       })}

@@ -121,9 +121,10 @@ export default function BatchDownloadSheet({
       return;
     }
     const list = Array.from(selectedEps).sort((a, b) => a - b);
+    const safeTitle = formatDramaTitle(title) || title || `Drama #${videoId}`;
     toast(`Queued ${list.length} episodes for batch download`, "ok");
     try {
-      const res = await executeBatchDownload(videoId, title, cover, list, allowCellular, downloadQuality);
+      const res = await executeBatchDownload(videoId, safeTitle, cover, list, allowCellular, downloadQuality);
       toast(`Batch download complete: ${res.success} saved (${res.failed} failed)`, res.failed ? "info" : "ok");
     } catch (e) {
       toast((e as Error).message || "Batch download failed", "info");

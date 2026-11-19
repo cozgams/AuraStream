@@ -10,7 +10,7 @@
 
 [![CI](https://github.com/cozgams/AuraStream/actions/workflows/ci.yml/badge.svg)](https://github.com/cozgams/AuraStream/actions/workflows/ci.yml)
 [![Release](https://github.com/cozgams/AuraStream/actions/workflows/release.yml/badge.svg)](https://github.com/cozgams/AuraStream/actions/workflows/release.yml)
-[![Version](https://img.shields.io/badge/version-0.1.9-amber)](https://github.com/cozgams/AuraStream/releases)
+[![Version](https://img.shields.io/badge/version-0.1.10-amber)](https://github.com/cozgams/AuraStream/releases)
 
 Android Native Application · Created by AAA
 

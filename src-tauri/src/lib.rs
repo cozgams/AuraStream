@@ -41,8 +41,16 @@ fn allowed_dev_host(host: &str) -> bool {
 fn allowed_frontend_origin(origin: &str) -> bool {
     if matches!(
         origin,
-        "tauri://localhost" | "http://tauri.localhost" | "https://tauri.localhost"
-    ) {
+        "tauri://localhost"
+            | "http://tauri.localhost"
+            | "https://tauri.localhost"
+            | "http://localhost"
+            | "https://localhost"
+            | "http://127.0.0.1"
+            | "https://127.0.0.1"
+    ) || origin.starts_with("http://127.0.0.1:")
+        || origin.starts_with("http://localhost:")
+    {
         return true;
     }
     // Mobile dev may use TAURI_DEV_HOST; strict security only allows local or configured host
@@ -127,6 +135,26 @@ pub fn run() {
                 .get("Origin")
                 .and_then(|v| v.to_str().ok())
                 .map(str::to_string);
+
+            // Handle CORS preflight OPTIONS request
+            if request.method() == tauri::http::Method::OPTIONS {
+                let mut resp = tauri::http::Response::builder()
+                    .status(204)
+                    .header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+                    .header("Access-Control-Allow-Headers", "*")
+                    .header("Access-Control-Max-Age", "86400")
+                    .body(Vec::new())
+                    .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()));
+                if let Some(origin) = request_origin.as_deref().and_then(|s| tauri::http::HeaderValue::from_str(s).ok()) {
+                    resp.headers_mut().insert("Access-Control-Allow-Origin", origin);
+                    resp.headers_mut().insert("Vary", tauri::http::HeaderValue::from_static("Origin"));
+                } else {
+                    resp.headers_mut().insert("Access-Control-Allow-Origin", tauri::http::HeaderValue::from_static("*"));
+                }
+                responder.respond(resp);
+                return;
+            }
+
             if playback_log::enabled() {
                 let resource = url::form_urlencoded::parse(request.uri().query().unwrap_or("").as_bytes())
                     .find(|(key, _)| key == "u")
