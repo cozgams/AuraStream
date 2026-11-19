@@ -1,6 +1,17 @@
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 
-process.env.BROWSER_EXECUTABLE = process.env.BROWSER_EXECUTABLE || "/usr/bin/chromium";
+if (!process.env.BROWSER_EXECUTABLE) {
+  const candidates = [
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+  ];
+  const found = candidates.find(p => fs.existsSync(p));
+  if (found) {
+    process.env.BROWSER_EXECUTABLE = found;
+  }
+}
 
 const suites = [
   { name: "iOS Icon Catalog", script: "scripts/test-ios-icons.mjs" },
