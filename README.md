@@ -10,9 +10,9 @@
 
 [![CI](https://github.com/cozgams/AuraStream/actions/workflows/ci.yml/badge.svg)](https://github.com/cozgams/AuraStream/actions/workflows/ci.yml)
 [![Release](https://github.com/cozgams/AuraStream/actions/workflows/release.yml/badge.svg)](https://github.com/cozgams/AuraStream/actions/workflows/release.yml)
-[![Version](https://img.shields.io/badge/version-0.1.4-amber)](https://github.com/cozgams/AuraStream/releases)
+[![Version](https://img.shields.io/badge/version-0.1.8-amber)](https://github.com/cozgams/AuraStream/releases)
 
-Windows · macOS · Linux · Android · iOS · Progressive Web App (PWA)
+Android Native Application · Created by AAA
 
 </div>
 
@@ -23,7 +23,6 @@ Windows · macOS · Linux · Android · iOS · Progressive Web App (PWA)
 - **This App Created by AAA**: Handcrafted user interface with minimalist typography and responsive ergonomics.
 - **Dynamic Subtitle Collision Prevention**: Smart vertical anchor positioning that avoids caption collisions with drama titles and controls.
 - **Customizable Closed Captions**: Instant fine-tuning slider (5%–92%) and quick presets (*Downside*, *Above Title*, *Middle*, *Top*), with selectable colors, edge shadows, and background styles.
-- **Multi-Platform Native Performance**: High-efficiency Rust core utilizing Tauri 2 with local HTTP streaming proxy, AES decryption, and DNS failover recovery.
 - **Zero-Data Offline Playback**: Download single episodes or full seasons directly to storage with live speedometers and ETA countdowns.
 - **1-Tap RAM Booster & Deep Cache Purge**: Clears in-memory HLS segments, decryption keys, and backend proxy cache.
 - **Turbo Wi-Fi Pre-Caching & Smart Auto-Cleaner**: Concurrent segment buffering on Wi-Fi with LRU memory eviction.
@@ -31,20 +30,15 @@ Windows · macOS · Linux · Android · iOS · Progressive Web App (PWA)
 
 ---
 
-## 📦 Multi-Platform Downloads
+## 📦 Android Downloads
 
-Download the latest production builds directly from [GitHub Releases](https://github.com/cozgams/AuraStream/releases):
+Download the latest production APKs directly from [GitHub Releases](https://github.com/cozgams/AuraStream/releases):
 
-| Platform | Production Asset | Description |
+| Architecture | APK Package | Target Devices |
 |---|---|---|
-| **Android** | `AuraStream_0.1.4_arm64.apk` | 64-bit ARM for modern Android devices |
-| **Android** | `AuraStream_0.1.4_x86_64.apk` | Intel/AMD Chromebooks & Emulators |
-| **Android** | `AuraStream_0.1.4_arm.apk` | 32-bit legacy Android devices |
-| **Windows** | `AuraStream_0.1.4_x64-setup.exe` | Windows 10/11 NSIS Installer |
-| **Windows** | `AuraStream_0.1.4_x64_portable.zip` | Standalone portable executable |
-| **macOS** | `AuraStream_0.1.4_universal.dmg` | Universal Binary (Apple Silicon M1–M4 & Intel Core) |
-| **Linux** | `AuraStream_0.1.4_amd64.deb` | Ubuntu / Debian 64-bit package |
-| **iOS** | `AuraStream_0.1.4_ios.ipa` | iOS 16+ application archive |
+| **Android 64-bit** | `AuraStream_0.1.8_arm64-v8a.apk` | Modern smartphones & tablets (Snapdragon, MediaTek, Tensor) |
+| **Android 32-bit** | `AuraStream_0.1.8_armeabi-v7a.apk` | Legacy 32-bit Android devices |
+| **Android x86_64** | `AuraStream_0.1.8_x86_64.apk` | Intel/AMD Android emulators, ChromeOS & Chromebooks |
 
 ---
 

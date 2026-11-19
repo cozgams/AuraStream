@@ -101,7 +101,7 @@ function AppBody() {
     return () => ro.disconnect();
   }, []);
 
-  /* Global Keyboard Shortcuts */
+  /* Hardware Back Key / Dismissal navigation */
   useEffect(() => {
     const fn = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
@@ -111,14 +111,10 @@ function AppBody() {
       }
       if (loginOpen) { if (e.key === "Escape") setLoginOpen(false); return; }
       if (e.key === "Escape") { if (stack.length) pop(); return; }
-      if (e.key === "/") { e.preventDefault(); setTab("search"); return; }
-      if (tab !== "home" && stack.length === 0 && ["1", "2", "3", "4"].includes(e.key) && !e.repeat) {
-        setTab((["home", "search", "category", "profile"] as Tab[])[Number(e.key) - 1]);
-      }
     };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
-  }, [stack.length, pop, setTab, loginOpen, setLoginOpen]);
+  }, [stack.length, pop, loginOpen, setLoginOpen]);
 
   const vis = (k: Tab) => (tab === k ? `absolute inset-0 ${k === "home" ? "" : "ios-tab-active"}` : "absolute inset-0 hidden pointer-events-none");
   const pageActive = stack.length === 0 && !loginOpen;

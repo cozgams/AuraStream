@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { api, APP_VERSION, cover, fmt, fmtTime, isMobile, logLine, mediaUrl } from "../api";
 import type { Detail, Episode, Post, VideoCard } from "../types";
 import { useStore } from "../store";
-import { Avatar, Img, Kbd, Modal, Sheet } from "./ui";
+import { Avatar, Img, Sheet } from "./ui";
 import VideoSurface, { type VideoHandle } from "./VideoSurface";
 import PlayerControls from "./PlayerControls";
 import PlaybackLock from "./PlaybackLock";
@@ -107,7 +107,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [panel, setPanel] = useState<"episodes" | "comments" | "article" | "detail" | "captions" | "more" | null>(null);
   const [lineOpen, setLineOpen] = useState(false);
   const [descOpen, setDescOpen] = useState(false);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [cancelAutoNext, setCancelAutoNext] = useState(false);
   const cancelAutoNextRef = useRef(false);
   const [autoSkipSec, setAutoSkipSecState] = useState<number>(() => getAutoSkipIntroSec());
@@ -773,94 +772,24 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* Keyboard shortcuts */
+  /* Basic key navigation for accessibility */
   useEffect(() => {
     if (!active || controlsLocked) return;
-    const seekRelative = (delta: number) => {
-      const current = videoRef.current?.el()?.currentTime ?? 0;
-      const maxDur = typeof duration === "number" && Number.isFinite(duration) && duration > 0 ? duration : Infinity;
-      const target = Math.max(0, Math.min(maxDur, current + delta));
-      videoRef.current?.seek(target, "keyboard_shortcut");
-      playbackClock.publish(target);
-      triggerSeekRipple(delta > 0 ? "right" : "left", `${delta > 0 ? "+" : ""}${delta}s`);
-    };
     const fn = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
       if (panel) { if (e.key === "Escape") setPanel(null); return; }
-      if (shortcutsOpen) { if (e.key === "Escape" || e.key === "?") setShortcutsOpen(false); return; }
       switch (e.key) {
         case "ArrowDown": e.preventDefault(); stepDir(1); break;
         case "ArrowUp": e.preventDefault(); stepDir(-1); break;
-        case " ":
-        case "k": case "K":
-          e.preventDefault(); videoRef.current?.toggle(); break;
-        case "ArrowLeft": e.preventDefault(); seekRelative(-5); break;
-        case "ArrowRight": e.preventDefault(); seekRelative(5); break;
-        case "j": case "J": e.preventDefault(); seekRelative(-10); break;
-        case "l": case "L": e.preventDefault(); seekRelative(10); break;
-        case "f": case "F": toggleFull(); break;
-        case "t": case "T": setTheater((v) => !v); break;
-        case "m": case "M": setMuted((v) => !v); break;
-        case "s": case "S": onLike(); triggerSeekRipple("center", "star"); break;
-        case "c": case "C": {
-          e.preventDefault();
-          const next = store.subtitleMode === "off" ? "en" : "off";
-          store.setSubtitleMode(next);
-          toast(next === "en" ? "Subtitles: English (CC)" : "Subtitles: Off", "ok");
-          break;
-        }
-        case "v": case "V": {
-          e.preventDefault();
-          const next = !isVoiceDubEnabled();
-          setVoiceDubEnabled(next);
-          toast(next ? "AI Voice Dubbing: Enabled" : "AI Voice Dubbing: Disabled", "ok");
-          break;
-        }
-        case "n": case "N": e.preventDefault(); stepDir(1); break;
-        case "p": case "P": e.preventDefault(); stepDir(-1); break;
-        case "w": case "W": setPanel("comments"); break;
-        case "e": case "E": setPanel("episodes"); break;
-        case ">": case ".": {
-          e.preventDefault();
-          const next = rate === 1 ? 1.25 : rate === 1.25 ? 1.5 : rate === 1.5 ? 2 : 2;
-          videoRef.current?.rate(next);
-          setRate(next);
-          toast(`Speed: ${next}x`, "info");
-          break;
-        }
-        case "<": case ",": {
-          e.preventDefault();
-          const next = rate === 2 ? 1.5 : rate === 1.5 ? 1.25 : 1;
-          videoRef.current?.rate(next);
-          setRate(next);
-          toast(`Speed: ${next}x`, "info");
-          break;
-        }
-        case "?": {
-          e.preventDefault();
-          setShortcutsOpen((o) => !o);
-          break;
-        }
-        default: {
-          if (e.key >= "0" && e.key <= "9" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-            e.preventDefault();
-            const pct = Number(e.key) / 10;
-            if (duration > 0) {
-              const target = pct * duration;
-              videoRef.current?.seek(target, "keyboard_percent");
-              playbackClock.publish(target);
-              triggerSeekRipple(pct >= 0.5 ? "right" : "left", `${Number(e.key) * 10}%`);
-            }
-          }
-          break;
-        }
+        case " ": e.preventDefault(); videoRef.current?.toggle(); break;
+        default: break;
       }
     };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, controlsLocked, panel, shortcutsOpen, index, stepDir, duration, rate, store]);
+  }, [active, controlsLocked, panel, index, stepDir]);
 
   /* Android back button handler */
   useEffect(() => {
@@ -2706,26 +2635,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       />
                     </button>
                   </div>
-
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      setPanel(null);
-                      setShortcutsOpen(true);
-                    }}
-                    className="p-3.5 rounded-[14px] border border-border bg-s2 flex items-center justify-between pressable text-left hover:bg-s3 transition-all"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-base">⌨</span>
-                      <div>
-                        <div className="text-[13px] font-bold text-on">Keyboard Shortcuts</div>
-                        <div className="text-[11px] text-mut leading-tight mt-0.5">
-                          View all desktop playback hotkeys & navigation controls
-                        </div>
-                      </div>
-                    </div>
-                    <span className="text-[11px] font-semibold text-primary">View</span>
-                  </Button>
                 </div>
               </div>
             </div>
@@ -2848,96 +2757,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         totalEpisodes={episodes.length || detail?.episodes?.length || detail?.episode_count || detail?.total_episodes || meta.episodes?.length || 10}
       />
       <LinePicker open={lineOpen} onClose={() => setLineOpen(false)} />
-
-      {/* Keyboard Shortcuts Guide Modal */}
-      <Modal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} width={460}>
-        <div className="p-5 text-on">
-          <div className="flex items-center justify-between pb-3 border-b border-border">
-            <div className="flex items-center gap-2.5">
-              <span className="w-8 h-8 rounded-xl bg-primary/15 text-primary flex items-center justify-center font-bold text-sm">
-                ⌨
-              </span>
-              <div>
-                <h2 className="text-[16px] font-bold text-on leading-tight">Keyboard Shortcuts</h2>
-                <p className="text-[12px] text-mut">Desktop & keyboard navigation controls</p>
-              </div>
-            </div>
-            <Button
-              onClick={() => setShortcutsOpen(false)}
-              className="w-7 h-7 rounded-full bg-s3 flex items-center justify-center text-mut pressable"
-              aria-label="Close"
-            >
-              <IClose size={14} />
-            </Button>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 mt-4 text-[12.5px]">
-            <div className="flex items-center justify-between p-2 rounded-lg bg-s2">
-              <span className="text-on/80">Play / Pause</span>
-              <div className="flex gap-1"><Kbd>Space</Kbd><Kbd>K</Kbd></div>
-            </div>
-            <div className="flex items-center justify-between p-2 rounded-lg bg-s2">
-              <span className="text-on/80">Seek ±10s</span>
-              <div className="flex gap-1"><Kbd>J</Kbd><Kbd>L</Kbd></div>
-            </div>
-            <div className="flex items-center justify-between p-2 rounded-lg bg-s2">
-              <span className="text-on/80">Seek ±5s</span>
-              <div className="flex gap-1"><Kbd>←</Kbd><Kbd>→</Kbd></div>
-            </div>
-            <div className="flex items-center justify-between p-2 rounded-lg bg-s2">
-              <span className="text-on/80">Prev / Next Ep</span>
-              <div className="flex gap-1"><Kbd>P</Kbd><Kbd>N</Kbd></div>
-            </div>
-            <div className="flex items-center justify-between p-2 rounded-lg bg-s2">
-              <span className="text-on/80">Toggle Subtitles</span>
-              <Kbd>C</Kbd>
-            </div>
-            <div className="flex items-center justify-between p-2 rounded-lg bg-s2">
-              <span className="text-on/80">AI Voice Dub</span>
-              <Kbd>V</Kbd>
-            </div>
-            <div className="flex items-center justify-between p-2 rounded-lg bg-s2">
-              <span className="text-on/80">Fullscreen</span>
-              <Kbd>F</Kbd>
-            </div>
-            <div className="flex items-center justify-between p-2 rounded-lg bg-s2">
-              <span className="text-on/80">Theater Mode</span>
-              <Kbd>T</Kbd>
-            </div>
-            <div className="flex items-center justify-between p-2 rounded-lg bg-s2">
-              <span className="text-on/80">Mute / Unmute</span>
-              <Kbd>M</Kbd>
-            </div>
-            <div className="flex items-center justify-between p-2 rounded-lg bg-s2">
-              <span className="text-on/80">Like & Star</span>
-              <Kbd>S</Kbd>
-            </div>
-            <div className="flex items-center justify-between p-2 rounded-lg bg-s2">
-              <span className="text-on/80">Episodes Panel</span>
-              <Kbd>E</Kbd>
-            </div>
-            <div className="flex items-center justify-between p-2 rounded-lg bg-s2">
-              <span className="text-on/80">Jump to 0-90%</span>
-              <Kbd>0-9</Kbd>
-            </div>
-            <div className="flex items-center justify-between p-2 rounded-lg bg-s2">
-              <span className="text-on/80">Speed ±0.25x</span>
-              <div className="flex gap-1"><Kbd>&lt;</Kbd><Kbd>&gt;</Kbd></div>
-            </div>
-            <div className="flex items-center justify-between p-2 rounded-lg bg-s2">
-              <span className="text-on/80">Shortcuts Guide</span>
-              <Kbd>?</Kbd>
-            </div>
-          </div>
-
-          <Button
-            onClick={() => setShortcutsOpen(false)}
-            className="mt-4 w-full h-9 rounded-(--r-ctl) bg-s3 text-[13.5px] font-medium text-on pressable"
-          >
-            Got it
-          </Button>
-        </div>
-      </Modal>
       {controlsLocked && <PlaybackLock active={active} onUnlock={() => { setControlsLocked(false); wake(); }} />}
     </div>
   );
