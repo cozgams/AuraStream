@@ -1,0 +1,24 @@
+{
+  "name": "AuraStream",
+  "short_name": "AuraStream",
+  "description": "Next-Generation Streaming Experience · Powered by Rust & Tauri 2",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#101012",
+  "theme_color": "#101012",
+  "author": "AAA",
+  "icons": [
+    {
+      "src": "/app-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

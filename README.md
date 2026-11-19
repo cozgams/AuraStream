@@ -1,77 +1,107 @@
 <div align="center">
 
-<img src="public/logo.png" alt="AuraStream" width="128" height="128" style="border-radius: 28px;" />
+<img src="public/logo.png" alt="AuraStream" width="128" height="128" style="border-radius: 28px; box-shadow: 0 8px 32px rgba(0,0,0,0.4);" />
 
-# AuraStream 2.1.0
+# AuraStream
 
-**Next-Generation Streaming Experience · Powered by Rust & Tauri 2**
+**Next-Generation Multi-Platform Streaming Experience · Powered by Rust & Tauri 2**
 
 ### This App Created by AAA
 
-Android Universal Release · Zero Data Offline Playback · AI Bilingual Subtitles · 1-Tap RAM Booster
+[![CI](https://github.com/cozgams/AuraStream/actions/workflows/ci.yml/badge.svg)](https://github.com/cozgams/AuraStream/actions/workflows/ci.yml)
+[![Release](https://github.com/cozgams/AuraStream/actions/workflows/release.yml/badge.svg)](https://github.com/cozgams/AuraStream/actions/workflows/release.yml)
+[![Version](https://img.shields.io/badge/version-0.1.4-amber)](https://github.com/cozgams/AuraStream/releases)
+
+Windows · macOS · Linux · Android · iOS · Progressive Web App (PWA)
 
 </div>
 
 ---
 
-## Overview
+## 🌟 Key Highlights
 
-AuraStream is a high-performance streaming application crafted for modern Android devices. Built with a lightweight, secure Rust core and a fluid, responsive interface, AuraStream delivers instant swipe transitions, zero-data offline storage, and intelligent playback enhancements.
-
----
-
-## Key Features
-
-- **This App Created by AAA**: Premium handcrafted design with clean typography and zero emojis.
-- **Amber Gold Star Favorite System**: Elegant, consistent amber-gold star theme across all feed items, comments, and profile collections.
-- **Zero-Data Offline Playback**: Download single episodes or full seasons directly to local storage (IndexedDB & native storage export) with live transfer speed metrics and ETA indicators.
-- **1-Tap RAM Booster & Deep Cache Purge**: Instant memory optimization that flushes preloaded media segments, eviction of unneeded M3U8 manifests, and cache optimization directly from Settings and Profile.
-- **Real-Time AI Bilingual Subtitles**: Clean English and dual-language subtitles with custom Netflix-style caption typography, styling, and color personalization.
-- **Turbo Wi-Fi Pre-Caching & Smart Auto-Cleaner**: 8-thread concurrent segment buffering on Wi-Fi with LRU cache memory eviction to prevent phone memory pressure.
-- **Picture-in-Picture (PiP) & Background Audio**: Native Android Picture-in-Picture mode and MediaSession audio controls.
-- **Smart Sleep Timer & Auto-Skip**: Automatic intro and outro skipping (5s–30s) and sleep timer with custom durations and "End of Episode" pause.
-- **Multi-Select Batch Management**: Batch export episodes directly to the phone's Movies/Downloads folders, or batch delete with 1-tap storage cleanup.
+- **This App Created by AAA**: Handcrafted user interface with minimalist typography and responsive ergonomics.
+- **Dynamic Subtitle Collision Prevention**: Smart vertical anchor positioning that avoids caption collisions with drama titles and controls.
+- **Customizable Closed Captions**: Instant fine-tuning slider (5%–92%) and quick presets (*Downside*, *Above Title*, *Middle*, *Top*), with selectable colors, edge shadows, and background styles.
+- **Multi-Platform Native Performance**: High-efficiency Rust core utilizing Tauri 2 with local HTTP streaming proxy, AES decryption, and DNS failover recovery.
+- **Zero-Data Offline Playback**: Download single episodes or full seasons directly to storage with live speedometers and ETA countdowns.
+- **1-Tap RAM Booster & Deep Cache Purge**: Clears in-memory HLS segments, decryption keys, and backend proxy cache.
+- **Turbo Wi-Fi Pre-Caching & Smart Auto-Cleaner**: Concurrent segment buffering on Wi-Fi with LRU memory eviction.
+- **Picture-in-Picture (PiP) & MediaSession Integration**: Lock controls, background audio playback, and OS-level media integration.
 
 ---
 
-## Architecture & Tech Stack
+## 📦 Multi-Platform Downloads
 
+Download the latest production builds directly from [GitHub Releases](https://github.com/cozgams/AuraStream/releases):
+
+| Platform | Production Asset | Description |
+|---|---|---|
+| **Android** | `AuraStream_0.1.4_arm64.apk` | 64-bit ARM for modern Android devices |
+| **Android** | `AuraStream_0.1.4_x86_64.apk` | Intel/AMD Chromebooks & Emulators |
+| **Android** | `AuraStream_0.1.4_arm.apk` | 32-bit legacy Android devices |
+| **Windows** | `AuraStream_0.1.4_x64-setup.exe` | Windows 10/11 NSIS Installer |
+| **Windows** | `AuraStream_0.1.4_x64_portable.zip` | Standalone portable executable |
+| **macOS** | `AuraStream_0.1.4_universal.dmg` | Universal Binary (Apple Silicon M1–M4 & Intel Core) |
+| **Linux** | `AuraStream_0.1.4_amd64.deb` | Ubuntu / Debian 64-bit package |
+| **iOS** | `AuraStream_0.1.4_ios.ipa` | iOS 16+ application archive |
+
+---
+
+## 🛠️ Architecture & Tech Stack
+
+```text
+┌────────────────────────────────────────────────────────┐
+│               AuraStream Client (React 18)             │
+│   • Tailwind CSS  • HLS.js (MSE)  • WebVTT Parser     │
+└───────────────────────────┬────────────────────────────┘
+                            │ Tauri 2 IPC
+┌───────────────────────────▼────────────────────────────┐
+│                  Rust Core Engine                      │
+│   • Local HTTP Proxy   • AES Decryption / Key Cache   │
+│   • DNS Failover       • Network Policy & Strict Guard│
+└────────────────────────────────────────────────────────┘
+```
+
+- **Frontend**: React 18, TypeScript, Tailwind CSS, Playwright.
 - **Core Engine**: Rust (Tauri 2) with local HTTP streaming proxy, AES decryption, and DNS fallback recovery.
-- **Frontend**: React 18, TypeScript, Tailwind CSS, and HLS.js with MSE/hardware decoding.
-- **Packaging**: Android Universal APK signed with v2+v3 scheme (`apksigner`).
+- **Packaging**: Tauri CLI with multi-target GitHub Actions automated release pipeline.
 
 ---
 
-## Building the Android APK
+## 🚀 Development & Build
 
-Ensure the Android SDK and NDK (version 26+) are installed on your system.
+### Prerequisites
+
+- Node.js (v20+) & `pnpm` (v10+)
+- Rust (stable toolchain)
+- Platform-specific SDKs:
+  - **Android**: Android SDK & NDK 26+
+  - **macOS / iOS**: Xcode 15+
+  - **Windows**: Visual Studio C++ Build Tools & NSIS
+  - **Linux**: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`
+
+### Running Locally
 
 ```bash
-# 1. Install dependencies
+# Install dependencies
 pnpm install
 
-# 2. Build the Android universal release package
-pnpm tauri android build --apk
+# Start development server
+pnpm dev
 
-# 3. Align and sign the APK with apksigner (v2 + v3 scheme)
-/opt/android-sdk/build-tools/35.0.0/zipalign -f -v -p 4 \
-  src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk \
-  AuraStream_2.1.0_universal_aligned.apk
+# Run full test suite (9 test suites)
+pnpm test
 
-/opt/android-sdk/build-tools/35.0.0/apksigner sign \
-  --ks ~/.android/debug.keystore \
-  --ks-pass pass:android \
-  --key-pass pass:android \
-  --ks-key-alias androiddebugkey \
-  --out AuraStream_2.1.0_universal.apk \
-  AuraStream_2.1.0_universal_aligned.apk
+# Build production web bundle
+pnpm build
 
-# 4. Verify signature
-/opt/android-sdk/build-tools/35.0.0/apksigner verify --verbose AuraStream_2.1.0_universal.apk
+# Run Rust unit tests
+cd src-tauri && cargo test --lib
 ```
 
 ---
 
-## License
+## 📄 License
 
-This App Created by AAA. All rights reserved.
+**This App Created by AAA.** All rights reserved.
