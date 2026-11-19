@@ -223,7 +223,7 @@ export default function SubtitleOverlay({
   if (position === "custom" && typeof styleConfig.customOffsetPercent === "number") {
     const pct = Math.max(5, Math.min(92, styleConfig.customOffsetPercent));
     positionStyle = {
-      bottom: `calc(var(--sab, 0px) + ${pct}%)`,
+      bottom: `calc(var(--sab, 48px) + ${pct}%)`,
     };
   } else if (position === "middle") {
     positionStyle = {
@@ -233,14 +233,14 @@ export default function SubtitleOverlay({
     };
   } else if (position === "top") {
     positionStyle = {
-      top: isDesktop ? "64px" : "calc(max(var(--sat, 0px), 28px) + 54px)",
+      top: isDesktop ? "64px" : "calc(max(var(--sat, 12px), 28px) + 54px)",
       bottom: "auto",
     };
   } else if (position === "above_title") {
     positionStyle = {
       bottom: isDesktop
         ? "80px"
-        : `calc(var(--sab, 0px) + ${(bottomOffset !== undefined ? bottomOffset : 124) + 140}px)`,
+        : `calc(var(--sab, 48px) + ${(bottomOffset !== undefined ? bottomOffset : 124) + 140}px)`,
     };
   } else {
     // "bottom" -> Anchored on the downside (lower portion of active video frame, non-overlapping with metadata)
@@ -248,14 +248,16 @@ export default function SubtitleOverlay({
       positionStyle = { bottom: "48px" };
     } else if (clean || fs) {
       positionStyle = {
-        bottom: videoFrameBottom !== null ? `${videoFrameBottom}px` : "calc(var(--sab, 0px) + 24px)",
+        bottom: videoFrameBottom !== null
+          ? `calc(max(var(--sab, 48px), ${videoFrameBottom}px) + 20px)`
+          : "calc(var(--sab, 48px) + 24px)",
       };
     } else {
       const baseOffset = bottomOffset !== undefined ? bottomOffset : 54;
       positionStyle = {
         bottom: videoFrameBottom !== null && videoFrameBottom > baseOffset + 112
           ? `${videoFrameBottom}px`
-          : `calc(var(--sab, 0px) + ${baseOffset + 112}px)`,
+          : `calc(var(--sab, 48px) + ${baseOffset + 112}px)`,
       };
     }
   }
@@ -268,16 +270,23 @@ export default function SubtitleOverlay({
     WebkitBoxDecorationBreak: "clone",
     lineHeight: "1.25",
     whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
   };
+
+  const isRightRailVisible = !clean && !fs && !isDesktop;
 
   return (
     <div
-      className="absolute left-0 right-0 z-20 pointer-events-none flex flex-col items-center px-3"
+      className={`absolute left-0 right-0 z-20 pointer-events-none flex flex-col items-center px-3 ${
+        isRightRailVisible ? "pr-16 pl-3" : ""
+      }`}
       style={positionStyle}
       aria-live="polite"
     >
       <div
-        className={`flex flex-col items-center text-center max-w-[85%] sm:max-w-[75%] gap-0.5 select-none transition-all duration-200 ease-out ${
+        className={`flex flex-col items-center text-center ${
+          isRightRailVisible ? "max-w-[72%] sm:max-w-[70%]" : "max-w-[85%] sm:max-w-[75%]"
+        } gap-0.5 select-none transition-all duration-200 ease-out ${
           isVisible ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
         }`}
       >

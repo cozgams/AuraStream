@@ -33,3 +33,7 @@ docs/API.md
 
 # Agent instructions (local)
 AGENTS.md
+
+# Local APK builds
+*.apk
+*.apk.idsig

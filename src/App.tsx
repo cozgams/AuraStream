@@ -137,8 +137,8 @@ function AppBody() {
           </div>
         ))}
 
-        {isMobile && !inPip && !fs && !clean && stack.length === 0 && tab !== "home" && tab !== "profile" && <ContinueWatchingBar />}
-        {isMobile && !inPip && !fs && !clean && stack.length === 0 && <TabBar />}
+        {isMobile && !inPip && !fs && !clean && stack.length === 0 && !loginOpen && tab !== "home" && tab !== "profile" && <ContinueWatchingBar />}
+        {isMobile && !inPip && !fs && !clean && stack.length === 0 && !loginOpen && <TabBar />}
       </div>
     </div>
   );
@@ -214,7 +214,7 @@ function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boole
             <StackPage page={p} onBack={pop} wide={wide} top={i === stack.length - 1} bottomInset={14} />
           </div>
         ))}
-        {stack.length === 0 && tab !== "home" && <ContinueWatchingBar />}
+        {stack.length === 0 && !loginOpen && tab !== "home" && <ContinueWatchingBar />}
       </div>
     </div>
   );

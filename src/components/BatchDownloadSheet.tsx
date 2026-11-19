@@ -310,7 +310,7 @@ export default function BatchDownloadSheet({
         </div>
 
         {/* Footer Summary & Action Button */}
-        <div className="px-4 pt-3 pb-[calc(var(--sab,0px)+14px)] border-t border-edge/30 flex items-center justify-between gap-3 shrink-0 bg-s1">
+        <div className="px-4 pt-3 pb-[calc(var(--sab,48px)+14px)] border-t border-edge/30 flex items-center justify-between gap-3 shrink-0 bg-s1">
           <div className="flex flex-col">
             <span className="text-[13px] font-bold text-on">
               {t("batch.selected_count", { count: selectedEps.size })}

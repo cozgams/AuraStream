@@ -1555,11 +1555,19 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               {/* Mobile action rail (Star / Comments / Captions / Download / More) */}
               {!fs && !clean && !isDesktop && !panel && (
                 <div className="absolute right-2.5 z-30 flex flex-col items-center gap-[12px] pointer-events-auto"
-                  style={{ bottom: `calc(var(--sab, 0px) + ${bottomInset + 18}px)` }}
+                  style={{ bottom: `calc(var(--sab, 48px) + ${bottomInset + 18}px)` }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
                   onClick={(e) => e.stopPropagation()}>
                   {/* 1. Star / Favorite */}
                   <Button
+                    type="button"
                     onClick={onFav}
+                    onTouchEnd={(e) => {
+                      e.preventDefault();
+                      onFav();
+                    }}
+                    style={{ touchAction: "manipulation" }}
                     className="flex flex-col items-center justify-center min-w-[50px] min-h-[50px] gap-0.5 pressable cursor-pointer select-none active:scale-95 transition-transform"
                     aria-pressed={isFav(curId)}
                     aria-label={isFav(curId) ? t("player.favorited") : t("player.favorite")}
@@ -1572,7 +1580,13 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
                   {/* 2. Comments */}
                   <Button
+                    type="button"
                     onClick={() => setPanel("comments")}
+                    onTouchEnd={(e) => {
+                      e.preventDefault();
+                      setPanel("comments");
+                    }}
+                    style={{ touchAction: "manipulation" }}
                     className="flex flex-col items-center justify-center min-w-[50px] min-h-[50px] gap-0.5 pressable cursor-pointer select-none active:scale-95 transition-transform"
                     aria-label={t("player.comments")}
                   >
@@ -1582,7 +1596,13 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
                   {/* 4. Offline Download */}
                   <Button
+                    type="button"
                     onClick={() => setDownloadChoiceOpen(true)}
+                    onTouchEnd={(e) => {
+                      e.preventDefault();
+                      setDownloadChoiceOpen(true);
+                    }}
+                    style={{ touchAction: "manipulation" }}
                     className="flex flex-col items-center justify-center min-w-[50px] min-h-[50px] gap-0.5 pressable cursor-pointer select-none active:scale-95 transition-transform"
                     aria-label="Offline Download"
                   >
@@ -1607,7 +1627,13 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
                   {/* 5. Share */}
                   <Button
+                    type="button"
                     onClick={shareLink}
+                    onTouchEnd={(e) => {
+                      e.preventDefault();
+                      shareLink();
+                    }}
+                    style={{ touchAction: "manipulation" }}
                     className="flex flex-col items-center justify-center min-w-[50px] min-h-[50px] gap-0.5 pressable cursor-pointer select-none active:scale-95 transition-transform"
                     aria-label={t("player.share")}
                   >
@@ -1740,7 +1766,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                   Text shadow ensures readability without dimming overlays;
                   Clean minimalistic scrub indicator. */}
               {!fs && !clean && !isDesktop && !panel && (
-                <div className="absolute inset-x-0 z-20 pointer-events-none" style={{ bottom: `calc(var(--sab, 0px) + ${bottomInset}px)` }}>
+                <div className="absolute inset-x-0 z-20 pointer-events-none" style={{ bottom: `calc(var(--sab, 48px) + ${bottomInset}px)` }}>
                   {/* Floating Action Pill / Card (Skip Intro or Up Next Countdown) */}
                   {time > 0.8 && time < 14 && duration > 25 && (
                     <div className="px-4 pb-2 flex items-center pointer-events-auto">
@@ -1901,7 +1927,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 <div
                   className="absolute z-30 pointer-events-auto transition-all duration-300 animate-in fade-in slide-in-from-bottom-2"
                   style={{
-                    bottom: isDesktop ? "76px" : fs ? "calc(var(--sab, 0px) + 64px)" : `calc(var(--sab, 0px) + ${bottomInset + 54}px)`,
+                    bottom: isDesktop ? "76px" : fs ? "calc(var(--sab, 48px) + 64px)" : `calc(var(--sab, 48px) + ${bottomInset + 54}px)`,
                     right: isDesktop || fs ? "24px" : "16px",
                   }}
                 >

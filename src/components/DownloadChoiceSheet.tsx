@@ -110,7 +110,7 @@ export default function DownloadChoiceSheet({
 
   return (
     <Sheet open={isOpen} onClose={onClose} label="Offline Downloads">
-      <div className="flex flex-col bg-canvas text-on p-4 sm:p-5 pb-[calc(var(--sab,0px)+16px)] gap-3.5 max-h-[82dvh] overflow-y-auto">
+      <div className="flex flex-col bg-canvas text-on p-4 sm:p-5 pb-[calc(var(--sab,48px)+16px)] gap-3.5 max-h-[82dvh] overflow-y-auto">
         {/* Top subtle drag indicator */}
         <div className="w-10 h-1 rounded-full bg-border/70 mx-auto -mt-1 mb-1" />
 

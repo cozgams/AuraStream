@@ -387,7 +387,7 @@ export default function ExportSheet({
         </div>
 
         {/* Footer info */}
-        <div className="px-4 pt-3 pb-[calc(var(--sab,0px)+12px)] border-t border-edge/30 bg-s1 text-center text-[11px] text-mut shrink-0">
+        <div className="px-4 pt-3 pb-[calc(var(--sab,48px)+12px)] border-t border-edge/30 bg-s1 text-center text-[11px] text-mut shrink-0">
           Exported MP4 files can be played anywhere offline without internet
         </div>
       </div>

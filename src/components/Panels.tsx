@@ -89,7 +89,7 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bar
           </Button>
         </div>
       )}
-      <div className="flex-1 scroll-y px-4 pb-[calc(var(--sab,0px)+24px)]">
+      <div className="flex-1 scroll-y px-4 pb-[calc(var(--sab,48px)+24px)]">
         <div className="grid grid-cols-4 gap-2">
           {list.map((e) => {
             const isDl = isEpisodeDownloaded(videoId, e.ep_num);
@@ -241,7 +241,7 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
         )}
       </div>
 
-      <Form className="shrink-0 flex items-center gap-2 px-3 pt-2.5 pb-[calc(var(--sab,0px)+12px)] bg-s2/70 border-t border-s3/40" onSubmit={(e) => { e.preventDefault(); send(); }}>
+      <Form className="shrink-0 flex items-center gap-2 px-3 pt-2.5 pb-[calc(var(--sab,48px)+12px)] bg-s2/70 border-t border-s3/40" onSubmit={(e) => { e.preventDefault(); send(); }}>
         <Avatar size={30} src={user?.avatar} name={user?.nickname || "Me"} hue={322} />
         <Input ref={inputRef} value={text} onChange={(e) => setText(e.target.value)}
           readOnly={!user} onClick={() => { if (!user) setLoginOpen(true); }}
@@ -276,7 +276,7 @@ export function ArticlePanel({ title, html, cover, hot, onClose }: {
           <IClose size={13} />
         </Button>
       </div>
-      <div className="flex-1 scroll-y px-4 pb-[calc(var(--sab,0px)+24px)]">
+      <div className="flex-1 scroll-y px-4 pb-[calc(var(--sab,48px)+24px)]">
         {cover && <Image src={imageCover(cover)} alt="" className="w-full rounded-(--r-md) mb-3 object-cover" />}
         <h2 className="text-[16px] font-bold text-on leading-snug">{title}</h2>
         <div className="article-body mt-3" onClick={(e) => handleArticleClick(e, openSafeLink)} dangerouslySetInnerHTML={{ __html: safeHtml }} />

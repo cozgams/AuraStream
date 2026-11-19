@@ -84,7 +84,7 @@ export default function Profile({ wide }: { wide: boolean }) {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [ramBoosting, setRamBoosting] = useState(false);
-  const [expandedDramas, setExpandedDramas] = useState<Set<number>>(() => new Set());
+  const [collapsedDramas, setCollapsedDramas] = useState<Set<number>>(() => new Set());
 
   const [batchSheet, setBatchSheet] = useState<{
     isOpen: boolean;
@@ -151,32 +151,13 @@ export default function Profile({ wide }: { wide: boolean }) {
     });
   };
 
-  const toggleDramaExpand = (videoId: number) => {
-    setExpandedDramas((prev) => {
+  const toggleDramaCollapse = (videoId: number) => {
+    setCollapsedDramas((prev) => {
       const next = new Set(prev);
       if (next.has(videoId)) next.delete(videoId);
       else next.add(videoId);
       return next;
     });
-  };
-
-  const isDramaExpanded = (videoId: number, totalGroups: number) => {
-    // If only 1 or 2 dramas, keep them expanded by default unless user collapses them
-    if (totalGroups <= 2) return !expandedDramas.has(-videoId);
-    return expandedDramas.has(videoId);
-  };
-
-  const handleToggleSingleDrama = (videoId: number, totalGroups: number) => {
-    if (totalGroups <= 2) {
-      setExpandedDramas((prev) => {
-        const next = new Set(prev);
-        if (next.has(-videoId)) next.delete(-videoId);
-        else next.add(-videoId);
-        return next;
-      });
-    } else {
-      toggleDramaExpand(videoId);
-    }
   };
 
   const handleRamBoost = async () => {
@@ -353,7 +334,10 @@ export default function Profile({ wide }: { wide: boolean }) {
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col select-none overflow-hidden">
       {/* Top Header */}
-      <div className="ios-page-heading shrink-0 px-4 h-13 flex items-center justify-between border-b border-edge/30 bg-bg/80 backdrop-blur-md z-10">
+      <div
+        className="shrink-0 px-4 flex items-center justify-between border-b border-edge/30 bg-bg/80 backdrop-blur-md z-10"
+        style={{ paddingTop: "calc(var(--sat, 0px) + 10px)", paddingBottom: "10px" }}
+      >
         <h1 className="text-[20px] font-bold tracking-tight text-on">
           {t("profile.title")}
         </h1>
@@ -379,7 +363,7 @@ export default function Profile({ wide }: { wide: boolean }) {
       {/* Main Scroll View */}
       <div
         className="ios-page-body flex-1 scroll-y px-4 pt-3"
-        style={{ paddingBottom: "calc(var(--sab, 0px) + 104px)" }}
+        style={{ paddingBottom: "calc(var(--sab, 48px) + 104px)" }}
       >
         {/* Unified Hero Library Card */}
         <Surface className="w-full rounded-2xl bg-s2 border border-edge/60 p-4 shadow-xs a-rise flex flex-col gap-3.5">
@@ -440,7 +424,8 @@ export default function Profile({ wide }: { wide: boolean }) {
 
           {/* Interactive 4-Tab Switcher Card (Single Source of Truth) */}
           <div className="grid grid-cols-4 gap-1 p-1 rounded-xl bg-s3/70 border border-edge/40">
-            <button
+            <Button
+              type="button"
               onClick={() => setTab("fav")}
               className={`flex flex-col items-center justify-center py-2 px-1 rounded-lg transition-all duration-200 pressable ${
                 tab === "fav"
@@ -454,9 +439,10 @@ export default function Profile({ wide }: { wide: boolean }) {
               <span className={`text-[11px] mt-1 font-semibold leading-tight tracking-tight ${tab === "fav" ? "text-black/90" : "text-mut"}`}>
                 {t("profile.favorites")}
               </span>
-            </button>
+            </Button>
 
-            <button
+            <Button
+              type="button"
               onClick={() => setTab("watchlater")}
               className={`flex flex-col items-center justify-center py-2 px-1 rounded-lg transition-all duration-200 pressable ${
                 tab === "watchlater"
@@ -470,9 +456,10 @@ export default function Profile({ wide }: { wide: boolean }) {
               <span className={`text-[11px] mt-1 font-semibold leading-tight tracking-tight ${tab === "watchlater" ? "text-black/90" : "text-mut"}`}>
                 {t("profile.watch_later")}
               </span>
-            </button>
+            </Button>
 
-            <button
+            <Button
+              type="button"
               onClick={() => setTab("history")}
               className={`flex flex-col items-center justify-center py-2 px-1 rounded-lg transition-all duration-200 pressable ${
                 tab === "history"
@@ -486,9 +473,10 @@ export default function Profile({ wide }: { wide: boolean }) {
               <span className={`text-[11px] mt-1 font-semibold leading-tight tracking-tight ${tab === "history" ? "text-black/90" : "text-mut"}`}>
                 {t("profile.history")}
               </span>
-            </button>
+            </Button>
 
-            <button
+            <Button
+              type="button"
               onClick={() => setTab("downloads")}
               className={`flex flex-col items-center justify-center py-2 px-1 rounded-lg transition-all duration-200 pressable ${
                 tab === "downloads"
@@ -502,7 +490,7 @@ export default function Profile({ wide }: { wide: boolean }) {
               <span className={`text-[11px] mt-1 font-semibold leading-tight tracking-tight ${tab === "downloads" ? "text-black/90" : "text-mut"}`}>
                 {t("profile.downloads")}
               </span>
-            </button>
+            </Button>
           </div>
         </Surface>
 
@@ -750,7 +738,7 @@ export default function Profile({ wide }: { wide: boolean }) {
               {dramaGroups.length > 0 ? (
                 <div className="flex flex-col gap-3">
                   {dramaGroups.map((group) => {
-                    const expanded = isDramaExpanded(group.videoId, dramaGroups.length);
+                    const expanded = !collapsedDramas.has(group.videoId);
                     const totalMB = (group.totalBytes / (1024 * 1024)).toFixed(1);
 
                     return (
@@ -760,7 +748,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                       >
                         {/* Show Header */}
                         <div
-                          onClick={() => handleToggleSingleDrama(group.videoId, dramaGroups.length)}
+                          onClick={() => toggleDramaCollapse(group.videoId)}
                           className="p-3.5 flex items-center gap-3 bg-s3/40 border-b border-edge/40 cursor-pointer pressable hover:bg-s3/70 transition-colors"
                         >
                           <div className="w-13 h-18 rounded-xl overflow-hidden shrink-0 shadow-sm border border-edge/40 bg-s3">
@@ -790,6 +778,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                             {/* Play Show Button */}
                             {!selectMode && group.episodes[0] && (
                               <Button
+                                type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   push({
@@ -800,7 +789,10 @@ export default function Profile({ wide }: { wide: boolean }) {
                                     startEp: group.episodes[0].episode,
                                   });
                                 }}
-                                className="w-8 h-8 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center pressable shadow-xs active:scale-95 transition-transform"
+                                onTouchEnd={(e) => {
+                                  e.stopPropagation();
+                                }}
+                                className="w-9 h-9 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center pressable shadow-xs active:scale-95 transition-transform"
                                 title="Play from Episode 1"
                               >
                                 <IPlayF size={12} />
@@ -1042,7 +1034,7 @@ export default function Profile({ wide }: { wide: boolean }) {
         </div>
 
         {/* Quiet Handcrafted Branding Footer */}
-        <div className="text-center text-[11.5px] text-mut/60 mt-6 tracking-tight">
+        <div className="text-center text-[11.5px] text-mut/60 mt-6 mb-8 tracking-tight">
           AuraStream {APP_VERSION} · This App Created by AAA
         </div>
       </div>
