@@ -1,0 +1,396 @@
+import React, { useEffect, useState } from "react";
+import { Sheet, Toggle } from "./ui";
+import { Button } from "./ios/controls";
+import { Loader } from "./ios/effects";
+import { ICheck, IClose, IDownload, IExport, IFilm, IFolder, IMessageSquare, ISdCard, IShare } from "../icons";
+import { useStore } from "../store";
+import {
+  processEpisodeExport,
+  processSubtitleExport,
+  openInGallery,
+  getDeviceStorageInfo,
+  type ExportAction,
+  type StorageInfo,
+} from "../offline/exportService";
+import { formatDramaTitle } from "../subtitles/dramaTranslator";
+
+export interface ExportTarget {
+  id: ExportAction;
+  title: string;
+  subtitle: string;
+  icon: React.ReactNode;
+  badge?: string;
+  available: boolean;
+}
+
+export interface ExportBatchItem {
+  videoId: number;
+  episode: number;
+  title: string;
+}
+
+interface ExportSheetProps {
+  isOpen: boolean;
+  onClose: () => void;
+  videoId: number;
+  episode?: number;
+  title: string;
+  batchEpisodes?: number[];
+  batchItems?: ExportBatchItem[];
+}
+
+export default function ExportSheet({
+  isOpen,
+  onClose,
+  videoId,
+  episode,
+  title,
+  batchEpisodes,
+  batchItems,
+}: ExportSheetProps) {
+  const { toast } = useStore();
+  const [storageInfo, setStorageInfo] = useState<StorageInfo>(() => getDeviceStorageInfo());
+  const [exporting, setExporting] = useState<boolean>(false);
+  const [progress, setProgress] = useState<number>(0);
+  const [currentEpIndex, setCurrentEpIndex] = useState<number>(0);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [includeSubtitles, setIncludeSubtitles] = useState<boolean>(true);
+
+  const itemsToExport: ExportBatchItem[] =
+    batchItems && batchItems.length > 0
+      ? batchItems
+      : batchEpisodes && batchEpisodes.length > 0
+        ? batchEpisodes.map((ep) => ({ videoId, episode: ep, title }))
+        : episode != null
+          ? [{ videoId, episode, title }]
+          : [];
+
+  const isBatch = itemsToExport.length > 1;
+  const epCount = itemsToExport.length;
+
+  useEffect(() => {
+    if (isOpen) {
+      setStorageInfo(getDeviceStorageInfo());
+      setSuccessMsg(null);
+      setProgress(0);
+      setExporting(false);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !exporting) {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, exporting, onClose]);
+
+  if (!isOpen) return null;
+
+  const targets: ExportTarget[] = [
+    {
+      id: "save_movies",
+      title: "Phone Gallery & Movies",
+      subtitle: "Movies/AuraStream · Visible in Gallery, Google Photos & Video Players",
+      icon: <IFilm size={20} className="text-primary" />,
+      badge: "Recommended",
+      available: true,
+    },
+    {
+      id: "save_downloads",
+      title: "Phone Downloads Folder",
+      subtitle: "Download/AuraStream · Easily accessible in Files / My Files app",
+      icon: <IFolder size={20} className="text-cyan-500" />,
+      badge: "Standard",
+      available: true,
+    },
+    {
+      id: "save_sdcard",
+      title: "MicroSD Card Storage",
+      subtitle: storageInfo.hasSdCard
+        ? `Direct SD Card / AuraStream · ${(storageInfo.sdFreeBytes / (1024 * 1024 * 1024)).toFixed(1)} GB Free`
+        : "No physical MicroSD card found · Will fallback to Downloads",
+      icon: <ISdCard size={20} className="text-amber-500" />,
+      badge: storageInfo.hasSdCard ? "SD Card" : "Fallback",
+      available: true,
+    },
+    {
+      id: "share",
+      title: "Share to Other Apps",
+      subtitle: "Send via WhatsApp, Telegram, Quick Share, Google Drive or File Managers",
+      icon: <IShare size={20} className="text-emerald-500" />,
+      available: !isBatch, // Single episode share
+    },
+  ];
+
+  const handleExecuteExport = async (action: ExportAction) => {
+    if (exporting) return;
+    if (itemsToExport.length === 0) {
+      toast("No episode available to export", "info");
+      return;
+    }
+    setExporting(true);
+    setProgress(0);
+    setSuccessMsg(null);
+
+    try {
+      let savedPathResult = "";
+      for (let i = 0; i < itemsToExport.length; i++) {
+        const item = itemsToExport[i];
+        setCurrentEpIndex(i + 1);
+        const epProgressBase = (i / itemsToExport.length) * 100;
+        const res = await processEpisodeExport(
+          item.videoId,
+          item.episode,
+          action,
+          (pct) => {
+            setProgress(Math.round(epProgressBase + (pct / itemsToExport.length)));
+          },
+          { includeSubtitles }
+        );
+        if (!res.success) {
+          throw new Error(res.error || `Failed to export episode ${item.episode}`);
+        }
+        savedPathResult = res.savedPath || "Storage";
+      }
+
+      setProgress(100);
+      const msg = itemsToExport.length > 1
+        ? `Successfully exported ${itemsToExport.length} episodes to ${savedPathResult}${includeSubtitles ? " (+ Subtitles)" : ""}`
+        : `Saved to ${savedPathResult}${includeSubtitles ? " (+ Subtitles)" : ""}`;
+      setSuccessMsg(msg);
+      toast(msg, "ok");
+    } catch (e: any) {
+      toast(e?.message || "Export failed", "info");
+      setSuccessMsg(`Export error: ${e?.message || "Failed"}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleExportSubtitle = async (fmt: "srt" | "vtt") => {
+    if (exporting) return;
+    if (itemsToExport.length === 0) {
+      toast("No episode available to export", "info");
+      return;
+    }
+    setExporting(true);
+    setProgress(0);
+    setSuccessMsg(null);
+
+    try {
+      let savedPathResult = "";
+      for (let i = 0; i < itemsToExport.length; i++) {
+        const item = itemsToExport[i];
+        setCurrentEpIndex(i + 1);
+        const res = await processSubtitleExport(
+          item.videoId,
+          item.episode,
+          fmt,
+          item.title,
+          "en",
+          "save_movies"
+        );
+        if (!res.success) {
+          throw new Error(res.error || `Failed to export subtitle for episode ${item.episode}`);
+        }
+        savedPathResult = res.savedPath || "Storage";
+        setProgress(Math.round(((i + 1) / itemsToExport.length) * 100));
+      }
+
+      setProgress(100);
+      const msg = itemsToExport.length > 1
+        ? `Saved ${itemsToExport.length} .${fmt.toUpperCase()} subtitles to ${savedPathResult}`
+        : `Saved subtitle (.${fmt.toUpperCase()}) to ${savedPathResult}`;
+      setSuccessMsg(msg);
+      toast(msg, "ok");
+    } catch (e: any) {
+      toast(e?.message || "Subtitle export failed", "info");
+      setSuccessMsg(`Subtitle error: ${e?.message || "Failed"}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const cleanTitle = formatDramaTitle(title);
+
+  return (
+    <Sheet open={isOpen} onClose={exporting ? () => {} : onClose} label="Export Episode">
+      <div className="flex flex-col max-h-[85vh] overflow-hidden bg-canvas text-on">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-edge/30 shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center text-sm font-bold">
+              <IExport size={16} />
+            </div>
+            <div>
+              <div className="text-[15px] font-bold text-on">
+                {isBatch ? `Export Series (${epCount} Episodes)` : "Export Episode to Phone / SD Card"}
+              </div>
+              <div className="text-[12px] text-mut truncate max-w-[240px]">
+                {cleanTitle} {episode != null && !isBatch ? `· Ep. ${episode}` : ""}
+              </div>
+            </div>
+          </div>
+          <Button
+            disabled={exporting}
+            onClick={onClose}
+            className="w-8 h-8 rounded-full bg-s3 flex items-center justify-center text-mut pressable"
+            aria-label="Close"
+          >
+            <IClose size={14} />
+          </Button>
+        </div>
+
+        {/* Progress or Status */}
+        {exporting && (
+          <div className="p-4 bg-primary/10 border-b border-primary/20 flex flex-col gap-2 shrink-0">
+            <div className="flex items-center justify-between text-[12px]">
+              <span className="font-semibold text-primary flex items-center gap-1.5">
+                <Loader className="w-4 h-4 spinner" />
+                {isBatch
+                  ? `Exporting episode ${currentEpIndex} of ${itemsToExport.length}...`
+                  : "Writing video file to device storage..."}
+              </span>
+              <span className="font-bold text-primary tabular-nums">{progress}%</span>
+            </div>
+            <div className="w-full h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all duration-200"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {successMsg && !exporting && (
+          <div className="mx-4 mt-3 flex flex-col gap-2 shrink-0">
+            <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-[12px] flex items-center gap-2">
+              <ICheck size={16} className="shrink-0" strokeWidth={2.5} />
+              <span className="truncate flex-1 font-semibold">{successMsg}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={() => {
+                  const ok = openInGallery();
+                  if (ok) {
+                    toast("Opening in Gallery / Player...", "ok");
+                  } else {
+                    toast("Opening player...", "info");
+                  }
+                }}
+                className="flex-1 h-10 rounded-xl bg-primary text-on-primary font-bold text-[13px] flex items-center justify-center gap-2 pressable shadow-md hover:brightness-110"
+              >
+                <IFilm size={15} />
+                <span>Open in Gallery</span>
+              </Button>
+              <Button
+                onClick={onClose}
+                className="h-10 px-4 rounded-xl bg-s3 text-on font-semibold text-[13px] pressable"
+              >
+                Done
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Export Destinations */}
+        <div className="p-4 flex-1 min-h-0 flex flex-col gap-2.5 overflow-y-auto">
+          {/* Subtitle Bundle Toggle */}
+          <div className="p-3 rounded-2xl bg-s2/70 border border-edge/60 flex items-center justify-between">
+            <div className="pr-3 flex-1 min-w-0">
+              <div className="text-[13px] font-bold text-on flex items-center gap-1.5">
+                <IMessageSquare size={15} className="text-primary shrink-0" />
+                <span>Bundle Subtitles (.SRT)</span>
+                <span className="px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[10px] font-bold">Auto-Sync</span>
+              </div>
+              <div className="text-[11px] text-mut truncate mt-0.5">
+                Saves matching .srt file alongside MP4 for auto-loading in VLC/Gallery
+              </div>
+            </div>
+            <Toggle
+              label="Bundle Subtitles (.SRT)"
+              on={includeSubtitles}
+              onChange={setIncludeSubtitles}
+            />
+          </div>
+
+          <div className="text-[11px] font-bold uppercase tracking-wider text-mut px-1 mt-1">
+            Video Destinations
+          </div>
+
+          {targets.map((t) => (
+            <button
+              key={t.id}
+              disabled={exporting}
+              onClick={() => void handleExecuteExport(t.id)}
+              className="p-3.5 rounded-2xl border border-edge/60 bg-s2/60 hover:bg-s2 text-left flex items-center gap-3 transition-all pressable disabled:opacity-50"
+            >
+              <div className="w-10 h-10 rounded-xl bg-s3 flex items-center justify-center text-xl shrink-0">
+                {t.icon}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-[14px] font-bold text-on">{t.title}</span>
+                  {t.badge && (
+                    <span className="px-1.5 py-0.5 rounded-md bg-primary/10 text-primary text-[10px] font-bold">
+                      {t.badge}
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-mut mt-0.5 truncate">{t.subtitle}</div>
+              </div>
+              <div className="shrink-0 text-mut">
+                <IDownload size={16} />
+              </div>
+            </button>
+          ))}
+
+          {/* Standalone Subtitles Section */}
+          <div className="text-[11px] font-bold uppercase tracking-wider text-mut px-1 mt-2">
+            Standalone Subtitle Tracks
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              disabled={exporting}
+              onClick={() => void handleExportSubtitle("srt")}
+              className="p-3 rounded-xl border border-edge/60 bg-s2/60 hover:bg-s2 text-left flex items-center gap-2.5 pressable"
+            >
+              <div className="w-8 h-8 rounded-lg bg-amber-500/15 text-amber-500 flex items-center justify-center font-bold text-[11px]">
+                SRT
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[12.5px] font-bold text-on truncate">Export .SRT</div>
+                <div className="text-[10.5px] text-mut truncate">SubRip Subtitle</div>
+              </div>
+            </Button>
+
+            <Button
+              type="button"
+              disabled={exporting}
+              onClick={() => void handleExportSubtitle("vtt")}
+              className="p-3 rounded-xl border border-edge/60 bg-s2/60 hover:bg-s2 text-left flex items-center gap-2.5 pressable"
+            >
+              <div className="w-8 h-8 rounded-lg bg-cyan-500/15 text-cyan-500 flex items-center justify-center font-bold text-[11px]">
+                VTT
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[12.5px] font-bold text-on truncate">Export .VTT</div>
+                <div className="text-[10.5px] text-mut truncate">WebVTT Standard</div>
+              </div>
+            </Button>
+          </div>
+        </div>
+
+        {/* Footer info */}
+        <div className="px-4 pt-3 pb-[calc(var(--sab,0px)+12px)] border-t border-edge/30 bg-s1 text-center text-[11px] text-mut shrink-0">
+          Exported MP4 files can be played anywhere offline without internet
+        </div>
+      </div>
+    </Sheet>
+  );
+}

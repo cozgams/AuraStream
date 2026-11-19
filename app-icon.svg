@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="aura-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#020412"/>
+      <stop offset="100%" stop-color="#000208"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#aura-bg)"/>
+  <image href="/data/home/.gemini/antigravity-cli/brain/f3dd6a2f-052a-4132-80ac-b16d5e967f6d/aurastream_user_unmasked.png" x="0" y="0" width="1024" height="1024"/>
+</svg>

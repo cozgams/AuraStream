@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="aurastream-title aurastream-desc">
+  <title id="aurastream-title">AuraStream Official Icon</title>
+  <desc id="aurastream-desc">Official AuraStream brand icon featuring the luminous monogram A, flowing media crossbar, and glowing play core.</desc>
+  <defs>
+    <!-- Deep Space Velvet Obsidian Background -->
+    <linearGradient id="aura-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a081d"/>
+      <stop offset="35%" stop-color="#071226"/>
+      <stop offset="70%" stop-color="#030c1a"/>
+      <stop offset="100%" stop-color="#01040d"/>
+    </linearGradient>
+
+    <!-- Multi-stage Ambient Cosmic Backlight -->
+    <radialGradient id="aura-halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.36"/>
+      <stop offset="40%" stop-color="#8b5cf6" stop-opacity="0.24"/>
+      <stop offset="75%" stop-color="#06b6d4" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Core Radial Bloom behind Play Triangle -->
+    <radialGradient id="play-bloom" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#2dd4bf" stop-opacity="0.45"/>
+      <stop offset="45%" stop-color="#38bdf8" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Left Ascending Pillar: Electric Indigo into Vivid Violet to Brilliant Sky -->
+    <linearGradient id="aura-left" x1="0%" y1="100%" x2="70%" y2="0%">
+      <stop offset="0%" stop-color="#4f46e5"/>
+      <stop offset="30%" stop-color="#7c3aed"/>
+      <stop offset="65%" stop-color="#a855f7"/>
+      <stop offset="90%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#7ee7fc"/>
+    </linearGradient>
+
+    <!-- Right Descending Pillar: Electric Cyan into Deep Sky to Radiant Mint -->
+    <linearGradient id="aura-right" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7ee7fc"/>
+      <stop offset="30%" stop-color="#0ea5e9"/>
+      <stop offset="65%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+
+    <!-- Horizontal Stream Crossbar -->
+    <linearGradient id="aura-cross" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="45%" stop-color="#38bdf8"/>
+      <stop offset="80%" stop-color="#2dd4bf"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+
+    <!-- Glowing Optical Play Triangle Core -->
+    <linearGradient id="aura-play" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="30%" stop-color="#d1fae5"/>
+      <stop offset="65%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+
+    <!-- Specular Bevel Rim -->
+    <linearGradient id="rim-glass" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="35%" stop-color="#38bdf8" stop-opacity="0.18"/>
+      <stop offset="70%" stop-color="#8b5cf6" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.5"/>
+    </linearGradient>
+
+    <!-- Elevation Drop Shadow -->
+    <filter id="shadow-elev" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#000308" flood-opacity="0.75"/>
+    </filter>
+
+    <filter id="glow-play" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="18" flood-color="#34d399" flood-opacity="0.75"/>
+    </filter>
+
+    <filter id="glow-star" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#ffffff" flood-opacity="0.9"/>
+    </filter>
+  </defs>
+
+  <!-- Base Square Background (Unmasked for iOS & Stores) -->
+  <clipPath id="squircle-clip"><rect width="1024" height="1024" rx="224"/></clipPath>
+  <g clip-path="url(#squircle-clip)">
+    <rect width="1024" height="1024" fill="url(#aura-bg)"/>
+
+  <!-- Master Artwork Group (inside <g> to pass iOS validator) -->
+  <g id="icon-elements" filter="url(#shadow-elev)">
+    <!-- Liquid Glass Edge Rim -->
+    <rect x="6" y="6" width="1012" height="1012" fill="none" stroke="url(#rim-glass)" stroke-width="6"/>
+
+    <!-- Ambient Cosmic Halo -->
+    <circle cx="512" cy="512" r="440" fill="url(#aura-halo)"/>
+
+    <!-- Underlying Diffuse Neon Glow along the letter A paths -->
+    <g opacity="0.32" filter="blur(22px)">
+      <path d="M 276 764 Q 380 440, 512 204 Q 644 440, 748 764" stroke="#38bdf8" stroke-width="96" stroke-linecap="round" fill="none"/>
+      <path d="M 364 540 Q 512 520, 660 540" stroke="#8b5cf6" stroke-width="78" stroke-linecap="round" fill="none"/>
+    </g>
+
+    <!-- 1. Left Upward Streaming Pillar (Aura Ascension) -->
+    <path d="M 276 764 Q 380 440, 512 204"
+          stroke="url(#aura-left)" stroke-width="84" stroke-linecap="round" fill="none"/>
+
+    <!-- 2. Right Downward Streaming Pillar (Velocity Descent) -->
+    <path d="M 512 204 Q 644 440, 748 764"
+          stroke="url(#aura-right)" stroke-width="84" stroke-linecap="round" fill="none"/>
+
+    <!-- 3. Specular Highlight Ribs on Both Pillars -->
+    <path d="M 298 724 Q 386 440, 498 224"
+          stroke="#ffffff" stroke-width="9" stroke-linecap="round" fill="none" opacity="0.45"/>
+    <path d="M 526 224 Q 638 440, 726 724"
+          stroke="#ffffff" stroke-width="9" stroke-linecap="round" fill="none" opacity="0.4"/>
+
+    <!-- 4. Aerodynamic Streaming Crossbar across the A -->
+    <path d="M 374 540 Q 512 522, 650 540"
+          stroke="url(#aura-cross)" stroke-width="64" stroke-linecap="round" fill="none"/>
+    <path d="M 390 538 Q 512 520, 634 538"
+          stroke="#ffffff" stroke-width="6" stroke-linecap="round" fill="none" opacity="0.35"/>
+
+    <!-- Ambient Play Core Backlight Bloom -->
+    <circle cx="524" cy="530" r="130" fill="url(#play-bloom)"/>
+
+    <!-- 5. Illuminated Media Play Core (The Radiant Heart of AuraStream) -->
+    <g filter="url(#glow-play)">
+      <path d="M 456 422
+               C 456 408, 472 402, 482 408
+               L 610 498
+               C 620 504, 620 522, 610 528
+               L 482 618
+               C 472 624, 456 618, 456 604 Z"
+            fill="url(#aura-play)"/>
+      <path d="M 466 438 L 584 514 L 466 590 Z" fill="#ffffff" opacity="0.45"/>
+    </g>
+
+    <!-- 6. Apex Diamond Starlight Flare -->
+    <g transform="translate(512, 204)" filter="url(#glow-star)">
+      <polygon points="0,-32 7,-8 32,0 7,8 0,32 -7,8 -32,0 -7,-8" fill="#ffffff"/>
+      <circle cx="0" cy="0" r="7" fill="#ffffff"/>
+      <circle cx="0" cy="0" r="16" fill="#7ee7fc" opacity="0.4"/>
+    </g>
+
+    <!-- 7. Harmonic Micro-Spark Accents -->
+    <g opacity="0.8">
+      <circle cx="280" cy="270" r="4" fill="#a7f3d0"/>
+      <circle cx="744" cy="270" r="4" fill="#7ee7fc"/>
+      <circle cx="512" cy="740" r="3.5" fill="#38bdf8"/>
+    </g>
+  </g>
+  </g>
+</svg>

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#101012" />
+    <meta name="author" content="AAA" />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <link rel="apple-touch-icon" href="/app-icon.png" />
+    <link rel="dns-prefetch" href="https://hghub.top" />
+    <link rel="preconnect" href="https://hghub.top" crossorigin />
+    <title>AuraStream</title>
+    <script>
+      try {
+        const preference = localStorage.getItem("aurastream_theme") ?? localStorage.getItem("hghubx_theme") ?? localStorage.getItem("hghub_theme");
+        const dark = preference === "dark";
+        if (!dark) document.documentElement.classList.add("theme-light");
+        document.querySelector('meta[name="theme-color"]').content = dark ? "#121212" : "#eeece7";
+      } catch (e) {}
+    </script>
+    <style>html,body{background:#eeece7}html.theme-light,html.theme-light body{background:#eeece7}</style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

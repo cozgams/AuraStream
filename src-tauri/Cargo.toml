@@ -1,0 +1,102 @@
+[package]
+name = "hghubx"
+version = "0.1.0"
+description = "AuraStream client - Created by AAA"
+authors = ["AAA"]
+edition = "2021"
+rust-version = "1.90"
+
+[lib]
+name = "hghubx_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+default = []
+# Required for custom-protocol handling in Tauri 2
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "=2.7.2"
+tauri-plugin-clipboard-manager = "=2.5.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dom_query = { version = "=0.28.0", default-features = false }
+time = { version = "0.3", features = ["formatting"] }
+# Note: system-proxy must be explicitly listed so system proxy settings are respected
+reqwest = { version = "0.12", default-features = false, features = [
+  "rustls-tls",
+  "system-proxy",
+  "socks",
+  "gzip",
+  "brotli",
+  "json",
+  "charset",
+] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net"] }
+aes = "0.8"
+base64 = "0.22"
+percent-encoding = "2"
+once_cell = "1"
+url = "2"
+
+# Tauri already uses this WebKitGTK version/features; reuse it to configure only
+# the app WebView's local-media transport (see linux_webview.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "2.0.2", features = ["v2_40"] }
+
+# Proxy matcher for Apple platforms matching reqwest diagnostics
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+hyper-util = { version = "0.1.21", features = ["client-proxy", "client-proxy-system"] }
+
+[dev-dependencies]
+hyper-util = { version = "0.1.21", features = ["client-proxy", "client-proxy-system"] }
+
+# AppKit button metrics for macOS titlebar alignment
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+  "std",
+  "NSButton",
+  "NSControl",
+  "NSGraphics",
+  "NSResponder",
+  "NSView",
+  "NSWindow",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.6"
+objc2-ui-kit = { version = "0.3", default-features = false, features = [
+  "std",
+  "objc2-core-foundation",
+  "UIResponder",
+  "UIView",
+  "UIScrollView",
+  "UIWindow",
+  "UIGeometry",
+] }
+objc2-web-kit = { version = "0.3", default-features = false, features = [
+  "std",
+  "WKWebViewConfiguration",
+  "WKPreferences",
+] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# Query HKCU Internet Settings for Windows system proxy configuration
+winreg = "0.56"
+
+[profile.dev]
+debug = 0
+strip = true
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    
+    <!-- Background Canvas -->
+    <linearGradient id="c1-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a081d"/>
+      <stop offset="40%" stop-color="#071226"/>
+      <stop offset="80%" stop-color="#030c1a"/>
+      <stop offset="100%" stop-color="#01040d"/>
+    </linearGradient>
+
+    <!-- Cosmic Glow Backdrop -->
+    <radialGradient id="c1-halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.35"/>
+      <stop offset="40%" stop-color="#8b5cf6" stop-opacity="0.22"/>
+      <stop offset="75%" stop-color="#06b6d4" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Play Bloom -->
+    <radialGradient id="c1-play-bloom" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#2dd4bf" stop-opacity="0.45"/>
+      <stop offset="50%" stop-color="#38bdf8" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Left Pillar: Electric Indigo -> Vivid Violet -> Radiant Sky -->
+    <linearGradient id="c1-left" x1="0%" y1="100%" x2="70%" y2="0%">
+      <stop offset="0%" stop-color="#4338ca"/>
+      <stop offset="30%" stop-color="#6366f1"/>
+      <stop offset="65%" stop-color="#a855f7"/>
+      <stop offset="90%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#7ee7fc"/>
+    </linearGradient>
+
+    <!-- Right Pillar: Radiant Sky -> Electric Cyan -> Emerald Mint -->
+    <linearGradient id="c1-right" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7ee7fc"/>
+      <stop offset="25%" stop-color="#38bdf8"/>
+      <stop offset="60%" stop-color="#0ea5e9"/>
+      <stop offset="85%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+
+    <!-- Dynamic Curved Crossbar -->
+    <linearGradient id="c1-cross" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="35%" stop-color="#c084fc"/>
+      <stop offset="65%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+
+    <!-- Play Triangle Core -->
+    <linearGradient id="c1-play" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="28%" stop-color="#a7f3d0"/>
+      <stop offset="65%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+
+    <!-- Ambient Shadow -->
+    <filter id="c1-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="24" stdDeviation="30" flood-color="#00020a" flood-opacity="0.85"/>
+    </filter>
+    <filter id="c1-glow-play" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="20" flood-color="#34d399" flood-opacity="0.8"/>
+    </filter>
+    <filter id="c1-glow-star" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="0" stdDeviation="14" flood-color="#ffffff" flood-opacity="0.95"/>
+    </filter>
+  
+  </defs>
+  <g transform="translate(512 512) scale(0.68) translate(-512 -512)">
+    
+  
+
+  <!-- Canvas Squircle -->
+  
+  
+
+  <!-- Halo -->
+  
+
+  <!-- Main Monogram Group -->
+  <g filter="url(#c1-shadow)">
+    <!-- Left Ascending Leg -->
+    <path d="M 276 764 Q 380 440, 512 204"
+          stroke="url(#c1-left)" stroke-width="84" stroke-linecap="round" fill="none"/>
+    
+    <!-- Right Descending Leg -->
+    <path d="M 512 204 Q 644 440, 748 764"
+          stroke="url(#c1-right)" stroke-width="84" stroke-linecap="round" fill="none"/>
+
+    <!-- Specular Highlight Ribbons -->
+    <path d="M 298 724 Q 386 440, 498 224"
+          stroke="#ffffff" stroke-width="9" stroke-linecap="round" fill="none" opacity="0.45"/>
+    <path d="M 526 224 Q 638 440, 726 724"
+          stroke="#ffffff" stroke-width="9" stroke-linecap="round" fill="none" opacity="0.4"/>
+
+    <!-- Flowing Streaming Crossbar -->
+    <path d="M 374 540 Q 512 522, 650 540"
+          stroke="url(#c1-cross)" stroke-width="64" stroke-linecap="round" fill="none"/>
+    <path d="M 390 538 Q 512 520, 634 538"
+          stroke="#ffffff" stroke-width="6" stroke-linecap="round" fill="none" opacity="0.35"/>
+
+    <!-- Media Play Core Bloom & Glyph -->
+    <circle cx="524" cy="530" r="135" fill="url(#c1-play-bloom)"/>
+    <g filter="url(#c1-glow-play)">
+      <path d="M 456 422
+               C 456 408, 472 402, 482 408
+               L 610 498
+               C 620 504, 620 522, 610 528
+               L 482 618
+               C 472 624, 456 618, 456 604 Z"
+            fill="url(#c1-play)"/>
+      <!-- Internal Play Facet -->
+      <path d="M 466 438 L 584 514 L 466 590 Z" fill="#ffffff" opacity="0.45"/>
+    </g>
+
+    <!-- Apex Diamond Starlight Flare -->
+    <g transform="translate(512, 204)" filter="url(#c1-glow-star)">
+      <polygon points="0,-34 8,-9 34,0 8,9 0,34 -8,9 -34,0 -8,-9" fill="#ffffff"/>
+      <circle cx="0" cy="0" r="7" fill="#ffffff"/>
+      <circle cx="0" cy="0" r="18" fill="#7ee7fc" opacity="0.4"/>
+    </g>
+  </g>
+
+  </g>
+</svg>
