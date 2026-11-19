@@ -121,7 +121,7 @@ export function parseVtt(content: string): SubtitleCue[] {
       start,
       end,
       en: englishCue,
-      zh: englishCue,
+      zh: zh || englishCue,
     });
   }
 

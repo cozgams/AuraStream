@@ -183,7 +183,7 @@ export default function Profile({ wide }: { wide: boolean }) {
         map.set(item.videoId, grp);
       }
       grp.episodes.push(item);
-      grp.totalBytes += item.sizeBytes;
+      grp.totalBytes += (item.sizeBytes || 0);
     }
     for (const grp of map.values()) {
       grp.episodes.sort((a, b) => a.episode - b.episode);

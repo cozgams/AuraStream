@@ -213,6 +213,8 @@ export default function BatchDownloadSheet({
               return (
                 <button
                   key={ep}
+                  type="button"
+                  aria-label={`Episode ${ep}`}
                   disabled={isDownloaded || isCurrentBatchActive}
                   onClick={() => toggleEp(ep)}
                   className={`h-11 rounded-xl text-[13px] font-semibold flex items-center justify-center relative transition-all ${
