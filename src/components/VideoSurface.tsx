@@ -214,10 +214,13 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src, proxyRecovery.revision]);
 
-  // Enable inline playback attribute for iOS WKWebView
+  // Enable inline playback attributes for Android & mobile WebViews
   useEffect(() => {
     const v = videoRef.current;
-    if (v) v.setAttribute("webkit-playsinline", "true");
+    if (v) {
+      v.setAttribute("playsinline", "true");
+      v.setAttribute("webkit-playsinline", "true");
+    }
   }, []);
 
   useEffect(() => { if (videoRef.current) videoRef.current.muted = muted; }, [muted]);

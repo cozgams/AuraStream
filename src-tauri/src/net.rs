@@ -464,11 +464,33 @@ pub async fn get(
     get_with_dns(raw, timeout, accept, referer, false).await
 }
 
+/// Execute HTTP GET request with DNS validation, proxy routing, and optional Authorization header.
+pub async fn get_with_auth(
+    raw: &str,
+    timeout: Duration,
+    accept: Option<&str>,
+    referer: Option<&str>,
+    auth: Option<&str>,
+) -> Result<reqwest::Response, String> {
+    get_with_dns_auth(raw, timeout, accept, referer, auth, false).await
+}
+
 async fn get_with_dns(
     raw: &str,
     timeout: Duration,
     accept: Option<&str>,
     referer: Option<&str>,
+    public_dns: bool,
+) -> Result<reqwest::Response, String> {
+    get_with_dns_auth(raw, timeout, accept, referer, None, public_dns).await
+}
+
+async fn get_with_dns_auth(
+    raw: &str,
+    timeout: Duration,
+    accept: Option<&str>,
+    referer: Option<&str>,
+    auth: Option<&str>,
     public_dns: bool,
 ) -> Result<reqwest::Response, String> {
     tokio::time::timeout(timeout, async {
@@ -487,6 +509,9 @@ async fn get_with_dns(
             }
             if let Some(value) = referer {
                 request = request.header("Referer", value);
+            }
+            if let Some(value) = auth {
+                request = request.header("Authorization", value);
             }
             let response = request.send().await.map_err(|e| err_text(&e))?;
             if !matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {

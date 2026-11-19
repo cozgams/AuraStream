@@ -325,16 +325,20 @@ fn version_in(text: &str) -> String {
 pub async fn line_health() -> Result<Value, String> {
     Ok(crate::lines::health().await)
 }
+const GITHUB_READ_TOKEN: &str = "REDACTED_GITHUB_TOKEN";
+
 /// Compare GitHub Release tag with current version.
 #[tauri::command]
 pub async fn check_update() -> Result<Value, String> {
     let current = env!("CARGO_PKG_VERSION").to_string();
     let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
-    let resp = crate::net::get(
+    let auth = format!("token {}", GITHUB_READ_TOKEN);
+    let resp = crate::net::get_with_auth(
         &url,
         std::time::Duration::from_secs(12),
         Some("application/vnd.github+json"),
         None,
+        Some(&auth),
     )
     .await?;
 
@@ -568,6 +572,12 @@ fn request_ios_orientation(landscape: bool) {
 }
 
 /* ------------------------- Session ------------------------- */
+
+/// Gracefully exit the application (used by Android double-tap back on Home).
+#[tauri::command]
+pub fn app_exit(app: tauri::AppHandle, code: Option<i32>) {
+    app.exit(code.unwrap_or(0));
+}
 
 #[tauri::command]
 pub async fn app_boot(state: State<'_, Api>) -> Result<Value, String> {

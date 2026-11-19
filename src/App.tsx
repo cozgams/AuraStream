@@ -285,7 +285,9 @@ export default function App() {
     // Double tap back to exit on Home tab
     const now = Date.now();
     if (now - lastBackPressRef.current < 2000) {
-      invoke("plugin:app|exit", { code: 0 }).catch(() => {});
+      invoke("app_exit", { code: 0 })
+        .catch(() => invoke("plugin:app|exit", { code: 0 }))
+        .catch(() => {});
     } else {
       lastBackPressRef.current = now;
       toast("Press back again to exit AuraStream", "info");

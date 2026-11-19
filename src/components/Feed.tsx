@@ -154,13 +154,23 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   /* Keep Android Screen Awake while actively playing video */
   useEffect(() => {
     const isPlaying = active && !paused && !waiting && !err;
+    let sentinel: any = null;
+    let disposed = false;
     try {
       (window as any).AuraNativeExport?.setKeepScreenOn?.(isPlaying);
       if (isPlaying && "wakeLock" in navigator) {
-        navigator.wakeLock.request("screen").catch(() => {});
+        (navigator as any).wakeLock.request("screen").then((s: any) => {
+          if (disposed) {
+            s.release().catch(() => {});
+          } else {
+            sentinel = s;
+          }
+        }).catch(() => {});
       }
     } catch { /* ignore */ }
     return () => {
+      disposed = true;
+      sentinel?.release().catch(() => {});
       try {
         (window as any).AuraNativeExport?.setKeepScreenOn?.(false);
       } catch { /* ignore */ }
