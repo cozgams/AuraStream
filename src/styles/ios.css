@@ -181,7 +181,7 @@ html.theme-light[data-accent="violet"] {
 .ios-page { container-type:inline-size; background:var(--p-bg); }
 .ios-page>.scroll-y { padding-inline:var(--ios-page-inset); }
 .ios-page>.shrink-0 { padding-inline:var(--ios-page-inset); }
-.ios-page-title { font-size:34px; line-height:1.2; font-weight:750; letter-spacing:-1px; }
+.ios-page-title { font-size:34px; line-height:1.2; font-weight:750; letter-spacing:-1px; color:var(--p-on); }
 .ios-page-heading { padding-top:calc(var(--sat,0px) + 24px); padding-bottom:16px; }
 .ios-account-card { border-radius:28px; background:var(--p-s1); padding:22px; box-shadow:0 3px 16px rgb(0 0 0 / .035); }
 .ios-setting-group { border-radius:24px; background:var(--p-s1); box-shadow:none; overflow:hidden; }

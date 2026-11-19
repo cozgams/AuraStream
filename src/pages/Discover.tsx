@@ -45,7 +45,7 @@ export function TopicsPage({ onBack, wide }: { onBack: () => void; wide: boolean
         </div>
       </div>
 
-      <div className="flex-1 scroll-y px-4 pt-3 pb-8">
+      <div className="flex-1 scroll-y px-4 pt-3 pb-[calc(var(--sab,48px)+24px)]">
         {loading ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
         ) : err && !items.length ? (
@@ -134,7 +134,7 @@ export function TopicPage({ slug, name, onBack, wide }: { slug: string; name: st
         {topic?.intro && <div className="px-4 pb-3 text-[12px] text-mut leading-relaxed clamp-3">{formatDramaDesc(topic.intro)}</div>}
       </div>
 
-      <div className="flex-1 scroll-y px-4 pt-3 pb-8">
+      <div className="flex-1 scroll-y px-4 pt-3 pb-[calc(var(--sab,48px)+24px)]">
         {related.length > 0 && (
           <div className="mb-4">
             <div className="text-[13px] font-semibold text-on/80 mb-2">{t("cat.related_topics")}</div>
@@ -202,7 +202,7 @@ export function TagsPage({ onBack, wide }: { onBack: () => void; wide: boolean }
         </div>
       </div>
 
-      <div className="flex-1 scroll-y px-4 pt-3 pb-8">
+      <div className="flex-1 scroll-y px-4 pt-3 pb-[calc(var(--sab,48px)+24px)]">
         {loading ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
         ) : err && !groups.length ? (
@@ -293,7 +293,7 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
         </div>
       </div>
 
-      <div className="flex-1 scroll-y px-4 pt-3 pb-8">
+      <div className="flex-1 scroll-y px-4 pt-3 pb-[calc(var(--sab,48px)+24px)]">
         {loading && !items.length ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
         ) : err && !items.length ? (

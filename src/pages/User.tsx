@@ -73,7 +73,7 @@ export function FollowingPage({ onBack, wide }: { onBack: () => void; wide: bool
         </div>
       </div>
 
-      <div className="flex-1 scroll-y px-4 pt-3 pb-8">
+      <div className="flex-1 scroll-y px-4 pt-3 pb-[calc(var(--sab,48px)+24px)]">
         {!user ? (
           <Empty icon={<IUser size={26} />} title="Sign in to view following" sub="Follow your favorite creators to stay updated on their latest releases"
             action="Sign In" onAction={() => setLoginOpen(true)} />
@@ -171,7 +171,7 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
         </div>
       </div>
 
-      <div className="flex-1 scroll-y px-4 pt-3 pb-8">
+      <div className="flex-1 scroll-y px-4 pt-3 pb-[calc(var(--sab,48px)+24px)]">
         {/* Profile Card */}
         <Surface className="rounded-(--r-lg) bg-s1 p-4 elev-1 flex items-center gap-3.5 a-rise">
           <Avatar size={56} src={profile?.avatar} name={creatorName || "U"} hue={220} ring />

@@ -121,20 +121,28 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
-      <div className="ios-page-heading shrink-0"><h1 className="ios-page-title">{t("nav.search")}</h1></div>
-      {/* Search Bar */}
-      <div className="shrink-0 px-4 pb-3 flex items-center gap-2.5">
-        <Form className="ios-search-form flex-1 flex items-center gap-2"
-          onSubmit={(e) => { e.preventDefault(); submit(q); }}>
-          <ISearch size={17} className="text-mut shrink-0" />
-          <Input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("search.placeholder")}
-            className="flex-1 min-w-0 bg-transparent text-[14px] text-on placeholder-dim outline-none" />
-          {q && <Button aria-label="Clear" type="button" onClick={() => { seqRef.current++; busy.current = false; setLoading(false); setQ(""); setSubmitted(""); setItems([]); setPosts([]); }} className="ios-icon-button ios-search-clear"><IClose size={16} /></Button>}
-        </Form>
-        <Button onClick={() => push({ kind: "ranks" })} aria-label={t("cat.rankings")}
-          className="ios-icon-button ios-search-shortcut">
-          <ITrophy size={19} />
-        </Button>
+      {/* Search Header App Bar */}
+      <div
+        className="shrink-0 bg-bg/95 backdrop-blur-md z-10 border-b border-edge/30 px-4"
+        style={{ paddingTop: "calc(var(--sat, 0px) + 12px)" }}
+      >
+        <div className="pb-2">
+          <h1 className="ios-page-title text-on">{t("nav.search")}</h1>
+        </div>
+        {/* Search Bar */}
+        <div className="pb-3 flex items-center gap-2.5">
+          <Form className="ios-search-form flex-1 flex items-center gap-2"
+            onSubmit={(e) => { e.preventDefault(); submit(q); }}>
+            <ISearch size={17} className="text-mut shrink-0" />
+            <Input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("search.placeholder")}
+              className="flex-1 min-w-0 bg-transparent text-[14px] text-on placeholder-dim outline-none" />
+            {q && <Button aria-label="Clear" type="button" onClick={() => { seqRef.current++; busy.current = false; setLoading(false); setQ(""); setSubmitted(""); setItems([]); setPosts([]); }} className="ios-icon-button ios-search-clear"><IClose size={16} /></Button>}
+          </Form>
+          <Button onClick={() => push({ kind: "ranks" })} aria-label={t("cat.rankings")}
+            className="ios-icon-button ios-search-shortcut">
+            <ITrophy size={19} />
+          </Button>
+        </div>
       </div>
 
       <div className="flex-1 scroll-y px-4 pb-52">

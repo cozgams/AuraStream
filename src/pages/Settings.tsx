@@ -121,15 +121,26 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
-      <div className="shrink-0 pt-3 pb-4" style={{ paddingTop: "calc(var(--sat, 0px) + 12px)" }}>
-        <Button onClick={onBack} aria-label={t("common.back")} className="ios-icon-button mb-3">
-          <IBack size={20} />
-        </Button>
-        <h1 className="ios-page-title text-on">{t("settings.title")}</h1>
-        <p className="text-[13px] text-mut mt-2">Customize your AuraStream experience</p>
+      {/* Top App Bar Header */}
+      <div
+        className="shrink-0 px-4 flex items-center justify-between border-b border-edge/30 bg-bg/90 backdrop-blur-md z-10"
+        style={{ paddingTop: "calc(var(--sat, 0px) + 8px)", paddingBottom: "10px" }}
+      >
+        <div className="flex items-center gap-3">
+          <Button onClick={onBack} aria-label={t("common.back")} className="ios-icon-button">
+            <IBack size={20} />
+          </Button>
+          <div>
+            <h1 className="text-[18px] font-bold text-on tracking-tight leading-tight">{t("settings.title")}</h1>
+            <p className="text-[11px] text-mut leading-none mt-0.5">Customize your experience</p>
+          </div>
+        </div>
       </div>
 
-      <div className="ios-page-body flex-1 scroll-y px-4 pt-1 pb-10">
+      <div
+        className="ios-page-body flex-1 scroll-y px-4 pt-3"
+        style={{ paddingBottom: "calc(var(--sab, 48px) + 40px)" }}
+      >
         <div className={wide ? "max-w-[720px] mx-auto" : ""}>
           {/* Appearance Section */}
           <Section title={t("settings.appearance")}>

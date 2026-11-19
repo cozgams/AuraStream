@@ -136,7 +136,7 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
         <span className="text-[14px] font-semibold text-on">Post Details</span>
       </div>
 
-      <div className="flex-1 scroll-y pb-8">
+      <div className="flex-1 scroll-y pb-[calc(var(--sab,48px)+24px)]">
         {err ? (
           <Empty icon={<IFireF size={26} />} title="Failed to load" sub={err} />
         ) : !post ? (

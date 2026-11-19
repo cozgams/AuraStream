@@ -90,13 +90,13 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
   }, [lineEpoch]);
 
   return (
-    <div className="ios-page absolute inset-0 bg-bg scroll-y">
-      <div className="ios-page-header bg-bg" style={{ paddingTop: "calc(var(--sat, 0px) + 12px)" }}>
+    <div className="ios-page absolute inset-0 bg-bg flex flex-col">
+      <div className="shrink-0 bg-bg/95 backdrop-blur-md z-10 border-b border-edge/30 px-4 pb-3" style={{ paddingTop: "calc(var(--sat, 0px) + 12px)" }}>
         <h1 className="ios-page-title text-on">{t("cat.title")}</h1>
         <p className="text-[13px] text-mut mt-1">{t("cat.subtitle")}</p>
       </div>
 
-      <div className={`ios-page-body pb-52 ${wide ? "max-w-[1200px] mx-auto" : ""}`}>
+      <div className={`ios-page-body flex-1 scroll-y pt-3 pb-52 ${wide ? "max-w-[1200px] mx-auto" : ""}`}>
         {/* Rankings: full-width featured card */}
         <div className="px-4 mb-2.5">
           <Button
