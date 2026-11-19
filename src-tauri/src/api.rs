@@ -269,7 +269,7 @@ pub async fn line_try_main() -> Result<Value, String> {
 
 /* ------------------------- Update Check ------------------------- */
 
-const REPO: &str = "AAA/AuraStream";
+const REPO: &str = "cozgams/AuraStream";
 
 fn ver_parts(v: &str) -> Vec<u64> {
     v.trim()

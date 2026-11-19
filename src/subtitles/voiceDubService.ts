@@ -17,6 +17,7 @@ const STORAGE_KEYS = {
 let cachedVoices: SpeechSynthesisVoice[] = [];
 let lastSpokenCueId: string | number | null = null;
 let isDucked = false;
+let preDuckVolume = 1.0;
 
 function loadVoices(): SpeechSynthesisVoice[] {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return [];
@@ -153,7 +154,10 @@ export function speakActiveCue(cue: SubtitleCue, videoEl?: HTMLVideoElement | nu
   // Audio Ducking: lower original video volume so English speech is clearly intelligible
   if (videoEl && isAudioDuckingEnabled()) {
     try {
-      videoEl.volume = 0.22;
+      if (!isDucked) {
+        preDuckVolume = typeof videoEl.volume === "number" ? videoEl.volume : 1.0;
+      }
+      videoEl.volume = Math.min(preDuckVolume, 0.22);
       isDucked = true;
     } catch {
       // ignore
@@ -163,7 +167,7 @@ export function speakActiveCue(cue: SubtitleCue, videoEl?: HTMLVideoElement | nu
   const restoreVolume = () => {
     if (videoEl && isDucked) {
       try {
-        videoEl.volume = 1.0;
+        videoEl.volume = preDuckVolume;
         isDucked = false;
       } catch {
         // ignore
@@ -195,7 +199,7 @@ export function cancelVoiceDub(videoEl?: HTMLVideoElement | null): void {
   }
   if (videoEl && isDucked) {
     try {
-      videoEl.volume = 1.0;
+      videoEl.volume = preDuckVolume;
       isDucked = false;
     } catch {
       // ignore

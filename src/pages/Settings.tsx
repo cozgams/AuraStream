@@ -557,7 +557,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
             </span>
             <div>
               <div className="text-[16px] font-bold text-on leading-tight">AuraStream</div>
-              <div className="text-[12px] text-mut mt-0.5">AuraStream Client v{APP_VERSION}</div>
+              <div className="text-[12px] text-mut mt-0.5">AuraStream Client v{APP_VERSION} · Created by AAA</div>
             </div>
           </div>
 
@@ -572,8 +572,8 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
           <div className="mt-4 divide-y divide-s3">
             <Button
               onClick={() => {
-                api.openUrl("https://github.com/zxsos/HGhubX").catch(() => {
-                  copyText("https://github.com/zxsos/HGhubX")
+                api.openUrl("https://github.com/cozgams/AuraStream").catch(() => {
+                  copyText("https://github.com/cozgams/AuraStream")
                     .then(() => toast("Repository URL copied", "ok"))
                     .catch(() => {});
                 });
@@ -581,7 +581,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
               className="w-full flex items-center gap-2 py-2.5 text-left pressable"
             >
               <ILink size={15} className="text-mut" />
-              <span className="text-[13px] text-on/85">github.com/zxsos/HGhubX</span>
+              <span className="text-[13px] text-on/85">github.com/cozgams/AuraStream</span>
               <span className="ml-auto text-[12px] text-primary">Copy</span>
             </Button>
             <div className="flex items-center gap-2 py-2.5">

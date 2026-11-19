@@ -267,6 +267,7 @@ export default function SubtitleOverlay({
     boxDecorationBreak: "clone",
     WebkitBoxDecorationBreak: "clone",
     lineHeight: "1.25",
+    whiteSpace: "pre-wrap",
   };
 
   return (
