@@ -10,10 +10,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const raw = (process.argv[2] || "").trim();
+let raw = (process.argv[2] || "").trim();
 if (!raw) {
   console.error("Usage: node scripts/set-version.mjs <major.minor.patch[+build]>");
   process.exit(1);
+}
+
+// Normalize "0.1" -> "0.1.0"
+if (/^\d+\.\d+$/.test(raw)) {
+  raw = `${raw}.0`;
 }
 
 const m = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(raw);

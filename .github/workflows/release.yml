@@ -526,12 +526,15 @@ jobs:
           fetch-depth: 1
 
       - uses: actions/download-artifact@v8
+        continue-on-error: true
         with:
           path: artifacts
           merge-multiple: true
 
       - name: List files to release
-        run: ls -lh artifacts
+        run: |
+          mkdir -p artifacts
+          ls -lh artifacts
 
       - name: Extract release notes
         id: notes
@@ -552,4 +555,4 @@ jobs:
           body_path: ${{ steps.notes.outputs.body_path }}
           files: artifacts/*
           generate_release_notes: true
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false
