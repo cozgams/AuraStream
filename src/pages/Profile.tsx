@@ -7,6 +7,7 @@ import { useStore } from "../store";
 import { Avatar, Empty, Modal } from "../components/ui";
 import { MediaCard } from "../components/cards";
 import ExportSheet from "../components/ExportSheet";
+import { registerOverlayBack } from "../back";
 import {
   IBack,
   IBoltF,
@@ -102,6 +103,37 @@ export default function Profile({ wide }: { wide: boolean }) {
   const [collapsedDramas, setCollapsedDramas] = useState<Set<number>>(() => new Set());
   const [selectedSeriesGroup, setSelectedSeriesGroup] = useState<DramaGroup | null>(null);
   const [downloadFilter, setDownloadFilter] = useState<"all" | "series">("all");
+  const [downloadSort, setDownloadSort] = useState<"recent" | "size" | "title">("recent");
+  const [detailCache, setDetailCache] = useState<Record<number, Detail>>({});
+
+  useEffect(() => {
+    const needed = history
+      .slice(0, 15)
+      .filter((h) => !h.cover || !h.title || h.title.startsWith("Drama #"))
+      .map((h) => h.id)
+      .filter((id) => !detailCache[id]);
+
+    if (!needed.length) return;
+
+    let alive = true;
+    Promise.allSettled(needed.slice(0, 10).map((id) => api.video(id)))
+      .then((rs) => {
+        if (!alive) return;
+        const newMap: Record<number, Detail> = {};
+        for (const r of rs) {
+          if (r.status === "fulfilled" && r.value) {
+            newMap[r.value.id] = r.value;
+          }
+        }
+        if (Object.keys(newMap).length) {
+          setDetailCache((prev) => ({ ...prev, ...newMap }));
+        }
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [history]);
 
   const [batchSheet, setBatchSheet] = useState<{
     isOpen: boolean;
@@ -184,6 +216,38 @@ export default function Profile({ wide }: { wide: boolean }) {
     }
   }, [view]);
 
+  // Handle hardware back on Android: return to overview seamlessly
+  useEffect(() => {
+    if (view === "overview") return;
+    return registerOverlayBack(() => {
+      if (selectMode) {
+        setSelectMode(false);
+        setSelectedKeys(new Set());
+        return true;
+      }
+      if (view === "seriesDetail") {
+        setView("downloads");
+        return true;
+      }
+      setView("overview");
+      return true;
+    });
+  }, [view, selectMode]);
+
+  useEffect(() => {
+    document.body.classList.toggle("has-selection-mode", selectMode);
+    return () => {
+      document.body.classList.remove("has-selection-mode");
+    };
+  }, [selectMode]);
+
+  useEffect(() => {
+    document.body.classList.toggle("has-series-detail", view === "seriesDetail");
+    return () => {
+      document.body.classList.remove("has-series-detail");
+    };
+  }, [view]);
+
   useEffect(() => {
     if (downloads.length === 0 && selectMode) {
       setSelectMode(false);
@@ -227,6 +291,38 @@ export default function Profile({ wide }: { wide: boolean }) {
   const totalDownloadsBytes = useMemo(() => {
     return downloads.reduce((acc, it) => acc + (it.sizeBytes || 0), 0);
   }, [downloads]);
+
+  const sortedDramaGroups = useMemo(() => {
+    let list = [...dramaGroups];
+    if (downloadFilter === "series") {
+      list = list.filter((g) => g.episodes.length > 1);
+    }
+    if (downloadSort === "size") {
+      list.sort((a, b) => b.totalBytes - a.totalBytes);
+    } else if (downloadSort === "title") {
+      list.sort((a, b) => a.title.localeCompare(b.title));
+    } else {
+      list.sort((a, b) => {
+        const atA = Math.max(...a.episodes.map((e) => e.downloadedAt || 0));
+        const atB = Math.max(...b.episodes.map((e) => e.downloadedAt || 0));
+        return atB - atA;
+      });
+    }
+    return list;
+  }, [dramaGroups, downloadFilter, downloadSort]);
+
+  const playSelected = () => {
+    const selectedEpisodes = downloads.filter((d) => selectedKeys.has(`${d.videoId}_${d.episode}`));
+    if (!selectedEpisodes.length) return;
+    const first = selectedEpisodes[0];
+    push({
+      kind: "feed",
+      videoIds: Array.from(new Set(selectedEpisodes.map((e) => e.videoId))),
+      index: 0,
+      title: formatDramaTitle(first.title),
+      startEp: first.episode,
+    });
+  };
 
   const openSingleExport = (videoId: number, episode: number, title: string) => {
     setExportSheetState({
@@ -355,13 +451,31 @@ export default function Profile({ wide }: { wide: boolean }) {
         ) : view === "downloads" ? (
           <>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setView("overview")}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] hover:bg-slate-200/60 active:scale-95 transition-all"
-              >
-                <IBack size={20} strokeWidth={2.4} />
-              </button>
+              {selectMode ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectMode(false);
+                    setSelectedKeys(new Set());
+                  }}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] hover:bg-slate-200/60 active:scale-95 transition-all"
+                  aria-label="Exit selection mode"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setView("overview")}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] hover:bg-slate-200/60 active:scale-95 transition-all"
+                  aria-label="Back to overview"
+                >
+                  <IBack size={20} strokeWidth={2.4} />
+                </button>
+              )}
               <h1 className="text-[20px] font-black tracking-tight text-[#0f172a]">
                 {selectMode ? `${selectedKeys.size} Selected` : "Downloads"}
               </h1>
@@ -372,23 +486,32 @@ export default function Profile({ wide }: { wide: boolean }) {
                 <>
                   <button
                     type="button"
-                    onClick={() => {
-                      if (selectedKeys.size === downloads.length) setSelectedKeys(new Set());
-                      else setSelectedKeys(new Set(downloads.map((d) => `${d.videoId}_${d.episode}`)));
-                    }}
-                    className="text-[12px] font-bold text-[#1a73e8] px-2.5 py-1 rounded-lg hover:bg-blue-50 pressable"
+                    onClick={playSelected}
+                    disabled={selectedKeys.size === 0}
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#1a73e8] hover:bg-blue-50 disabled:opacity-30 pressable active:scale-95 transition-all"
+                    title="Play selected"
                   >
-                    {selectedKeys.size === downloads.length ? "Deselect" : "Select All"}
+                    <IPlayF size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={deleteSelected}
+                    disabled={selectedKeys.size === 0}
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-red-500 hover:bg-red-50 disabled:opacity-30 pressable active:scale-95 transition-all"
+                    title="Delete selected"
+                  >
+                    <ITrash size={15} />
                   </button>
                   <button
                     type="button"
                     onClick={() => {
-                      setSelectMode(false);
-                      setSelectedKeys(new Set());
+                      if (selectedKeys.size === downloads.length) setSelectedKeys(new Set());
+                      else setSelectedKeys(new Set(downloads.map((d) => `${d.videoId}_${d.episode}`)));
                     }}
-                    className="text-[12px] font-bold text-slate-500 px-2 py-1 rounded-lg hover:bg-slate-100 pressable"
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] hover:bg-slate-200/60 pressable font-bold"
+                    title={selectedKeys.size === downloads.length ? "Deselect All" : "Select All"}
                   >
-                    Done
+                    ⋮
                   </button>
                 </>
               ) : (
@@ -397,6 +520,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                     type="button"
                     onClick={() => setTab("search")}
                     className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] hover:bg-slate-200/60 pressable"
+                    aria-label="Search downloads"
                   >
                     <ISearch size={18} />
                   </button>
@@ -404,6 +528,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                     type="button"
                     onClick={() => setSelectMode(true)}
                     className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] hover:bg-slate-200/60 pressable font-bold"
+                    aria-label="Select mode"
                   >
                     ⋮
                   </button>
@@ -577,6 +702,12 @@ export default function Profile({ wide }: { wide: boolean }) {
                         ? 35
                         : 0;
 
+                    const detail = detailCache[h.id];
+                    const coverUrl = detail?.cover || h.cover;
+                    const dramaTitle = formatDramaTitle(detail?.title || h.title || `Drama #${h.id}`);
+                    const epCount = detail?.episode_count || h.episode_count || 1;
+                    const isFinished = detail?.is_finished ?? h.is_finished;
+
                     return (
                       <div
                         key={`${h.id}_${h.ep}_${idx}`}
@@ -587,7 +718,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                             kind: "feed",
                             videoIds: history.map((x) => x.id),
                             index: idx,
-                            title: formatDramaTitle(h.title || "History"),
+                            title: dramaTitle,
                             startEp: h.ep,
                             startTime: h.t,
                           })
@@ -595,9 +726,9 @@ export default function Profile({ wide }: { wide: boolean }) {
                         className="w-28 shrink-0 flex flex-col cursor-pointer pressable active:scale-[0.98] transition-transform"
                       >
                         <div className="w-full h-[72px] rounded-xl overflow-hidden relative shadow-xs border border-slate-200/60 bg-slate-100">
-                          {h.cover ? (
+                          {coverUrl ? (
                             <img
-                              src={getCoverUrl(h.cover, 240)}
+                              src={getCoverUrl(coverUrl, 240)}
                               alt=""
                               className="w-full h-full object-cover"
                               loading="lazy"
@@ -625,10 +756,10 @@ export default function Profile({ wide }: { wide: boolean }) {
                         </div>
 
                         <div className="text-[11.5px] font-bold text-[#0f172a] truncate mt-1">
-                          {formatDramaTitle(h.title || `Drama #${h.id}`)}
+                          {dramaTitle}
                         </div>
                         <div className="text-[10px] text-[#64748b] truncate">
-                          {h.is_finished ? "Ended" : `${h.episode_count || 1} eps`} · Ep. {h.ep}
+                          {isFinished ? "Ended" : `${epCount} eps`} · Ep. {h.ep}
                         </div>
                       </div>
                     );
@@ -866,41 +997,88 @@ export default function Profile({ wide }: { wide: boolean }) {
                 </button>
               </div>
 
-              <div className="flex items-center gap-1 text-[11.5px] font-semibold text-[#64748b] bg-white/70 border border-slate-200 px-2.5 py-1 rounded-full">
-                <span>Recently Added</span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (downloadSort === "recent") setDownloadSort("size");
+                  else if (downloadSort === "size") setDownloadSort("title");
+                  else setDownloadSort("recent");
+                }}
+                className="flex items-center gap-1 text-[11.5px] font-semibold text-[#475569] bg-white/80 hover:bg-white border border-slate-200 px-2.5 py-1 rounded-full pressable transition-all shadow-2xs"
+              >
+                <span>
+                  {downloadSort === "recent"
+                    ? "Recently Added"
+                    : downloadSort === "size"
+                    ? "Largest Size"
+                    : "Title A-Z"}
+                </span>
                 <IChevronDown size={12} />
-              </div>
+              </button>
             </div>
 
             {/* Grouped Downloaded Shows */}
-            {dramaGroups.length > 0 ? (
+            {sortedDramaGroups.length > 0 ? (
               <div className="flex flex-col gap-3">
-                {dramaGroups.map((group) => {
+                {sortedDramaGroups.map((group) => {
                   const isExpanded = !collapsedDramas.has(group.videoId);
                   const totalMB = (group.totalBytes / (1024 * 1024)).toFixed(0);
+
+                  const allGroupKeys = group.episodes.map((e) => `${e.videoId}_${e.episode}`);
+                  const allSelected = allGroupKeys.every((k) => selectedKeys.has(k));
+                  const someSelected = allGroupKeys.some((k) => selectedKeys.has(k));
 
                   return (
                     <div
                       key={group.videoId}
-                      className="bg-white/90 backdrop-blur-md rounded-2xl border border-white/70 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-3.5 flex flex-col gap-3"
+                      className="bg-white/90 backdrop-blur-md rounded-2xl border border-white/70 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-3 flex flex-col gap-2.5"
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2.5">
+                        {selectMode ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedKeys((prev) => {
+                                const next = new Set(prev);
+                                if (allSelected) {
+                                  for (const k of allGroupKeys) next.delete(k);
+                                } else {
+                                  for (const k of allGroupKeys) next.add(k);
+                                }
+                                return next;
+                              });
+                            }}
+                            className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 pressable mr-0.5"
+                          >
+                            {allSelected ? (
+                              <div className="w-5 h-5 rounded-full bg-[#1a73e8] text-white flex items-center justify-center shadow-xs">
+                                <ICheck size={11} strokeWidth={3.5} />
+                              </div>
+                            ) : someSelected ? (
+                              <div className="w-5 h-5 rounded-full bg-[#1a73e8] text-white flex items-center justify-center shadow-xs">
+                                <span className="text-[12px] font-black leading-none">-</span>
+                              </div>
+                            ) : (
+                              <div className="w-5 h-5 rounded-full border-2 border-slate-300 bg-white" />
+                            )}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => toggleDramaCollapse(group.videoId)}
+                            className="text-slate-400 hover:text-slate-600 pressable p-1 shrink-0"
+                          >
+                            {isExpanded ? <IChevronUp size={16} /> : <IChevronDown size={16} />}
+                          </button>
+                        )}
+
                         <button
                           type="button"
-                          onClick={() => toggleDramaCollapse(group.videoId)}
-                          className="text-slate-400 hover:text-slate-600 pressable p-1"
-                        >
-                          {isExpanded ? <IChevronUp size={16} /> : <IChevronDown size={16} />}
-                        </button>
-
-                        <div
-                          role="button"
-                          tabIndex={0}
                           onClick={() => {
                             setSelectedSeriesGroup(group);
                             setView("seriesDetail");
                           }}
-                          className="w-16 h-20 rounded-xl overflow-hidden shrink-0 shadow-xs border border-black/5 bg-slate-100 cursor-pointer pressable"
+                          className="w-14 aspect-[3/4] rounded-xl overflow-hidden shrink-0 shadow-xs border border-black/5 bg-slate-100 cursor-pointer pressable relative p-0 border-0 text-left block"
                         >
                           <img
                             src={getCoverUrl(group.cover, 200)}
@@ -908,21 +1086,23 @@ export default function Profile({ wide }: { wide: boolean }) {
                             className="w-full h-full object-cover"
                             loading="lazy"
                           />
-                        </div>
+                          <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded-md bg-black/60 backdrop-blur-xs text-[9px] font-bold text-white shadow-xs">
+                            {group.episodes.length} eps
+                          </div>
+                        </button>
 
-                        <div
-                          role="button"
-                          tabIndex={0}
+                        <button
+                          type="button"
                           onClick={() => {
                             setSelectedSeriesGroup(group);
                             setView("seriesDetail");
                           }}
-                          className="flex-1 min-w-0 cursor-pointer"
+                          className="flex-1 min-w-0 cursor-pointer pr-1 text-left bg-transparent border-0 p-0 block"
                         >
-                          <div className="text-[15.5px] font-bold text-[#0f172a] truncate">
+                          <div className="text-[15px] font-bold text-[#0f172a] leading-snug line-clamp-2">
                             {formatDramaTitle(group.title)}
                           </div>
-                          <div className="text-[12px] text-[#64748b] mt-0.5 tabular-nums">
+                          <div className="text-[11.5px] text-[#64748b] mt-0.5 tabular-nums">
                             {group.episodes.length} episodes · {totalMB} MB
                           </div>
                           <div className="flex items-center gap-1.5 mt-1">
@@ -931,7 +1111,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                               <span>All Downloaded</span>
                             </span>
                           </div>
-                        </div>
+                        </button>
 
                         <div className="flex items-center gap-1 shrink-0">
                           <button
@@ -947,17 +1127,17 @@ export default function Profile({ wide }: { wide: boolean }) {
                                 });
                               }
                             }}
-                            className="w-9 h-9 rounded-full bg-[#e0edff] text-[#1a73e8] hover:bg-[#d0e4ff] flex items-center justify-center pressable active:scale-95 shadow-xs transition-all"
+                            className="w-8 h-8 rounded-full bg-[#e0edff] text-[#1a73e8] hover:bg-[#d0e4ff] flex items-center justify-center pressable active:scale-95 shadow-xs transition-all"
                             title="Play Show"
                           >
-                            <IPlayF size={12} />
+                            <IPlayF size={11} />
                           </button>
                           <button
                             type="button"
                             onClick={() => {
                               openSingleExport(group.videoId, group.episodes[0]?.episode || 1, group.title);
                             }}
-                            className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-slate-600 pressable"
+                            className="w-6 h-6 flex items-center justify-center text-slate-400 hover:text-slate-600 pressable font-bold"
                           >
                             ⋮
                           </button>
@@ -989,7 +1169,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                                     });
                                   }
                                 }}
-                                className="w-26 shrink-0 flex flex-col gap-1 cursor-pointer pressable active:scale-95 transition-all"
+                                className="w-28 shrink-0 flex flex-col gap-1 cursor-pointer pressable active:scale-95 transition-all"
                               >
                                 <div className="w-full aspect-[16/10] rounded-lg overflow-hidden relative border border-black/5 bg-slate-200">
                                   <img
@@ -1067,7 +1247,7 @@ export default function Profile({ wide }: { wide: boolean }) {
           <div className="flex flex-col gap-4 a-rise">
             {/* Top Showcase Card */}
             <div className="bg-white/90 backdrop-blur-md rounded-2xl border border-white/70 shadow-sm p-4 flex gap-4">
-              <div className="w-20 h-26 rounded-2xl overflow-hidden shrink-0 shadow-sm border border-black/5 bg-slate-100">
+              <div className="w-20 aspect-[3/4] rounded-2xl overflow-hidden shrink-0 shadow-sm border border-black/5 bg-slate-100">
                 <img
                   src={getCoverUrl(selectedSeriesGroup.cover, 240)}
                   alt=""
@@ -1127,10 +1307,16 @@ export default function Profile({ wide }: { wide: boolean }) {
             </div>
 
             {/* Storage Info Banner */}
-            <div className="p-3 rounded-2xl bg-white/80 border border-slate-200/80 flex items-center justify-between text-[12px] text-[#64748b]">
-              <div className="flex items-center gap-2 font-medium">
-                <IDownload size={14} className="text-[#1a73e8]" />
-                <span>Downloaded · {(selectedSeriesGroup.totalBytes / (1024 * 1024)).toFixed(0)} MB</span>
+            <div className="p-3 rounded-2xl bg-white/90 border border-slate-200/80 flex items-center justify-between text-[12px] text-[#64748b] shadow-xs">
+              <div className="flex items-center gap-2.5 font-medium">
+                <div className="w-5 h-5 rounded-md bg-[#1a73e8]/15 text-[#1a73e8] flex items-center justify-center shrink-0">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" />
+                  </svg>
+                </div>
+                <span className="text-[#334155] font-semibold">
+                  Downloaded on: {selectedSeriesGroup.episodes[0]?.downloadedAt ? new Date(selectedSeriesGroup.episodes[0].downloadedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Nov 19, 2026"} · {(selectedSeriesGroup.totalBytes / (1024 * 1024 * 1024) >= 1 ? `${(selectedSeriesGroup.totalBytes / (1024 * 1024 * 1024)).toFixed(1)} GB` : `${(selectedSeriesGroup.totalBytes / (1024 * 1024)).toFixed(0)} MB`)}
+                </span>
               </div>
               <IChevR size={13} className="text-slate-400" />
             </div>
@@ -1166,7 +1352,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                     }
                     className="p-3 rounded-2xl bg-white/90 backdrop-blur-md border border-white/70 shadow-xs flex items-center gap-3 cursor-pointer pressable active:scale-[0.99] transition-all"
                   >
-                    <div className="w-18 aspect-[16/10] rounded-xl overflow-hidden relative border border-black/5 bg-slate-200 shrink-0">
+                    <div className="w-20 aspect-[16/10] rounded-xl overflow-hidden relative border border-black/5 bg-slate-200 shrink-0">
                       <img
                         src={getCoverUrl(selectedSeriesGroup.cover, 160)}
                         alt=""
@@ -1178,9 +1364,12 @@ export default function Profile({ wide }: { wide: boolean }) {
                       <div className="text-[14px] font-bold text-[#0f172a] truncate">
                         Episode {item.episode}
                       </div>
-                      <div className="text-[11.5px] text-[#64748b] mt-0.5 tabular-nums flex items-center gap-1">
-                        <span className="text-[#16a34a] font-bold">✔ {epMB} MB</span>
-                        <span>· Downloaded</span>
+                      <div className="text-[11.5px] text-[#64748b] mt-0.5 tabular-nums flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
+                        <span className="w-3.5 h-3.5 rounded-full bg-[#10b981] text-white flex items-center justify-center shrink-0">
+                          <ICheck size={8} strokeWidth={3.5} />
+                        </span>
+                        <span className="font-semibold text-slate-700 shrink-0">{epMB} MB</span>
+                        <span className="truncate">· Downloaded</span>
                       </div>
                     </div>
 
@@ -1281,32 +1470,38 @@ export default function Profile({ wide }: { wide: boolean }) {
           ========================================================================= */}
       {selectMode && (
         <div
-          className="absolute inset-x-4 z-40 bg-white/95 backdrop-blur-xl border border-white/80 rounded-2xl p-3 flex items-center justify-between shadow-2xl a-rise"
-          style={{ bottom: "calc(var(--sab, 48px) + 20px)" }}
+          className="fixed inset-x-5 z-[70] bg-white border border-slate-200/90 rounded-full px-5 py-2.5 flex items-center justify-around shadow-[0_12px_36px_rgba(15,23,42,0.18)] a-rise"
+          style={{ bottom: "calc(var(--sab, 0px) + 20px)" }}
         >
-          <div className="text-[13px] font-bold text-[#0f172a] pl-2">
-            {selectedKeys.size} selected
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={openExportSelected}
-              disabled={selectedKeys.size === 0}
-              className="px-3.5 py-1.5 rounded-xl bg-[#1a73e8] disabled:opacity-40 text-white text-[12px] font-bold flex items-center gap-1.5 pressable shadow-xs active:scale-95"
-            >
-              <IExport size={13} strokeWidth={2.4} />
-              <span>Export</span>
-            </button>
-            <button
-              type="button"
-              onClick={deleteSelected}
-              disabled={selectedKeys.size === 0}
-              className="px-3.5 py-1.5 rounded-xl bg-red-500 disabled:opacity-40 text-white text-[12px] font-bold flex items-center gap-1.5 pressable shadow-xs active:scale-95"
-            >
-              <ITrash size={13} strokeWidth={2.4} />
-              <span>Delete</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={playSelected}
+            disabled={selectedKeys.size === 0}
+            className="flex items-center gap-2 text-[13px] font-bold text-[#0f172a] disabled:opacity-40 pressable active:scale-95"
+          >
+            <IPlayF size={13} className="text-[#1a73e8]" />
+            <span>Play</span>
+          </button>
+          <div className="w-[1px] h-4 bg-slate-200" />
+          <button
+            type="button"
+            onClick={deleteSelected}
+            disabled={selectedKeys.size === 0}
+            className="flex items-center gap-2 text-[13px] font-bold text-[#0f172a] hover:text-red-600 disabled:opacity-40 pressable active:scale-95"
+          >
+            <ITrash size={14} className="text-slate-600" />
+            <span>Delete</span>
+          </button>
+          <div className="w-[1px] h-4 bg-slate-200" />
+          <button
+            type="button"
+            onClick={openExportSelected}
+            disabled={selectedKeys.size === 0}
+            className="flex items-center gap-1.5 text-[13px] font-bold text-[#0f172a] disabled:opacity-40 pressable active:scale-95"
+          >
+            <span>More</span>
+            <IChevronDown size={13} className="text-slate-600" />
+          </button>
         </div>
       )}
 

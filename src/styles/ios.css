@@ -214,7 +214,11 @@ html.theme-light[data-accent="violet"] {
 .ios-sheet-grip { width:38px; height:5px; border-radius:999px; background:var(--p-on); opacity:.18; margin:10px auto 4px; flex-shrink:0; }
 
 body.has-overlay .ios-mobile-nav,
-body.has-overlay .hg-tabbar {
+body.has-overlay .hg-tabbar,
+body.has-selection-mode .ios-mobile-nav,
+body.has-selection-mode .hg-tabbar,
+body.has-series-detail .ios-mobile-nav,
+body.has-series-detail .hg-tabbar {
   opacity:0 !important;
   visibility:hidden !important;
   pointer-events:none !important;
