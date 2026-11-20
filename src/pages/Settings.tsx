@@ -12,7 +12,13 @@ import { copyText } from "../clipboard";
 import { IBack, IBoltF, IBroom, ICaptionsF, IChevR, IClock, IDownload, IHeart, IInfo, ILink, ILockF, IMoon, IRefresh, ISun, IVolMute } from "../icons";
 import { getSubtitleStyleConfig, setSubtitleStyleConfig } from "../subtitles/aiSubtitleService";
 import type { SubtitleStyleConfig } from "../subtitles/types";
-import { getDownloadQualityPreference, setDownloadQualityPreference, type DownloadQuality } from "../offline/downloadService";
+import {
+  getDownloadQualityPreference,
+  setDownloadQualityPreference,
+  isDownloadNotificationEnabled,
+  setDownloadNotificationEnabled,
+  type DownloadQuality,
+} from "../offline/downloadService";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -59,6 +65,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
   const [copyingReport, setCopyingReport] = useState(false);
   const [subStyle, setSubStyle] = useState<SubtitleStyleConfig>(() => getSubtitleStyleConfig());
   const [downloadQuality, setDownloadQuality] = useState<DownloadQuality>(() => getDownloadQualityPreference());
+  const [downloadNotifs, setDownloadNotifs] = useState(() => isDownloadNotificationEnabled());
 
   useEffect(() => {
     const onStyleChange = (e: Event) => {
@@ -328,6 +335,22 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                   </Button>
                 ))}
               </SegmentedControl>
+            </div>
+            <div className="flex items-center gap-3 px-3.5 py-3 border-t border-edge/20">
+              <span className="ios-setting-icon"><IDownload size={16} /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[14px] text-on">Background Download Alerts</div>
+                <div className="text-[12px] text-mut">Show progress notifications in system bar when app is minimized</div>
+              </div>
+              <Toggle
+                on={downloadNotifs}
+                onChange={(enabled) => {
+                  setDownloadNotifs(enabled);
+                  setDownloadNotificationEnabled(enabled);
+                  toast(enabled ? "Download notifications enabled" : "Download notifications disabled", "info");
+                }}
+                label="Background Download Alerts"
+              />
             </div>
           </Section>
 

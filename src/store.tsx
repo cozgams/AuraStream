@@ -5,6 +5,15 @@ import type { User } from "./types";
 import { readStorage, writeStorage, STORAGE_KEYS } from "./storage";
 import { getTranslation, type Language, type TranslationKey } from "./i18n";
 import type { SubtitleMode, SubtitleSize } from "./subtitles/types";
+import {
+  auth,
+  saveUserDataToCloud,
+  loadUserDataFromCloud,
+  subscribeAuthState,
+  logOutFirebase,
+  hasActiveFirebaseSession,
+  type CloudUserData,
+} from "./firebase";
 
 export type Platform = "android" | "ios" | "windows" | "macos" | "linux";
 export type Theme = "dark" | "light";
@@ -269,6 +278,7 @@ type Store = {
   ) => void;
   clearHistory: () => void;
   toggleFollowLocal: (uid: number) => boolean;
+  mergeCloudUserData: (cloudData: CloudUserData) => void;
   theater: boolean; setTheater: (v: boolean | ((p: boolean) => boolean)) => void;
   fs: boolean; setFs: (v: boolean | ((p: boolean) => boolean)) => void;
   /** Immersive clean screen mode: hides player controls and overlays */
@@ -388,6 +398,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     writeStorage(LS, JSON.stringify(p));
   }, [p]);
 
+  // Cloud sync to Firestore for authenticated Firebase users
+  const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+    syncTimeoutRef.current = setTimeout(() => {
+      try {
+        const uid = auth?.currentUser?.uid;
+        if (uid && (user?.user_type === "firebase" || user?.desc?.includes("@"))) {
+          void saveUserDataToCloud(uid, {
+            favorites: p.favs,
+            watchLater: p.watchLater,
+            history: p.history.map((h) => ({
+              id: h.id,
+              ep: h.ep,
+              t: h.t,
+              dur: h.dur,
+              updatedAt: h.at,
+              title: h.title,
+              cover: h.cover,
+            })),
+          });
+        }
+      } catch {
+        // ignore background sync error
+      }
+    }, 2000);
+    return () => {
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+    };
+  }, [p.favs, p.watchLater, p.history, user]);
+
   useEffect(() => {
     let request = 0;
     let active = true;
@@ -464,9 +505,85 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     try { await api.logout(); } catch { /* ignore */ }
+    try { await logOutFirebase(); } catch { /* ignore */ }
     setUser(null);
     toast("Logged out successfully", "info");
   }, [toast]);
+
+  const mergeCloudUserData = useCallback((cloudData: CloudUserData) => {
+    setP((prev) => {
+      const mergedFavs = Array.from(new Set([...(cloudData.favorites || []), ...prev.favs]));
+      const mergedWatchLater = Array.from(new Set([...(cloudData.watchLater || []), ...(prev.watchLater || [])]));
+
+      const historyMap = new Map<number, WatchProgress>();
+      for (const h of prev.history) {
+        historyMap.set(h.id, h);
+      }
+      if (Array.isArray(cloudData.history)) {
+        for (const ch of cloudData.history) {
+          if (ch && typeof ch.id === "number") {
+            const existing = historyMap.get(ch.id);
+            if (!existing || (ch.updatedAt || 0) > existing.at) {
+              historyMap.set(ch.id, {
+                id: ch.id,
+                ep: ch.ep || 1,
+                t: ch.t || 0,
+                dur: ch.dur || 0,
+                at: ch.updatedAt || Date.now(),
+                title: ch.title,
+                cover: ch.cover,
+              });
+            }
+          }
+        }
+      }
+      const mergedHistory = Array.from(historyMap.values()).sort((a, b) => b.at - a.at);
+
+      return {
+        ...prev,
+        favs: mergedFavs,
+        likes: mergedFavs,
+        watchLater: mergedWatchLater,
+        history: mergedHistory,
+      };
+    });
+  }, []);
+
+  // Rehydrate Firebase user session and sync cloud data on launch if previously authenticated
+  useEffect(() => {
+    if (!hasActiveFirebaseSession()) return;
+    if (typeof window !== "undefined" && window.location.pathname.startsWith("/tests/")) {
+      return;
+    }
+    const unsub = subscribeAuthState(async (fbUser) => {
+      if (fbUser && fbUser.email) {
+        let hash = 0;
+        for (let i = 0; i < fbUser.uid.length; i++) {
+          hash = ((hash << 5) - hash) + fbUser.uid.charCodeAt(i);
+          hash |= 0;
+        }
+        setUser({
+          id: Math.abs(hash) || 10001,
+          username: fbUser.email.split("@")[0] || "User",
+          nickname: fbUser.displayName || fbUser.email.split("@")[0] || "User",
+          avatar: fbUser.photoURL || "",
+          avatar_color: "#1a73e8",
+          sign: "Firebase Cloud Sync Active",
+          desc: fbUser.email,
+          user_type: "firebase",
+        });
+        try {
+          const cloud = await loadUserDataFromCloud(fbUser.uid);
+          if (cloud) {
+            mergeCloudUserData(cloud);
+          }
+        } catch {
+          // non-fatal
+        }
+      }
+    });
+    return () => unsub?.();
+  }, [mergeCloudUserData]);
   /** Line switch listener: increments epoch key to refresh content across views */
   useEffect(() => {
     const bump = () => setLineEpoch((n) => n + 1);
@@ -606,7 +723,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     isLiked: (id) => p.likes.includes(id),
     isFav: (id) => p.favs.includes(id),
     isWatchLater: (id) => (p.watchLater || []).includes(id),
-    toggleLikeLocal, toggleFavLocal, clearFavs, toggleWatchLaterLocal, clearWatchLater, toggleFollowLocal, addHistory, clearHistory,
+    toggleLikeLocal, toggleFavLocal, clearFavs, toggleWatchLaterLocal, clearWatchLater, toggleFollowLocal, addHistory, clearHistory, mergeCloudUserData,
     muted: p.muted, setMuted, volume: p.volume, setVolume, theater, setTheater, fs, setFs, clean, setClean,
     muteOnStartup: p.muteOnStartup, setMuteOnStartup,
     swipeEp: p.swipeEp, setSwipeEp,
@@ -618,7 +735,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     language, setLanguage, t,
     subtitleMode, setSubtitleMode, subtitleSize, setSubtitleSize,
   }), [theme, themePreference, setTheme, accent, setAccent, tab, setTab, stack, push, pop, user, loginOpen, logout,
-    p, toggleLikeLocal, toggleFavLocal, clearFavs, toggleWatchLaterLocal, clearWatchLater, toggleFollowLocal, addHistory, clearHistory,
+    p, toggleLikeLocal, toggleFavLocal, clearFavs, toggleWatchLaterLocal, clearWatchLater, toggleFollowLocal, addHistory, clearHistory, mergeCloudUserData,
     setMuted, setMuteOnStartup, setSwipeEp, setPreferHevc, setVolume, addSearch, removeSearch, clearSearchHist, strictSecurity, strictSecurityReady, securityPending, cliRelaxed, setStrictSecurity,
     toasts, toast, lineEpoch, theater, setTheater, fs, setFs, clean, setClean,
     language, setLanguage, t, subtitleMode, setSubtitleMode, subtitleSize, setSubtitleSize]);

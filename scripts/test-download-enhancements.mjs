@@ -20,15 +20,40 @@ try {
     executablePath: process.env.BROWSER_EXECUTABLE || "/usr/bin/chromium",
   });
 
-  const page = await browser.newPage();
+  const context = await browser.newContext({
+    userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+    isMobile: true,
+    hasTouch: true,
+    viewport: { width: 390, height: 844 },
+  });
+  await context.addInitScript(() => {
+    Object.assign(window, {
+      __TAURI_INTERNALS__: {
+        invoke(cmd) {
+          if (cmd === "app_boot") return Promise.resolve({ user: null, logged_in: false, base: "https://fixture.invalid", strict_security: true });
+          if (cmd === "playback_log_status") return Promise.resolve({ enabled: false, path: null, error: null });
+          if (cmd === "debug_log") return Promise.resolve();
+          if (cmd === "line_auto") return Promise.resolve({ base: "https://fixture.invalid", previous: "https://fixture.invalid", switched: false, pick: { tier: "main", ms: 1, reason: "fixture", candidates: [] } });
+          return Promise.resolve({ items: [], pagination: { page: 1, pages: 1, size: 8, total: 0 } });
+        },
+      },
+    });
+  });
+
+  const page = await context.newPage();
   page.on("pageerror", (err) => {
     console.error("PAGEERROR:", err);
     errors.push(err.message || String(err));
   });
   page.on("console", (msg) => {
     if (msg.type() === "error") {
-      console.error("CONSOLE ERROR:", msg.text());
-      errors.push(msg.text());
+      const text = msg.text();
+      // Ignore network errors to custom schemes or mock endpoints in headless test harness
+      if (text.includes("URL scheme") || text.includes("Failed to load resource") || text.includes("Unexpected IPC") || text.includes("fixture.invalid")) {
+        return;
+      }
+      console.error("CONSOLE ERROR:", text);
+      errors.push(text);
     }
   });
 

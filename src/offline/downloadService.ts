@@ -116,6 +116,21 @@ function notifyProgress() {
   }
 }
 
+export function isDownloadNotificationEnabled(): boolean {
+  try {
+    const val = localStorage.getItem("aurastream_download_notif_enabled");
+    return val === "true"; // default off per user preference
+  } catch {
+    return false;
+  }
+}
+
+export function setDownloadNotificationEnabled(enabled: boolean): void {
+  try {
+    localStorage.setItem("aurastream_download_notif_enabled", enabled ? "true" : "false");
+  } catch {}
+}
+
 function notifyNativeDownloadProgress(
   videoId: number,
   episode: number,
@@ -124,6 +139,7 @@ function notifyNativeDownloadProgress(
   speedFormatted: string,
   fileSizeFormatted: string = ""
 ) {
+  if (!isDownloadNotificationEnabled()) return;
   if (typeof window !== "undefined" && typeof (window as any).AuraNativeExport?.updateDownloadNotification === "function") {
     const notifId = ((Math.abs(videoId) % 10000) * 100 + (episode % 100)) & 0x7fffffff;
     (window as any).AuraNativeExport.updateDownloadNotification(notifId, title, `Episode ${episode}`, pct, speedFormatted, fileSizeFormatted);
@@ -131,12 +147,13 @@ function notifyNativeDownloadProgress(
 }
 
 function notifyNativeDownloadComplete(videoId: number, episode: number, title: string, fileSizeFormatted: string = "") {
+  if (typeof window !== "undefined" && typeof (window as any).AuraNativeExport?.setDownloadActive === "function") {
+    (window as any).AuraNativeExport.setDownloadActive(false);
+  }
+  if (!isDownloadNotificationEnabled()) return;
   if (typeof window !== "undefined" && typeof (window as any).AuraNativeExport?.showDownloadCompleteNotification === "function") {
     const notifId = ((Math.abs(videoId) % 10000) * 100 + (episode % 100)) & 0x7fffffff;
     (window as any).AuraNativeExport.showDownloadCompleteNotification(notifId, title, `Episode ${episode}`, fileSizeFormatted);
-  }
-  if (typeof window !== "undefined" && typeof (window as any).AuraNativeExport?.setDownloadActive === "function") {
-    (window as any).AuraNativeExport.setDownloadActive(false);
   }
 }
 

@@ -19,8 +19,12 @@ try {
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.route("**/*", route => {
-    if (new URL(route.request().url()).origin === new URL(origin).origin) return route.continue();
-    report.external.push(route.request().url());
+    const reqUrl = route.request().url();
+    if (new URL(reqUrl).origin === new URL(origin).origin) return route.continue();
+    if (reqUrl.includes("apis.google.com") || reqUrl.includes("firebase")) {
+      return route.abort();
+    }
+    report.external.push(reqUrl);
     return route.abort();
   });
   await page.addInitScript(() => {
@@ -60,7 +64,10 @@ try {
   });
   const load = async () => {
     await page.goto(`${origin}tests/diagnostic-copy.html`);
-    await page.waitForFunction(() => !document.querySelector('[aria-label="Playback Diagnostics Log"]').disabled);
+    await page.waitForFunction(() => {
+      const el = document.querySelector('[aria-label="Playback Diagnostics Log"]');
+      return el && !el.disabled;
+    });
   };
   const networkButton = () => page.getByRole("button").filter({ has: page.getByText("Network Diagnostics", { exact: true }) });
 

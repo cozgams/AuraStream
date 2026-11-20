@@ -136,7 +136,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
             <ISearch size={17} className="text-mut shrink-0" />
             <Input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("search.placeholder")}
               className="flex-1 min-w-0 bg-transparent text-[14px] text-on placeholder-dim outline-none" />
-            {q && <Button aria-label="Clear" type="button" onClick={() => { seqRef.current++; busy.current = false; setLoading(false); setQ(""); setSubmitted(""); setItems([]); setPosts([]); }} className="ios-icon-button ios-search-clear"><IClose size={16} /></Button>}
+            {q && <Button aria-label="Clear" type="button" onClick={() => { seqRef.current++; busy.current = false; setLoading(false); setErr(null); setPage(0); setPages(1); setQ(""); setSubmitted(""); setItems([]); setPosts([]); }} className="ios-icon-button ios-search-clear"><IClose size={16} /></Button>}
           </Form>
           <Button onClick={() => push({ kind: "ranks" })} aria-label={t("cat.rankings")}
             className="ios-icon-button ios-search-shortcut">
@@ -201,7 +201,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
                     >
                       <button
                         type="button"
-                        onClick={() => { setQ(h); submit(h); }}
+                        onClick={() => { setTab("video"); setQ(h); submit(h); }}
                         className="bg-transparent border-none p-0 text-inherit cursor-pointer select-none"
                       >
                         {h}
@@ -247,7 +247,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
             </div>
             <div className="flex flex-wrap gap-2 mt-2">
               {DISCOVERY_THEMES.map((theme) => (
-                <Button key={theme} onClick={() => { setQ(theme); submit(theme); }}
+                <Button key={theme} onClick={() => { setTab("video"); setQ(theme); submit(theme); }}
                   className="px-3 h-7 rounded-(--r-ctl) bg-primary/10 hover:bg-primary/20 text-primary text-[12.5px] font-semibold pressable transition-colors">
                   {theme}
                 </Button>
@@ -261,11 +261,13 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
                 <Button aria-pressed={tab === k} key={k} onClick={() => changeTab(k)}>{label}</Button>
               ))}
             </SegmentedControl>
-            <div className="text-[12px] text-mut mb-2.5">"{submitted}" found <span className="text-primary font-bold">{tab === "video" ? items.length : posts.length}</span> results</div>
+            {!loading && !err && (tab === "video" ? items.length : posts.length) > 0 && (
+              <div className="text-[12px] text-mut mb-2.5">"{submitted}" found <span className="text-primary font-bold">{tab === "video" ? items.length : posts.length}</span> results</div>
+            )}
             {(tab === "video" ? items.length : posts.length) ? (
               <>
                 {tab === "video" ? (
-                  <Masonry videos={items} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: items.map((x) => x.id), index: items.findIndex((x) => x.id === v.id), title: `Search · ${submitted}` })} />
+                  <Masonry videos={items} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: items.map((x) => x.id), index: Math.max(0, items.findIndex((x) => x.id === v.id)), title: `Search · ${submitted}` })} />
                 ) : (
                   <div className={`ios-media-grid ${wide ? "is-wide" : ""}`}>
                     {posts.map((post) => (
@@ -283,8 +285,13 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
             ) : loading ? (
               <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
             ) : (
-              <Empty icon={<ISearch size={26} />} title={err || "No results found"} sub="Try other keywords such as 'Urban' or 'Revenge'"
-                action="View Rankings" onAction={() => push({ kind: "ranks" })} />
+              <Empty
+                icon={<ISearch size={26} />}
+                title={err || "No results found"}
+                sub={err ? "Check your network connection and try again." : "Try other keywords such as 'Urban' or 'Revenge'"}
+                action={err ? "Retry" : "View Rankings"}
+                onAction={err ? () => run(submitted, 1) : () => push({ kind: "ranks" })}
+              />
             )}
           </>
         )}
@@ -348,7 +355,7 @@ export function RankPage({ onBack, wide }: { onBack: () => void; wide: boolean }
         ) : items.length ? (
           items.map((it) => (
             <RankRow key={`${it.video_id}-${it.rank}`} item={it} metricMax={max}
-              onOpen={() => push({ kind: "feed", videoIds: items.map((x) => x.video_id), index: items.findIndex((x) => x.video_id === it.video_id), title: "AuraStream Rankings" })} />
+              onOpen={() => push({ kind: "feed", videoIds: items.map((x) => x.video_id), index: Math.max(0, items.findIndex((x) => x.video_id === it.video_id)), title: "AuraStream Rankings" })} />
           ))
         ) : (
           <Empty icon={<ITrophy size={26} />} title="Rankings are currently empty" sub="Check back shortly or explore the home feed." />

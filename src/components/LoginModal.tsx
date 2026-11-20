@@ -49,7 +49,7 @@ function localizeFirebaseError(err: unknown): string {
 }
 
 export default function LoginModal() {
-  const { loginOpen, setLoginOpen, setUser, toast } = useStore();
+  const { loginOpen, setLoginOpen, setUser, toast, mergeCloudUserData, favs, watchLater, history } = useStore();
   const [provider, setProvider] = useState<"firebase" | "custom">("firebase");
   const [mode, setMode] = useState<"login" | "register" | "reset">("login");
   const [email, setEmail] = useState("");
@@ -125,9 +125,25 @@ export default function LoginModal() {
           setPassword("");
           setLoginOpen(false);
 
-          // Restore or sync Cloud Firestore data
+          // Restore and merge Cloud Firestore data
           try {
-            await loadUserDataFromCloud(fbUser.uid);
+            const cloud = await loadUserDataFromCloud(fbUser.uid);
+            if (cloud) {
+              mergeCloudUserData(cloud);
+            }
+            await saveUserDataToCloud(fbUser.uid, {
+              favorites: favs,
+              watchLater: watchLater,
+              history: history.map((h) => ({
+                id: h.id,
+                ep: h.ep,
+                t: h.t,
+                dur: h.dur,
+                updatedAt: h.at,
+                title: h.title,
+                cover: h.cover,
+              })),
+            });
           } catch {
             // cloud sync non-fatal
           }

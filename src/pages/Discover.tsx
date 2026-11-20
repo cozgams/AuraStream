@@ -23,15 +23,25 @@ export function TopicsPage({ onBack, wide }: { onBack: () => void; wide: boolean
   const [err, setErr] = useState("");
 
   const load = useCallback(() => {
+    let alive = true;
     setLoading(true);
     setErr("");
     api.topics()
-      .then((r) => setItems(r?.items || []))
-      .catch((e) => { const msg = localizeError(e); setErr(msg); toast(msg, "info"); })
-      .finally(() => setLoading(false));
+      .then((r) => { if (alive) setItems(r?.items || []); })
+      .catch((e) => {
+        if (!alive) return;
+        const msg = localizeError(e);
+        setErr(msg);
+        toast(msg, "info");
+      })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
   }, [toast]);
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => {
+    const cancel = load();
+    return () => { if (cancel) cancel(); };
+  }, [load]);
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
@@ -74,7 +84,7 @@ export function TopicsPage({ onBack, wide }: { onBack: () => void; wide: boolean
         )}
         {wide && <div className="h-2" />}
       </div>
-      {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: list.findIndex((x) => x.id === v.id), title: "Search · Topics" })} />}
+      {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: "Search · Topics" })} />}
     </div>
   );
 }
@@ -158,7 +168,7 @@ export function TopicPage({ slug, name, onBack, wide }: { slug: string; name: st
         ) : err && !videos.length ? (
           <Empty icon={<TopicIcon size={26} />} title="Failed to load" sub={err} action="Retry" onAction={loadMore} />
         ) : videos.length ? (
-          <Masonry videos={videos} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: videos.map((x) => x.id), index: videos.findIndex((x) => x.id === v.id), title: topic?.title || name })} />
+          <Masonry videos={videos} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: videos.map((x) => x.id), index: Math.max(0, videos.findIndex((x) => x.id === v.id)), title: topic?.title || name })} />
         ) : (
           <Empty icon={<TopicIcon size={26} />} title="No content available" />
         )}
@@ -167,7 +177,7 @@ export function TopicPage({ slug, name, onBack, wide }: { slug: string; name: st
         {!loading && videos.length > 0 && page >= pages && <div className="text-center text-[12px] text-dim py-3">— You've reached the end —</div>}
         {wide && <div className="h-2" />}
       </div>
-      {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: list.findIndex((x) => x.id === v.id), title: topic?.title || name })} />}
+      {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: topic?.title || name })} />}
     </div>
   );
 }
@@ -181,15 +191,25 @@ export function TagsPage({ onBack, wide }: { onBack: () => void; wide: boolean }
   const [err, setErr] = useState("");
 
   const load = useCallback(() => {
+    let alive = true;
     setLoading(true);
     setErr("");
     api.tags()
-      .then((r) => setGroups(r?.categories || []))
-      .catch((e) => { const msg = localizeError(e); setErr(msg); toast(msg, "info"); })
-      .finally(() => setLoading(false));
+      .then((r) => { if (alive) setGroups(r?.categories || []); })
+      .catch((e) => {
+        if (!alive) return;
+        const msg = localizeError(e);
+        setErr(msg);
+        toast(msg, "info");
+      })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
   }, [toast]);
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => {
+    const cancel = load();
+    return () => { if (cancel) cancel(); };
+  }, [load]);
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
@@ -230,7 +250,7 @@ export function TagsPage({ onBack, wide }: { onBack: () => void; wide: boolean }
         )}
         {wide && <div className="h-2" />}
       </div>
-      {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: list.findIndex((x) => x.id === v.id), title: "Search · Tags" })} />}
+      {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: "Search · Tags" })} />}
     </div>
   );
 }
@@ -259,7 +279,7 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
         return [...prev, ...(res?.items || []).filter((x) => !seen.has(x.id))];
       });
       setPage(next);
-      setPages(res?.pagination?.pages || next);
+      setPages(res?.pagination?.pages || (res?.items?.length ? next + 1 : next));
       setErr("");
     } catch (e) {
       const msg = localizeError(e);
@@ -297,18 +317,18 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
         {loading && !items.length ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
         ) : err && !items.length ? (
-          <Empty icon={<TopicIcon size={26} />} title="Failed to load" sub={err} action="Retry" onAction={loadMore} />
+          <Empty icon={<TagIcon size={26} />} title="Failed to load" sub={err} action="Retry" onAction={loadMore} />
         ) : items.length ? (
-          <Masonry videos={items} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: items.map((x) => x.id), index: items.findIndex((x) => x.id === v.id), title: name })} />
+          <Masonry videos={items} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: items.map((x) => x.id), index: Math.max(0, items.findIndex((x) => x.id === v.id)), title: name })} />
         ) : (
-          <Empty icon={<TopicIcon size={26} />} title="No dramas found in this tag" />
+          <Empty icon={<TagIcon size={26} />} title="No dramas found in this tag" />
         )}
         <div ref={sentinel} className="h-8" />
         {loading && items.length > 0 && <div className="flex justify-center py-3"><Loader className="w-6 h-6 spinner" /></div>}
         {!loading && items.length > 0 && page >= pages && <div className="text-center text-[12px] text-dim py-3">— You've reached the end —</div>}
         {wide && <div className="h-2" />}
       </div>
-      {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: list.findIndex((x) => x.id === v.id), title: name })} />}
+      {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: name })} />}
     </div>
   );
 }

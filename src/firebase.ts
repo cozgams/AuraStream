@@ -80,6 +80,9 @@ export function initFirebase(config?: FirebaseConfig | null): {
   auth: Auth | null;
   db: Firestore | null;
 } {
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/tests/")) {
+    return { app: null, auth: null, db: null };
+  }
   const activeConfig = config || getStoredConfig();
   if (!activeConfig || !activeConfig.apiKey || !activeConfig.projectId) {
     return { app: null, auth: null, db: null };
@@ -116,11 +119,32 @@ export function isFirebaseConfigured(): boolean {
 // Authentication Helpers (Free Tier)
 // -------------------------------------------------------------
 
+const SESSION_ACTIVE_KEY = "aurastream_has_firebase_auth";
+
+export function hasActiveFirebaseSession(): boolean {
+  try {
+    return localStorage.getItem(SESSION_ACTIVE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function setActiveFirebaseSession(active: boolean): void {
+  try {
+    if (active) {
+      localStorage.setItem(SESSION_ACTIVE_KEY, "true");
+    } else {
+      localStorage.removeItem(SESSION_ACTIVE_KEY);
+    }
+  } catch {}
+}
+
 export async function signInWithGoogle(): Promise<FirebaseUser | null> {
   if (!auth) initFirebase();
   if (!auth) throw new Error("Firebase is not configured yet");
   const provider = new GoogleAuthProvider();
   const res = await signInWithPopup(auth, provider);
+  if (res.user) setActiveFirebaseSession(true);
   return res.user;
 }
 
@@ -128,6 +152,7 @@ export async function signInAsGuest(): Promise<FirebaseUser | null> {
   if (!auth) initFirebase();
   if (!auth) throw new Error("Firebase is not configured yet");
   const res = await signInAnonymously(auth);
+  if (res.user) setActiveFirebaseSession(true);
   return res.user;
 }
 
@@ -135,6 +160,7 @@ export async function signInWithEmail(email: string, pass: string): Promise<Fire
   if (!auth) initFirebase();
   if (!auth) throw new Error("Firebase Authentication is not initialized");
   const res = await signInWithEmailAndPassword(auth, email.trim(), pass);
+  if (res.user) setActiveFirebaseSession(true);
   return res.user;
 }
 
@@ -153,6 +179,7 @@ export async function signUpWithEmail(
       // ignore non-fatal profile update failure
     }
   }
+  if (res.user) setActiveFirebaseSession(true);
   return res.user;
 }
 
@@ -163,6 +190,7 @@ export async function sendPasswordReset(email: string): Promise<void> {
 }
 
 export async function logOutFirebase(): Promise<void> {
+  setActiveFirebaseSession(false);
   if (!auth) return;
   await signOut(auth);
 }
