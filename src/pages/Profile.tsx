@@ -344,6 +344,22 @@ export default function Profile({ wide }: { wide: boolean }) {
     return downloads.reduce((acc, it) => acc + (it.sizeBytes || 0), 0);
   }, [downloads]);
 
+  const activeDownloadsProgressPercent = useMemo(() => {
+    if (activeSummary.overallProgressPercent > 0) return activeSummary.overallProgressPercent;
+    if (activeDownloads.length === 0) return 0;
+    const avg = Math.round(
+      activeDownloads.reduce((sum, d) => sum + (d.progress || 0), 0) / activeDownloads.length
+    );
+    return Math.max(0, Math.min(100, avg));
+  }, [activeSummary.overallProgressPercent, activeDownloads]);
+
+  const activeDownloadsSpeedFormatted = useMemo(() => {
+    if (activeSummary.aggregateSpeedFormatted && activeSummary.aggregateSpeedFormatted !== "-- KB/s") {
+      return activeSummary.aggregateSpeedFormatted;
+    }
+    return activeDownloads.some((d) => d.status === "downloading") ? "Connecting..." : "Paused";
+  }, [activeSummary.aggregateSpeedFormatted, activeDownloads]);
+
   const sortedDramaGroups = useMemo(() => {
     let list = [...dramaGroups];
     if (downloadFilter === "series") {
@@ -946,42 +962,93 @@ export default function Profile({ wide }: { wide: boolean }) {
               </div>
             </div>
 
-            {/* Downloads Card with Storage Bar */}
+            {/* Downloads Card with Storage Bar / Active Download Indicator */}
             <div
               role="button"
               tabIndex={0}
               onClick={() => setView("downloads")}
-              className="bg-white/85 backdrop-blur-md rounded-2xl border border-white/70 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-3.5 flex flex-col gap-2.5 cursor-pointer pressable hover:bg-white active:scale-[0.99] transition-all"
+              className={`bg-white/85 backdrop-blur-md rounded-2xl border ${
+                activeDownloads.length > 0
+                  ? "border-blue-200/80 shadow-[0_4px_20px_-2px_rgba(37,99,235,0.12)]"
+                  : "border-white/70 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)]"
+              } p-3.5 flex flex-col gap-2.5 cursor-pointer pressable hover:bg-white active:scale-[0.99] transition-all`}
             >
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-2xl bg-[#dcfce7] text-[#16a34a] flex items-center justify-center shrink-0 shadow-xs">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div
+                    className={`w-11 h-11 rounded-2xl ${
+                      activeDownloads.length > 0
+                        ? "bg-blue-50 text-[#1a73e8] border border-blue-200/60"
+                        : "bg-[#dcfce7] text-[#16a34a]"
+                    } flex items-center justify-center shrink-0 shadow-xs`}
+                  >
                     <IDownload size={20} strokeWidth={2.4} />
                   </div>
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <div className="text-[14.5px] font-bold text-[#0f172a]">Downloads</div>
-                    <div className="text-[11px] text-[#64748b]">
-                      {downloads.length} {downloads.length === 1 ? "episode" : "episodes"} offline · {formatBytes(totalDownloadsBytes)}
-                    </div>
+                    {activeDownloads.length > 0 ? (
+                      <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-blue-50 text-[#1a73e8] border border-blue-200/80 max-w-full">
+                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse shrink-0" />
+                          <span className="truncate">
+                            Downloading ({activeDownloads.length}) · {activeDownloadsSpeedFormatted}
+                          </span>
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-[#64748b] truncate">
+                        {downloads.length} {downloads.length === 1 ? "episode" : "episodes"} offline · {formatBytes(totalDownloadsBytes)}
+                      </div>
+                    )}
                   </div>
                 </div>
-                <IChevR size={14} className="text-slate-400" strokeWidth={2.5} />
+                <IChevR size={14} className="text-slate-400 shrink-0 ml-2" strokeWidth={2.5} />
               </div>
 
-              {/* Storage Bar Indicator */}
-              <div className="flex items-center gap-2 pt-0.5">
-                <div className="flex-1 h-1.5 rounded-full bg-[#e2e8f0] overflow-hidden">
-                  <div
-                    className="h-full bg-[#2563eb] rounded-full transition-all duration-300"
-                    style={{
-                      width: `${Math.min(100, Math.max(5, storageStats?.percentUsed != null ? Math.round(storageStats.percentUsed) : downloads.length > 0 ? 67 : 0))}%`,
-                    }}
-                  />
+              {/* Progress / Storage Bar Indicator */}
+              {activeDownloads.length > 0 ? (
+                <div className="flex items-center gap-2 pt-0.5">
+                  <div className="flex-1 h-1.5 rounded-full bg-blue-100 overflow-hidden">
+                    <div
+                      className="h-full bg-[#1a73e8] rounded-full transition-all duration-300"
+                      style={{
+                        width: `${Math.min(100, Math.max(3, activeDownloadsProgressPercent))}%`,
+                      }}
+                    />
+                  </div>
+                  <span className="text-[10.5px] font-extrabold text-[#1a73e8] tabular-nums">
+                    {activeDownloadsProgressPercent}%
+                  </span>
                 </div>
-                <span className="text-[10.5px] font-extrabold text-[#2563eb] tabular-nums">
-                  {storageStats?.percentUsed != null ? `${Math.round(storageStats.percentUsed)}%` : downloads.length > 0 ? "67%" : "0%"}
-                </span>
-              </div>
+              ) : (
+                <div className="flex items-center gap-2 pt-0.5">
+                  <div className="flex-1 h-1.5 rounded-full bg-[#e2e8f0] overflow-hidden">
+                    <div
+                      className="h-full bg-[#2563eb] rounded-full transition-all duration-300"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          Math.max(
+                            5,
+                            storageStats?.percentUsed != null
+                              ? Math.round(storageStats.percentUsed)
+                              : downloads.length > 0
+                              ? 67
+                              : 0
+                          )
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                  <span className="text-[10.5px] font-extrabold text-[#2563eb] tabular-nums">
+                    {storageStats?.percentUsed != null
+                      ? `${Math.round(storageStats.percentUsed)}%`
+                      : downloads.length > 0
+                      ? "67%"
+                      : "0%"}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Settings Card */}

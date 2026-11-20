@@ -200,7 +200,10 @@ html.theme-light[data-accent="violet"] {
 .ios-overlay-sheet .ios-dialog {
   width:100%;
   max-width:640px;
-  max-height:min(58dvh, 520px);
+  max-height:min(85dvh, 680px);
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;
   border-bottom-left-radius:0 !important;
   border-bottom-right-radius:0 !important;
   border-top-left-radius:28px !important;

@@ -357,6 +357,31 @@ export function isCellularConnection(): boolean {
 }
 
 /**
+ * Detects whether the device is on a slow or cellular connection
+ */
+export function isSlowOrCellularConnection(): boolean {
+  if (isCellularConnection()) return true;
+  if (typeof navigator !== "undefined" && "connection" in navigator) {
+    const conn = (navigator as unknown as {
+      connection?: {
+        type?: string;
+        effectiveType?: string;
+        saveData?: boolean;
+        downlink?: number;
+        rtt?: number;
+      };
+    }).connection;
+    if (conn) {
+      if (conn.type === "cellular" || conn.saveData) return true;
+      if (conn.effectiveType === "slow-2g" || conn.effectiveType === "2g" || conn.effectiveType === "3g") return true;
+      if (typeof conn.downlink === "number" && conn.downlink > 0 && conn.downlink < 1.5) return true;
+      if (typeof conn.rtt === "number" && conn.rtt > 500) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Detects whether device battery is critically low (< 20%) and not charging
  */
 export async function isLowBattery(): Promise<boolean> {
@@ -783,16 +808,26 @@ async function fetchSegmentData(
   }
 
   let lastError: any = null;
+  const hasDirectFallback = urlsToTry.length > 1;
+  const isSlowOrCellular = isSlowOrCellularConnection();
 
   for (const url of urlsToTry) {
     if (signal?.aborted) throw new Error("aborted");
+    const isUrlProxied = url.includes("/seg?u=");
+
     for (let attempt = 0; attempt <= 2; attempt++) {
       if (signal?.aborted) throw new Error("aborted");
+
+      // If the segment URL is a proxied URL, reduce initial attempt timeout on slow/cellular
+      // connections to 10s before trying the direct target URL, ensuring downloads never stall for 60s at 1%.
+      const timeoutMs = isUrlProxied && hasDirectFallback && isSlowOrCellular && attempt === 0
+        ? 10000
+        : 60000;
 
       const timeoutCtrl = new AbortController();
       const timer = setTimeout(() => {
         timeoutCtrl.abort("timeout");
-      }, 60000);
+      }, timeoutMs);
 
       let onAbort: (() => void) | null = null;
       if (signal) {
@@ -856,6 +891,12 @@ async function fetchSegmentData(
           throw new Error("aborted");
         }
         lastError = err;
+
+        // If proxied URL timed out or failed on slow/cellular connection, switch to direct target URL immediately
+        if (isUrlProxied && hasDirectFallback && (isSlowOrCellular || err === "timeout" || err?.message === "timeout")) {
+          break;
+        }
+
         await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
       }
     }

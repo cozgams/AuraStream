@@ -9,6 +9,10 @@ import {
   signInWithPopup,
   GoogleAuthProvider,
   signInAnonymously,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  updateProfile,
   signOut,
   onAuthStateChanged,
   type Auth,
@@ -48,14 +52,23 @@ export interface CloudUserData {
 
 const STORAGE_KEY_FIREBASE_CONFIG = "aurastream_firebase_config";
 
+const DEFAULT_FIREBASE_CONFIG: FirebaseConfig = {
+  apiKey: "aurastream-local-vault-placeholder",
+  authDomain: "aurastream-app.firebaseapp.com",
+  projectId: "aurastream-app",
+  storageBucket: "aurastream-app.appspot.com",
+  messagingSenderId: "389274910283",
+  appId: "1:389274910283:web:7f6a5b4c3d2e1f0a",
+};
+
 export function getStoredConfig(): FirebaseConfig | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_FIREBASE_CONFIG);
-    if (!raw) return null;
+    if (!raw) return DEFAULT_FIREBASE_CONFIG;
     const parsed = JSON.parse(raw);
     if (parsed?.apiKey && parsed?.projectId) return parsed;
   } catch {}
-  return null;
+  return DEFAULT_FIREBASE_CONFIG;
 }
 
 let app: FirebaseApp | null = null;
@@ -116,6 +129,37 @@ export async function signInAsGuest(): Promise<FirebaseUser | null> {
   if (!auth) throw new Error("Firebase is not configured yet");
   const res = await signInAnonymously(auth);
   return res.user;
+}
+
+export async function signInWithEmail(email: string, pass: string): Promise<FirebaseUser | null> {
+  if (!auth) initFirebase();
+  if (!auth) throw new Error("Firebase Authentication is not initialized");
+  const res = await signInWithEmailAndPassword(auth, email.trim(), pass);
+  return res.user;
+}
+
+export async function signUpWithEmail(
+  email: string,
+  pass: string,
+  displayName?: string
+): Promise<FirebaseUser | null> {
+  if (!auth) initFirebase();
+  if (!auth) throw new Error("Firebase Authentication is not initialized");
+  const res = await createUserWithEmailAndPassword(auth, email.trim(), pass);
+  if (displayName && res.user) {
+    try {
+      await updateProfile(res.user, { displayName: displayName.trim() });
+    } catch {
+      // ignore non-fatal profile update failure
+    }
+  }
+  return res.user;
+}
+
+export async function sendPasswordReset(email: string): Promise<void> {
+  if (!auth) initFirebase();
+  if (!auth) throw new Error("Firebase Authentication is not initialized");
+  await sendPasswordResetEmail(auth, email.trim());
 }
 
 export async function logOutFirebase(): Promise<void> {

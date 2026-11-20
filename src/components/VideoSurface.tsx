@@ -17,6 +17,7 @@ export type VideoHandle = {
   rate: (r: number) => void;
   mute: (m: boolean) => void;
   volume: (v: number) => void;
+  reload?: () => void;
 };
 
 type Props = {
@@ -37,6 +38,7 @@ type Props = {
   onPlaying?: () => void;
   onPause?: () => void;
   onWaiting?: () => void;
+  onStallTimeout?: () => void;
   onEnded?: () => void;
   onError?: (msg: string) => void;
   onClick?: () => void;
@@ -48,7 +50,7 @@ const safeVolume = (vol: number) => Math.max(0, Math.min(1, Number.isFinite(vol)
 /** Core video playback surface (HLS.js + HTMLVideoElement) */
 const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
   { src, poster, autoPlay = true, active = true, diagnosticContext = {}, muted = false, loop = false, fit = "contain", volume = 1, rate = 1,
-    onTime, onDuration, onSize, onPlaying, onPause, onWaiting, onEnded, onError, onClick, className = "" },
+    onTime, onDuration, onSize, onPlaying, onPause, onWaiting, onStallTimeout, onEnded, onError, onClick, className = "" },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -58,6 +60,10 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
   const nearEndFiredRef = useRef(false);
   const reportedSizeRef = useRef({ w: 0, h: 0 });
   const [ready, setReady] = useState(false);
+  const isBufferingRef = useRef(false);
+  const stallStageRef = useRef(0);
+  const lastAdvanceTimeRef = useRef(Date.now());
+  const lastPosRef = useRef(0);
   const { trace, requestSeek } = usePlayerDiagnostics(videoRef, hlsRef, { ...diagnosticContext, active, resource: mediaResource(src) });
   const activity = usePlaybackActivity(videoRef, hlsRef, { active, autoPlay, src, trace });
   const proxyRecovery = useProxyPlaybackRecovery(videoRef, src, activity, trace);
@@ -99,6 +105,23 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
     rate: (r: number) => { const v = videoRef.current; if (v) v.playbackRate = r; },
     mute: (m: boolean) => { const v = videoRef.current; if (v) v.muted = m; },
     volume: (vol: number) => { const v = videoRef.current; if (v) v.volume = safeVolume(vol); },
+    reload: () => {
+      const v = videoRef.current;
+      const hls = hlsRef.current;
+      if (hls && v) {
+        try {
+          hls.startLoad(v.currentTime || -1);
+          hls.recoverMediaError();
+        } catch { /* ignore */ }
+      } else if (v) {
+        try {
+          const cur = v.currentTime;
+          v.load();
+          v.currentTime = cur;
+          v.play().catch(() => {});
+        } catch { /* ignore */ }
+      }
+    },
   }), []);
 
   useEffect(() => {
@@ -108,6 +131,10 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
     reportedSizeRef.current = { w: 0, h: 0 };
     nearEndFiredRef.current = false;
     recoverCountRef.current = 0;
+    isBufferingRef.current = true;
+    stallStageRef.current = 0;
+    lastAdvanceTimeRef.current = Date.now();
+    lastPosRef.current = 0;
     const resume = proxyRecovery.resume();
     const onVideoResize = () => reportSize(video);
     video.addEventListener("resize", onVideoResize);
@@ -227,6 +254,89 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
   useEffect(() => { if (videoRef.current) videoRef.current.volume = safeVolume(volume); }, [volume]);
   useEffect(() => { if (videoRef.current) videoRef.current.playbackRate = rate; }, [rate]);
 
+  /* Playback stall watchdog */
+  useEffect(() => {
+    if (!active) return;
+
+    const interval = window.setInterval(() => {
+      const video = videoRef.current;
+      if (!video) return;
+
+      const isPlaybackActive = active && autoPlay && !video.paused;
+      if (!isPlaybackActive) {
+        lastAdvanceTimeRef.current = Date.now();
+        stallStageRef.current = 0;
+        return;
+      }
+
+      const curTime = video.currentTime;
+      const now = Date.now();
+
+      // Reset stall tracker when video time is advancing
+      if (Math.abs(curTime - lastPosRef.current) > 0.05) {
+        lastPosRef.current = curTime;
+        lastAdvanceTimeRef.current = now;
+        isBufferingRef.current = false;
+        stallStageRef.current = 0;
+        return;
+      }
+
+      // Check if video is buffering or in readyState < 3
+      const isBuffering = isBufferingRef.current || video.readyState < 3;
+      if (!isBuffering) return;
+
+      const stalledDuration = now - lastAdvanceTimeRef.current;
+
+      // > 4s stall watchdog: call hls.startLoad(video.currentTime || -1)
+      if (stalledDuration >= 4000 && stallStageRef.current < 1) {
+        stallStageRef.current = 1;
+        trace("playback.stall_watchdog.reload", {
+          currentTime: curTime,
+          stalledDuration,
+          readyState: video.readyState,
+        });
+        const hls = hlsRef.current;
+        if (hls) {
+          try {
+            hls.startLoad(curTime || -1);
+          } catch { /* ignore */ }
+        }
+        onStallTimeout?.();
+      }
+
+      // > 8s stall watchdog: attempt recovery (hls.recoverMediaError() or reload)
+      if (stalledDuration >= 8000 && stallStageRef.current < 2) {
+        stallStageRef.current = 2;
+        trace("playback.stall_watchdog.recover", {
+          currentTime: curTime,
+          stalledDuration,
+          readyState: video.readyState,
+        });
+        const hls = hlsRef.current;
+        if (hls) {
+          try {
+            hls.recoverMediaError();
+          } catch {
+            try {
+              hls.startLoad(curTime || -1);
+            } catch { /* ignore */ }
+          }
+        } else {
+          try {
+            video.load();
+            video.currentTime = curTime;
+            video.play().catch(() => {});
+          } catch { /* ignore */ }
+        }
+        onStallTimeout?.();
+      }
+    }, 1000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [active, autoPlay, onStallTimeout, trace]);
+
   const reapply = (v: HTMLVideoElement) => {
     v.volume = safeVolume(volume);
     v.muted = muted;
@@ -259,6 +369,12 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
       }}
       onTimeUpdate={(e) => {
         const v = e.target as HTMLVideoElement;
+        if (Math.abs(v.currentTime - lastPosRef.current) > 0.05) {
+          lastPosRef.current = v.currentTime;
+          lastAdvanceTimeRef.current = Date.now();
+          isBufferingRef.current = false;
+          stallStageRef.current = 0;
+        }
         reportSize(v);
         onTime?.(v.currentTime);
         const d = v.duration;
@@ -280,11 +396,35 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         onDuration?.(v.duration || 0);
         reportSize(v);
       }}
-      onPlay={() => { if (activity.isActive()) onPlaying?.(); }}
-      onPause={() => onPause?.()}
-      onWaiting={() => onWaiting?.()}
+      onPlay={() => {
+        isBufferingRef.current = true;
+        lastAdvanceTimeRef.current = Date.now();
+        if (activity.isActive()) onPlaying?.();
+      }}
+      onPause={() => {
+        isBufferingRef.current = false;
+        stallStageRef.current = 0;
+        lastAdvanceTimeRef.current = Date.now();
+        onPause?.();
+      }}
+      onWaiting={() => {
+        isBufferingRef.current = true;
+        onWaiting?.();
+      }}
+      onStalled={() => {
+        isBufferingRef.current = true;
+      }}
+      onSeeked={() => {
+        lastAdvanceTimeRef.current = Date.now();
+        if (videoRef.current) lastPosRef.current = videoRef.current.currentTime;
+      }}
       onPlaying={(e) => {
-        reportSize(e.target as HTMLVideoElement);
+        const v = e.target as HTMLVideoElement;
+        isBufferingRef.current = false;
+        stallStageRef.current = 0;
+        lastAdvanceTimeRef.current = Date.now();
+        lastPosRef.current = v.currentTime;
+        reportSize(v);
         if (activity.isActive()) onPlaying?.();
       }}
       onEnded={() => {

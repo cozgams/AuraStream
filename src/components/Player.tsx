@@ -42,6 +42,7 @@ export default function Player({
   const proxyRecovery = useProxyPlaybackRecovery(videoRef, src, activity, trace);
   const [playing, setPlaying] = useState(false);
   const [waiting, setWaiting] = useState(false);
+  const [waitingSlow, setWaitingSlow] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [full, setFull] = useState(false);
@@ -83,11 +84,46 @@ export default function Player({
     },
   });
 
+  /* Slow buffering watchdog (> 6s waiting shows interactive retry button) */
+  useEffect(() => {
+    if (active && waiting && !errMsg) {
+      const timer = window.setTimeout(() => {
+        setWaitingSlow(true);
+      }, 6000);
+      return () => window.clearTimeout(timer);
+    } else {
+      setWaitingSlow(false);
+    }
+  }, [active, waiting, errMsg]);
+
+  const handleRetryPlayback = () => {
+    setWaiting(false);
+    setWaitingSlow(false);
+    setErrMsg("");
+    const video = videoRef.current;
+    const hls = hlsRef.current;
+    if (hls && video) {
+      try {
+        hls.startLoad(video.currentTime || -1);
+        hls.recoverMediaError();
+      } catch { /* ignore */ }
+    } else if (video) {
+      try {
+        const cur = video.currentTime;
+        video.load();
+        video.currentTime = cur;
+        video.play().catch(() => {});
+      } catch { /* ignore */ }
+    }
+    activity.play("user_retry");
+  };
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !src) return;
     setErrMsg("");
     setWaiting(false);
+    setWaitingSlow(false);
     recoverCountRef.current = 0;
     const resume = proxyRecovery.resume();
     const isBlob = src.startsWith("blob:");
@@ -258,14 +294,23 @@ export default function Player({
         onPlay={() => { if (activity.isActive()) { setPlaying(true); onTogglePlay?.(true); } }}
         onPause={() => { setPlaying(false); onTogglePlay?.(false); }}
         onWaiting={() => setWaiting(true)}
-        onPlaying={() => { if (activity.isActive()) { setWaiting(false); setErrMsg(""); onPlaying?.(); } }}
-        onSeeked={() => setWaiting(false)}
-        onTimeUpdate={(e) => setTime((e.target as HTMLVideoElement).currentTime)}
+        onStalled={() => setWaiting(true)}
+        onPlaying={() => { if (activity.isActive()) { setWaiting(false); setWaitingSlow(false); setErrMsg(""); onPlaying?.(); } }}
+        onSeeked={() => { setWaiting(false); setWaitingSlow(false); }}
+        onTimeUpdate={(e) => {
+          const t = (e.target as HTMLVideoElement).currentTime;
+          setTime(t);
+          if (waiting && t > 0) {
+            setWaiting(false);
+            setWaitingSlow(false);
+          }
+        }}
         onLoadedMetadata={(e) => setDuration((e.target as HTMLVideoElement).duration || 0)}
         onEnded={() => { if (activity.isActive()) onEnded?.(); }}
         onError={() => {
           if (hlsRef.current) return;
           setWaiting(false);
+          setWaitingSlow(false);
           setPlaying(false);
           setErrMsg(mediaErrorMessage(videoRef.current?.error ?? null));
         }}
@@ -278,10 +323,24 @@ export default function Player({
       )}
 
       {waiting && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center pointer-events-none px-4">
           <div className="w-12 h-12 rounded-full bg-black/60 backdrop-blur-md flex items-center justify-center border border-white/15 shadow-[0_8px_24px_rgba(0,0,0,0.5)]">
             <Loader className="w-6 h-6 spinner text-primary" />
           </div>
+          {waitingSlow && (
+            <div className="mt-4 flex flex-col items-center gap-2 bg-black/80 backdrop-blur-xl border border-white/15 rounded-2xl px-5 py-3.5 shadow-[0_12px_32px_rgba(0,0,0,0.7)] pointer-events-auto a-rise max-w-[90%]">
+              <span className="text-sm font-medium text-white/90 text-center tracking-wide">
+                Buffering is slow · Tap to Retry
+              </span>
+              <button
+                type="button"
+                onClick={handleRetryPlayback}
+                className="mt-1 px-4 py-1.5 rounded-full bg-primary text-black font-semibold text-xs transition-transform active:scale-95 shadow-md cursor-pointer"
+              >
+                Tap to Retry
+              </button>
+            </div>
+          )}
         </div>
       )}
 

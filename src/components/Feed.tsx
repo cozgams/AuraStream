@@ -102,6 +102,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [controlsLocked, setControlsLocked] = useState(false);
   const [rate, setRate] = useState(1);
   const [waiting, setWaiting] = useState(false);
+  const [bufferingSlow, setBufferingSlow] = useState(false);
   const [videoStarted, setVideoStarted] = useState(false);
   const [err, setErr] = useState("");
   const [panel, setPanel] = useState<"episodes" | "comments" | "article" | "detail" | "captions" | "more" | null>(null);
@@ -251,6 +252,31 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const mainUrl = playUrls[playKey] || "";
   const hevcUrl = hevcUrls[playKey] || "";
   const playUrl = preferHevc && hevcUrl ? hevcUrl : mainUrl;
+
+  /* Slow buffering watchdog (> 5s waiting shows interactive recovery overlay) */
+  useEffect(() => {
+    if (active && waiting && !err && !paused) {
+      const timer = window.setTimeout(() => {
+        setBufferingSlow(true);
+      }, 5000);
+      return () => window.clearTimeout(timer);
+    } else {
+      setBufferingSlow(false);
+    }
+  }, [active, waiting, err, paused]);
+
+  const handleBufferingRetry = useCallback(() => {
+    setWaiting(false);
+    setBufferingSlow(false);
+    setErr("");
+    setPlayUrls((m) => {
+      const copy = { ...m };
+      delete copy[playKey];
+      return copy;
+    });
+    setProxyRetry((v) => v + 1);
+    videoRef.current?.reload?.();
+  }, [playKey]);
   useEffect(() => {
     const retry = () => {
       setErr("");
@@ -1378,17 +1404,18 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     onPointerDown={onDown} onPointerMove={onMove} onPointerUp={(e) => onUp(false, e)} onPointerCancel={(e) => onUp(true, e)} onLostPointerCapture={(e) => onUp(true, e)}>
                     <div style={{ position: "absolute", inset: 0, transform: isDesktop ? undefined : `translate3d(${zoom.x}px, ${zoom.y}px, 0) scale(${zoom.s})`, transformOrigin: "center center", transition: isDesktop || zoom.g ? "none" : "transform .18s ease-out" }}>
                       {/* Poster backdrop with smooth crossfade while video stream is connecting / waiting */}
-                      {posterUrl && (
-                        <div
-                          className="absolute inset-0 z-0 overflow-hidden pointer-events-none transition-opacity duration-500 ease-out"
-                          style={{ opacity: !videoStarted || waiting ? 1 : 0 }}
-                        >
+                      <div
+                        className="absolute inset-0 z-0 overflow-hidden pointer-events-none transition-opacity duration-500 ease-out flex flex-col items-center justify-center bg-gradient-to-b from-neutral-900 via-neutral-950 to-black select-none"
+                        style={{ opacity: !videoStarted || waiting ? 1 : 0 }}
+                      >
+                        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(255,255,255,0.06)_0%,_transparent_70%)]" />
+                        {posterUrl && (
                           <img
                             src={posterUrl}
                             alt=""
                             loading="eager"
                             decoding="async"
-                            className={`w-full h-full select-none ${
+                            className={`absolute inset-0 w-full h-full select-none ${
                               isDesktop
                                 ? "object-contain"
                                 : landscapeVideo
@@ -1405,9 +1432,24 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                               (e.target as HTMLElement).style.display = "none";
                             }}
                           />
-                          <div className="absolute inset-0 bg-black/25" />
+                        )}
+                        {posterUrl && <div className="absolute inset-0 bg-black/25" />}
+
+                        {/* Title and episode badge fallback backdrop */}
+                        <div className="relative z-0 flex flex-col items-center justify-center px-6 text-center max-w-md pointer-events-none mb-16">
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-[12px] font-medium text-white/80 mb-3 tracking-wide">
+                            <span>{kind === "post" ? "Post" : (episodes && episodes.length > 0 ? `EP ${curEp} / ${episodes.length}` : `Episode ${curEp}`)}</span>
+                          </div>
+                          <h2 className="text-lg md:text-xl font-bold text-white/90 line-clamp-2 leading-snug drop-shadow-md">
+                            {dramaTitle}
+                          </h2>
+                          {epTitle && epTitle !== dramaTitle && epTitle !== `Episode ${curEp}` && (
+                            <p className="text-xs text-white/60 mt-1 line-clamp-1">
+                              {epTitle}
+                            </p>
+                          )}
                         </div>
-                      )}
+                      </div>
                       <VideoSurface ref={videoRef} src={playUrl} poster={posterUrl} autoPlay active={active} muted={muted}
                         diagnosticContext={{ active, view: mode, kind, video_id: curId, episode: curEp }}
                         volume={volume} rate={effRate}
@@ -1419,9 +1461,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         }}
                         onDuration={onDurationTick}
                         onSize={(w, h) => setVsize((prev) => (prev.w === w && prev.h === h ? prev : { w, h }))}
-                        onPlaying={() => { setPaused(false); setWaiting(false); setErr(""); setVideoStarted(true); }}
+                        onPlaying={() => { setPaused(false); setWaiting(false); setBufferingSlow(false); setErr(""); setVideoStarted(true); }}
                         onPause={() => setPaused(true)}
                         onWaiting={() => setWaiting(true)}
+                        onStallTimeout={() => setBufferingSlow(true)}
                         onEnded={() => {
                           void checkAutoDeleteFinishedEpisode(curId, curEp);
                           let sleepTriggered = false;
@@ -1883,10 +1926,33 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 </div>
               )}
               {isActive && waiting && !err && !paused && (
-                <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center pointer-events-none px-4">
                   <div className="w-12 h-12 rounded-full bg-black/60 backdrop-blur-md flex items-center justify-center border border-white/15 shadow-[0_8px_24px_rgba(0,0,0,0.5)]">
                     <Loader className="w-6 h-6 spinner text-primary" />
                   </div>
+                  {bufferingSlow && (
+                    <div className="mt-4 flex flex-col items-center gap-2.5 bg-black/80 backdrop-blur-xl border border-white/15 rounded-2xl px-5 py-3.5 shadow-[0_12px_32px_rgba(0,0,0,0.7)] pointer-events-auto a-rise max-w-[90%]">
+                      <div className="text-sm font-medium text-white/90 text-center tracking-wide">
+                        Buffering is slow · Tap to Retry
+                      </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <button
+                          type="button"
+                          onClick={handleBufferingRetry}
+                          className="px-3.5 py-1.5 rounded-full bg-primary text-black font-semibold text-xs transition-transform active:scale-95 shadow-md flex items-center gap-1.5 cursor-pointer"
+                        >
+                          Retry
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLineOpen(true)}
+                          className="px-3.5 py-1.5 rounded-full bg-white/15 hover:bg-white/20 text-white font-medium text-xs transition-colors border border-white/10 active:scale-95 cursor-pointer"
+                        >
+                          Switch Line
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               {isActive && err && (
@@ -1956,6 +2022,92 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 </div>
               )}
               </>
+              )}
+              {isActive && !playUrl && (
+                <div className="absolute inset-0 z-0 flex flex-col items-center justify-center bg-gradient-to-b from-neutral-900 via-neutral-950 to-black select-none">
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(255,255,255,0.06)_0%,_transparent_70%)]" />
+                  {posterUrl && (
+                    <img
+                      src={posterUrl}
+                      alt=""
+                      loading="eager"
+                      decoding="async"
+                      className="absolute inset-0 w-full h-full object-cover select-none"
+                      onError={(e) => {
+                        (e.target as HTMLElement).style.display = "none";
+                      }}
+                    />
+                  )}
+                  {posterUrl && <div className="absolute inset-0 bg-black/40" />}
+                  <div className="relative z-10 flex flex-col items-center justify-center px-6 text-center max-w-md pointer-events-none mb-16">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-[12px] font-medium text-white/80 mb-3 tracking-wide">
+                      <span>{kind === "post" ? "Post" : (episodes && episodes.length > 0 ? `EP ${curEp} / ${episodes.length}` : `Episode ${curEp}`)}</span>
+                    </div>
+                    <h2 className="text-lg md:text-xl font-bold text-white/90 line-clamp-2 leading-snug drop-shadow-md">
+                      {dramaTitle}
+                    </h2>
+                    {epTitle && epTitle !== dramaTitle && epTitle !== `Episode ${curEp}` && (
+                      <p className="text-xs text-white/60 mt-1 line-clamp-1">
+                        {epTitle}
+                      </p>
+                    )}
+                  </div>
+                  {err ? (
+                    <div className="absolute inset-0 z-20 flex items-center justify-center p-6">
+                      <div
+                        className="rounded-2xl p-6 flex flex-col items-center gap-3 text-center max-w-sm backdrop-blur-xl border border-white/10 shadow-2xl"
+                        style={{ background: "rgba(18, 18, 22, 0.90)" }}
+                      >
+                        <div className="w-12 h-12 rounded-full bg-red-500/15 flex items-center justify-center text-red-400 mb-1">
+                          <IPlayF size={22} className="opacity-80" />
+                        </div>
+                        <span className="text-[15px] font-bold text-white tracking-tight">{t("player.load_error")}</span>
+                        <span className="text-[12.5px] text-zinc-300 leading-relaxed max-w-[260px] break-words">{localizeError(err, store.language)}</span>
+                        <div className="flex items-center gap-2 mt-2 w-full">
+                          <Button
+                            className="flex-1 h-9 rounded-xl bg-white/10 hover:bg-white/15 text-white text-[13px] font-semibold pressable"
+                            onClick={() => {
+                              setErr("");
+                              setWaiting(true);
+                              setProxyRetry((v) => v + 1);
+                            }}
+                          >
+                            {t("cat.retry")}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center pointer-events-none px-4">
+                      <div className="w-12 h-12 rounded-full bg-black/60 backdrop-blur-md flex items-center justify-center border border-white/15 shadow-[0_8px_24px_rgba(0,0,0,0.5)]">
+                        <Loader className="w-6 h-6 spinner text-primary" />
+                      </div>
+                      {bufferingSlow && (
+                        <div className="mt-4 flex flex-col items-center gap-2.5 bg-black/80 backdrop-blur-xl border border-white/15 rounded-2xl px-5 py-3.5 shadow-[0_12px_32px_rgba(0,0,0,0.7)] pointer-events-auto a-rise max-w-[90%]">
+                          <div className="text-sm font-medium text-white/90 text-center tracking-wide">
+                            Buffering is slow · Tap to Retry
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <button
+                              type="button"
+                              onClick={handleBufferingRetry}
+                              className="px-3.5 py-1.5 rounded-full bg-primary text-black font-semibold text-xs transition-transform active:scale-95 shadow-md flex items-center gap-1.5 cursor-pointer"
+                            >
+                              Retry
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setLineOpen(true)}
+                              className="px-3.5 py-1.5 rounded-full bg-white/15 hover:bg-white/20 text-white font-medium text-xs transition-colors border border-white/10 active:scale-95 cursor-pointer"
+                            >
+                              Switch Line
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
             </section>
           );
@@ -2245,8 +2397,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           />
 
           {/* More playback options sheet - Warm Classic Light iOS Theme */}
-          <Sheet open={panel === "more"} onClose={() => setPanel(null)} label="Playback Options" className="max-h-[58dvh]">
-            <div className="flex flex-col w-full overflow-hidden text-on max-h-[58dvh]">
+          <Sheet open={panel === "more"} onClose={() => setPanel(null)} label="Playback Options" className="max-h-[85dvh]">
+            <div className="flex flex-col w-full overflow-hidden text-on max-h-[85dvh]">
               {/* Fixed Header */}
               <div className="px-4 pt-1.5 pb-2.5 border-b border-border flex items-center justify-between shrink-0 bg-s1">
                 <div className="min-w-0 pr-2">
@@ -2274,7 +2426,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               </div>
 
               {/* Scrollable Content */}
-              <div className="flex flex-col max-h-[calc(58dvh-52px)] scroll-y px-4 pt-2 pb-[calc(var(--sab,16px)+20px)] gap-2.5">
+              <div className="flex flex-col max-h-[calc(85dvh-52px)] scroll-y px-4 pt-2 pb-[calc(var(--sab,16px)+20px)] gap-2.5">
                 {/* 1. Quick Access Action Grid */}
                 <div className="grid grid-cols-4 gap-2">
                   <Button
