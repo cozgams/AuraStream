@@ -50,8 +50,19 @@ export default function LoginModal() {
       <Button variant="primary" className="ios-auth-submit" type="submit" disabled={busy}>
         {busy && <Loader className="size-5" />}{busy ? "Processing…" : mode === "login" ? "Sign In" : "Create Account"}
       </Button>
+      <Button
+        variant="secondary"
+        className="ios-auth-submit mt-2"
+        type="button"
+        onClick={() => {
+          setLoginOpen(false);
+          toast("Using Local Library. Favorites and history are saved privately on this device.", "ok");
+        }}
+      >
+        Continue with Local Library (Offline)
+      </Button>
     </Form>
-    <p className="ios-description ios-auth-note">Login sessions are bound to the current endpoint. When switching custom mirrors, sign-in is managed per endpoint.</p>
+    <p className="ios-description ios-auth-note">AuraStream operates 100% locally by default. Account sign-in is optional and used only if connected to a custom mirror endpoint.</p>
   </div>;
   return isMobile ? <Sheet open={loginOpen} onClose={() => setLoginOpen(false)} label={title}>{content}</Sheet>
     : <Modal open={loginOpen} onClose={() => setLoginOpen(false)} label={title} width={440}>{content}</Modal>;

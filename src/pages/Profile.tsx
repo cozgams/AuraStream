@@ -1005,7 +1005,7 @@ export default function Profile({ wide }: { wide: boolean }) {
 
             {/* Footer */}
             <div className="text-center text-[10.5px] text-[#94a3b8] font-medium pt-0.5 pb-1 tracking-tight">
-              AuraStream v0.1.17
+              AuraStream v0.1.18
             </div>
           </div>
         ) : view === "downloads" ? (
@@ -1128,6 +1128,118 @@ export default function Profile({ wide }: { wide: boolean }) {
                 <IChevronDown size={12} />
               </button>
             </div>
+
+            {/* Active Downloads in Progress */}
+            {activeDownloads.length > 0 && (
+              <div className="flex flex-col gap-2.5 mb-1">
+                <div className="flex items-center justify-between px-0.5">
+                  <div className="text-[12px] font-black text-[#0f172a] uppercase tracking-wider flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                    <span>Downloading ({activeDownloads.length})</span>
+                  </div>
+                  {activeDownloads.some((d) => d.status === "downloading") && (
+                    <button
+                      type="button"
+                      onClick={() => pauseAllDownloads()}
+                      className="text-[11.5px] font-bold text-[#1a73e8] hover:text-[#1557b0] pressable"
+                    >
+                      Pause All
+                    </button>
+                  )}
+                </div>
+
+                {activeDownloads.map((item) => (
+                  <div
+                    key={item.id}
+                    className="bg-white/95 backdrop-blur-md rounded-2xl border border-blue-100 shadow-[0_4px_20px_-2px_rgba(37,99,235,0.08)] p-3 flex flex-col gap-2.5"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 aspect-[3/4] rounded-xl overflow-hidden shrink-0 shadow-xs border border-black/5 bg-slate-100 relative">
+                        <img
+                          src={getCoverUrl(item.cover || "", 160)}
+                          alt=""
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute bottom-0.5 left-0.5 px-1 py-0.2 rounded bg-black/60 text-[8px] font-bold text-white">
+                          Ep. {item.episode}
+                        </div>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[14px] font-bold text-[#0f172a] truncate leading-tight">
+                          {formatDramaTitle(item.title)}
+                        </div>
+                        <div className="text-[11px] text-[#64748b] mt-0.5 flex items-center gap-1.5 flex-wrap">
+                          <span>Episode {item.episode}</span>
+                          <span>·</span>
+                          <span className="font-semibold text-blue-600">
+                            {item.speedFormatted || "Connecting..."}
+                          </span>
+                          {item.etaFormatted && item.etaFormatted !== "--" && (
+                            <>
+                              <span>·</span>
+                              <span>ETA {item.etaFormatted}</span>
+                            </>
+                          )}
+                        </div>
+                        <div className="text-[10.5px] text-[#94a3b8] mt-0.5 tabular-nums">
+                          {formatBytes(item.downloadedBytes)} / {formatBytes(item.totalBytes)} ({item.progress}%)
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {item.status === "downloading" ? (
+                          <button
+                            type="button"
+                            onClick={() => pauseDownload(item.id)}
+                            className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center pressable"
+                            title="Pause"
+                          >
+                            <IPauseF size={12} />
+                          </button>
+                        ) : item.status === "paused" ? (
+                          <button
+                            type="button"
+                            onClick={() => void resumeDownload(item.id, true)}
+                            className="w-8 h-8 rounded-full bg-blue-500 hover:bg-blue-600 text-white flex items-center justify-center pressable shadow-xs"
+                            title="Resume"
+                          >
+                            <IPlayF size={12} className="ml-0.5" />
+                          </button>
+                        ) : item.status === "error" ? (
+                          <button
+                            type="button"
+                            onClick={() => void resumeDownload(item.id, true)}
+                            className="px-2.5 py-1 rounded-full bg-red-50 text-red-600 text-[11px] font-bold hover:bg-red-100 pressable"
+                          >
+                            Retry
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => cancelDownload(item.id)}
+                          className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center pressable"
+                          title="Cancel"
+                        >
+                          <IClose size={13} strokeWidth={2.4} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Live Progress Bar */}
+                    <div className="w-full h-1.5 rounded-full bg-blue-100 overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-300"
+                        style={{ width: `${Math.max(2, item.progress)}%` }}
+                      />
+                    </div>
+                    {item.error && (
+                      <div className="text-[11px] text-red-500 font-medium">
+                        {item.error}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Grouped Downloaded Shows */}
             {sortedDramaGroups.length > 0 ? (
@@ -1377,7 +1489,7 @@ export default function Profile({ wide }: { wide: boolean }) {
               </div>
             )}
               </>
-            ) : (
+            ) : activeDownloads.length === 0 ? (
               /* Empty Downloads Screen (Image 3 Screen 4) */
               <div className="flex flex-col items-center justify-center py-16 px-4 text-center select-none relative">
                 {/* Floating graphic with orbital ring and sparkles */}
@@ -1426,7 +1538,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                   <span>Browse Content</span>
                 </button>
               </div>
-            )}
+            ) : null}
           </div>
         ) : view === "seriesDetail" && selectedSeriesGroup ? (
           /* =====================================================================

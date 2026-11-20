@@ -5,7 +5,7 @@
  * Phone Storage visualizer, "Download on Wi-Fi Only" cellular guard, and 1-Click Series Batch Downloader.
  */
 
-import { api, LOCAL } from "../api";
+import { api, LOCAL, logLine } from "../api";
 import { readStorage, writeStorage, STORAGE_KEYS } from "../storage";
 import { getSubtitlesForEpisode } from "../subtitles/aiSubtitleService";
 import type { SubtitleCue } from "../subtitles/types";
@@ -702,12 +702,19 @@ export function getActiveDownloadsSummary(): {
   };
 }
 
+/**
+ * Returns a snapshot array of all active and paused downloads
+ */
+export function getActiveDownloads(): ActiveDownloadProgress[] {
+  return Array.from(activeProgress.values());
+}
+
 async function fetchWithRetry(
   url: string,
   signal?: AbortSignal,
   maxRetries = 3,
-  baseDelay = 350,
-  timeoutMs = 15000
+  baseDelay = 250,
+  timeoutMs = 60000
 ): Promise<Response> {
   let lastError: any = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -748,6 +755,113 @@ async function fetchWithRetry(
     }
   }
   throw lastError || new Error("Request failed after retries");
+}
+
+/**
+ * Downloads a video segment with automatic proxy fallback and live chunk streaming
+ */
+async function fetchSegmentData(
+  segUrl: string,
+  signal: AbortSignal | undefined,
+  onChunk?: (chunkLength: number) => void
+): Promise<ArrayBuffer> {
+  const urlsToTry: string[] = [segUrl];
+
+  // If URL is a proxied URL like `${LOCAL}/seg?u=...`, compute the direct target URL as fallback
+  if (segUrl.includes("/seg?u=")) {
+    try {
+      const match = /[?&]u=([^&]+)/.exec(segUrl);
+      if (match && match[1]) {
+        const directUrl = decodeURIComponent(match[1]);
+        if (directUrl.startsWith("http://") || directUrl.startsWith("https://")) {
+          urlsToTry.push(directUrl);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  let lastError: any = null;
+
+  for (const url of urlsToTry) {
+    if (signal?.aborted) throw new Error("aborted");
+    for (let attempt = 0; attempt <= 2; attempt++) {
+      if (signal?.aborted) throw new Error("aborted");
+
+      const timeoutCtrl = new AbortController();
+      const timer = setTimeout(() => {
+        timeoutCtrl.abort("timeout");
+      }, 60000);
+
+      let onAbort: (() => void) | null = null;
+      if (signal) {
+        onAbort = () => timeoutCtrl.abort("aborted");
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+
+      let bytesFromThisAttempt = 0;
+
+      try {
+        const res = await fetch(url, { signal: timeoutCtrl.signal });
+        if (!res.ok) {
+          clearTimeout(timer);
+          if (onAbort && signal) signal.removeEventListener("abort", onAbort);
+          throw new Error(`HTTP ${res.status}`);
+        }
+
+        const reader = res.body?.getReader();
+        if (reader) {
+          const chunks: Uint8Array[] = [];
+          while (true) {
+            if (signal?.aborted) {
+              void reader.cancel();
+              clearTimeout(timer);
+              if (onAbort && signal) signal.removeEventListener("abort", onAbort);
+              throw new Error("aborted");
+            }
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) {
+              chunks.push(value);
+              bytesFromThisAttempt += value.length;
+              if (onChunk) onChunk(value.length);
+            }
+          }
+          clearTimeout(timer);
+          if (onAbort && signal) signal.removeEventListener("abort", onAbort);
+
+          const totalLen = chunks.reduce((acc, c) => acc + c.byteLength, 0);
+          const combined = new Uint8Array(totalLen);
+          let offset = 0;
+          for (const c of chunks) {
+            combined.set(c, offset);
+            offset += c.byteLength;
+          }
+          return combined.buffer;
+        } else {
+          const buf = await res.arrayBuffer();
+          clearTimeout(timer);
+          if (onAbort && signal) signal.removeEventListener("abort", onAbort);
+          if (onChunk) onChunk(buf.byteLength);
+          return buf;
+        }
+      } catch (err: any) {
+        clearTimeout(timer);
+        if (onAbort && signal) signal.removeEventListener("abort", onAbort);
+        if (bytesFromThisAttempt > 0 && onChunk) {
+          onChunk(-bytesFromThisAttempt);
+        }
+        if (signal?.aborted || err === "aborted" || (err?.name === "AbortError" && signal?.aborted)) {
+          throw new Error("aborted");
+        }
+        lastError = err;
+        await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+      }
+    }
+  }
+
+  throw lastError || new Error("Failed to download segment after retries");
 }
 
 /**
@@ -936,8 +1050,8 @@ export async function startEpisodeDownload(
       let completedSegments = 0;
       let nextIndex = 0;
 
-      // Mobile network stability: 3 concurrent downloads on Wi-Fi, 2 on cellular to avoid socket starvation
-      const CONCURRENCY = isCellularConnection() ? 2 : 3;
+      // Mobile network stability: prioritize completion with reliable serial/dual worker
+      const CONCURRENCY = isCellularConnection() ? 1 : 2;
 
       // Provide immediate feedback with initial total size estimation (~1.8MB per segment)
       const initialEstBytes = totalSegments * 1.8 * 1024 * 1024;
@@ -959,6 +1073,7 @@ export async function startEpisodeDownload(
       });
       notifyProgress();
       maybeNotifyNative(1, "Connecting...", 0, initialEstBytes);
+      logLine(`[download] start id=${id} ep=${episode} segments=${totalSegments} estBytes=${initialEstBytes}`);
 
       const failedIndices: number[] = [];
 
@@ -970,11 +1085,35 @@ export async function startEpisodeDownload(
             segUrl = segUrl.startsWith("/") ? `${LOCAL}${segUrl}` : `${LOCAL}/${segUrl}`;
           }
           try {
-            const segRes = await fetchWithRetry(segUrl, controller.signal, 3, 300, 15000);
-            if (!segRes.ok) throw new Error(`HTTP ${segRes.status}`);
-            const segBuf = await segRes.arrayBuffer();
+            const segBuf = await fetchSegmentData(segUrl, controller.signal, (chunkDelta) => {
+              receivedBytes += chunkDelta;
+              const avgSegBytes = receivedBytes / Math.max(1, completedSegments + 0.5);
+              const estTotalBytes = Math.max(receivedBytes, Math.round(avgSegBytes * totalSegments));
+              const { speedBytesPerSec, speedFormatted, etaSeconds, etaFormatted } = computeSpeedAndEta(
+                receivedBytes,
+                estTotalBytes
+              );
+              const pct = Math.min(99, Math.max(1, Math.round((receivedBytes / estTotalBytes) * 100)));
+              activeProgress.set(id, {
+                id,
+                videoId,
+                episode,
+                title,
+                cover,
+                progress: pct,
+                downloadedBytes: receivedBytes,
+                totalBytes: estTotalBytes,
+                speedBytesPerSec,
+                speedFormatted,
+                etaSeconds,
+                etaFormatted,
+                status: "downloading",
+                streamUrl,
+              });
+              notifyProgress();
+              maybeNotifyNative(pct, speedFormatted, receivedBytes, estTotalBytes);
+            });
             segmentBuffers[i] = segBuf;
-            receivedBytes += segBuf.byteLength;
             completedSegments++;
 
             // Estimated total bytes based on average segment size so far
@@ -1007,6 +1146,7 @@ export async function startEpisodeDownload(
             maybeNotifyNative(pct, speedFormatted, receivedBytes, estTotalBytes);
           } catch (segErr) {
             if (controller.signal.aborted) return;
+            logLine(`[download] seg failed id=${id} ep=${episode} seg=${i + 1}/${totalSegments} err=${segErr}`);
             failedIndices.push(i);
           }
         }
@@ -1017,17 +1157,17 @@ export async function startEpisodeDownload(
 
       // Retry any segments that failed during parallel worker phase
       if (failedIndices.length > 0 && !controller.signal.aborted) {
+        logLine(`[download] retrying ${failedIndices.length} failed segments id=${id}`);
         for (const i of failedIndices) {
           if (controller.signal.aborted) break;
           let segUrl = segUrls[i];
           if (!segUrl.startsWith("http://") && !segUrl.startsWith("https://") && !segUrl.startsWith("hg://")) {
             segUrl = segUrl.startsWith("/") ? `${LOCAL}${segUrl}` : `${LOCAL}/${segUrl}`;
           }
-          const segRes = await fetchWithRetry(segUrl, controller.signal, 3, 400, 15000);
-          if (!segRes.ok) throw new Error(`Segment ${i + 1}/${totalSegments} failed: HTTP ${segRes.status}`);
-          const segBuf = await segRes.arrayBuffer();
+          const segBuf = await fetchSegmentData(segUrl, controller.signal, (chunkDelta) => {
+            receivedBytes += chunkDelta;
+          });
           segmentBuffers[i] = segBuf;
-          receivedBytes += segBuf.byteLength;
           completedSegments++;
         }
       }
@@ -1041,7 +1181,7 @@ export async function startEpisodeDownload(
         ? streamUrl
         : `${LOCAL}/seg?u=${encodeURIComponent(streamUrl)}`;
 
-      const response = await fetchWithRetry(downloadUrl, controller.signal, 3, 400, 20000);
+      const response = await fetchWithRetry(downloadUrl, controller.signal, 3, 400, 60000);
       if (!response.ok) {
         throw new Error(`Failed to download stream: HTTP ${response.status}`);
       }
@@ -1169,6 +1309,7 @@ export async function startEpisodeDownload(
     });
     notifyProgress();
     notifyNativeDownloadComplete(videoId, episode, title, formatBytes(totalSize));
+    logLine(`[download] finished id=${id} ep=${episode} size=${formatBytes(totalSize)}`);
 
     setTimeout(() => {
       activeProgress.delete(id);
@@ -1177,6 +1318,7 @@ export async function startEpisodeDownload(
   } catch (err: unknown) {
     activeAbortControllers.delete(id);
     notifyNativeDownloadCancel(videoId, episode);
+    logLine(`[download] error id=${id} ep=${episode} err=${(err as Error)?.message || String(err)}`);
     const error = err as { name?: string };
     if (error?.name === "AbortError" || controller.signal.aborted) {
       if (controller.signal.reason === "paused") {

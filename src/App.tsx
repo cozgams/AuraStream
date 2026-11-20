@@ -15,7 +15,6 @@ import { PostsPage, PostDetail } from "./pages/Posts";
 import { TopicsPage, TopicPage, TagsPage, TagPage } from "./pages/Discover";
 import { FollowingPage, UserPage } from "./pages/User";
 import LoginModal from "./components/LoginModal";
-import DownloadNotificationBanner from "./components/DownloadNotificationBanner";
 import { ToastHost } from "./components/ui";
 import { DesktopRail, DesktopTitleBar } from "./components/DesktopChrome";
 import ResizeHandles from "./components/ResizeHandles";
@@ -328,7 +327,6 @@ export default function App() {
     <>
       {isMobile ? <MobileShell /> : <DesktopShell />}
       <LoginModal />
-      <DownloadNotificationBanner />
       <ToastHost />
       {/* Login modal backdrop */}
       {loginOpen && <div className="hidden" onClick={() => setLoginOpen(false)} />}
