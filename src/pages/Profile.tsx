@@ -146,6 +146,7 @@ export default function Profile({ wide }: { wide: boolean }) {
   const [confirmDeleteSeriesOpen, setConfirmDeleteSeriesOpen] = useState(false);
   const [manageStorageOpen, setManageStorageOpen] = useState(false);
   const [seriesMenuOpen, setSeriesMenuOpen] = useState(false);
+  const [libraryInfoOpen, setLibraryInfoOpen] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [collapsedDramas, setCollapsedDramas] = useState<Set<number>>(() => new Set());
@@ -723,19 +724,12 @@ export default function Profile({ wide }: { wide: boolean }) {
             <div
               role="button"
               tabIndex={0}
-              onClick={() => {
-                if (!user) setLoginOpen(true);
-                else push({ kind: "user", id: user.id, name: user.nickname });
-              }}
-              className="bg-white/85 backdrop-blur-md rounded-2xl border border-white/70 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-2 flex items-center gap-3 cursor-pointer pressable active:scale-[0.99] transition-all"
+              onClick={() => setLibraryInfoOpen(true)}
+              className="bg-white/85 backdrop-blur-md rounded-2xl border border-white/70 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-2.5 flex items-center gap-3 cursor-pointer pressable active:scale-[0.99] transition-all"
             >
               <div className="relative shrink-0">
                 <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-[#1a73e8] to-[#38bdf8] flex items-center justify-center text-white shadow-sm overflow-hidden">
-                  {user?.avatar ? (
-                    <img src={user.avatar} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <IUser size={22} />
-                  )}
+                  <IUser size={22} />
                 </div>
                 <span
                   className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-[#22c55e] border-2 border-white shadow-xs"
@@ -745,12 +739,12 @@ export default function Profile({ wide }: { wide: boolean }) {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
                   <h2 className="text-[15.5px] font-bold text-[#0f172a] tracking-tight truncate">
-                    {user ? user.nickname : "My Library"}
+                    My Library
                   </h2>
                   <IChevR size={14} className="text-slate-400 shrink-0" strokeWidth={2.5} />
                 </div>
                 <div className="text-[11px] text-[#64748b] truncate mt-0.5">
-                  {user ? `@${user.username}` : "Local Library · Tap to sign in"}
+                  Local Library · Active on this device
                 </div>
               </div>
             </div>
@@ -1011,7 +1005,7 @@ export default function Profile({ wide }: { wide: boolean }) {
 
             {/* Footer */}
             <div className="text-center text-[10.5px] text-[#94a3b8] font-medium pt-0.5 pb-1 tracking-tight">
-              AuraStream v0.1.16
+              AuraStream v0.1.17
             </div>
           </div>
         ) : view === "downloads" ? (
@@ -1915,6 +1909,58 @@ export default function Profile({ wide }: { wide: boolean }) {
               Cancel
             </button>
           </div>
+        </div>
+      </Modal>
+
+      {/* My Library Overview Modal */}
+      <Modal
+        open={libraryInfoOpen}
+        onClose={() => setLibraryInfoOpen(false)}
+        label="My Local Library"
+      >
+        <div className="p-4 flex flex-col gap-3 text-center">
+          <div className="relative mx-auto">
+            <div className="w-14 h-14 rounded-full bg-gradient-to-tr from-[#1a73e8] to-[#38bdf8] flex items-center justify-center text-white shadow-md">
+              <IUser size={28} />
+            </div>
+            <span
+              className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-[#22c55e] border-2 border-white shadow-xs"
+              title="Local Storage Ready"
+            />
+          </div>
+          <div>
+            <h3 className="text-[17px] font-black text-[#0f172a] tracking-tight">
+              My Library
+            </h3>
+            <p className="text-[12px] text-[#64748b] mt-1 leading-relaxed">
+              Your history, favorites, playlists, and offline downloads are stored securely and privately on this device.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 mt-1 text-left">
+            <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+              <div className="text-[10px] font-semibold text-[#64748b]">Watch History</div>
+              <div className="text-[15px] font-black text-[#0f172a] mt-0.5">{history.length} items</div>
+            </div>
+            <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+              <div className="text-[10px] font-semibold text-[#64748b]">Favorites & Saved</div>
+              <div className="text-[15px] font-black text-[#0f172a] mt-0.5">{favs.length + (watchLater?.length || 0)} dramas</div>
+            </div>
+            <div className="col-span-2 p-2.5 rounded-xl bg-blue-50/70 border border-blue-100/80">
+              <div className="text-[10px] font-semibold text-[#1a73e8]">Offline Downloads</div>
+              <div className="text-[14px] font-black text-[#0f172a] mt-0.5">
+                {downloads.length} {downloads.length === 1 ? "episode" : "episodes"} ({formatBytes(totalDownloadsBytes)})
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setLibraryInfoOpen(false)}
+            className="w-full h-10 rounded-xl bg-[#1a73e8] text-white text-[13px] font-bold pressable active:scale-95 transition-all mt-1"
+          >
+            Done
+          </button>
         </div>
       </Modal>
 

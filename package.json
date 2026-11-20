@@ -1,7 +1,7 @@
 {
   "name": "aurastream",
   "private": true,
-  "version": "0.1.16",
+  "version": "0.1.17",
   "author": "AAA",
   "type": "module",
   "scripts": {
@@ -36,6 +36,7 @@
     "@tauri-apps/plugin-clipboard-manager": "2.5.0",
     "clsx": "2.1.1",
     "dompurify": "3.4.17",
+    "firebase": "^13.4.0",
     "hls.js": "1.6.19",
     "react": "19.2.6",
     "react-dom": "19.2.6",
@@ -55,7 +56,9 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "esbuild"
+      "esbuild",
+      "@firebase/util",
+      "protobufjs"
     ]
   }
 }
