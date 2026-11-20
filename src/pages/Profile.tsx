@@ -740,29 +740,51 @@ export default function Profile({ wide }: { wide: boolean }) {
             <div
               role="button"
               tabIndex={0}
-              onClick={() => setLibraryInfoOpen(true)}
+              onClick={() => {
+                if (user) {
+                  setLibraryInfoOpen(true);
+                } else {
+                  setLoginOpen(true);
+                }
+              }}
               className="bg-white/85 backdrop-blur-md rounded-2xl border border-white/70 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-2.5 flex items-center gap-3 cursor-pointer pressable active:scale-[0.99] transition-all"
             >
               <div className="relative shrink-0">
                 <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-[#1a73e8] to-[#38bdf8] flex items-center justify-center text-white shadow-sm overflow-hidden">
-                  <IUser size={22} />
+                  {user?.avatar ? (
+                    <img src={user.avatar} alt={user.nickname || "User"} className="w-full h-full object-cover" />
+                  ) : (
+                    <IUser size={22} />
+                  )}
                 </div>
                 <span
-                  className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-[#22c55e] border-2 border-white shadow-xs"
-                  title="Local Active"
+                  className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white shadow-xs ${user ? "bg-[#38bdf8]" : "bg-[#22c55e]"}`}
+                  title={user ? "Firebase Cloud Sync Active" : "Local Active"}
                 />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
                   <h2 className="text-[15.5px] font-bold text-[#0f172a] tracking-tight truncate">
-                    My Library
+                    {user ? (user.nickname || user.username || "Firebase Account") : "My Library"}
                   </h2>
                   <IChevR size={14} className="text-slate-400 shrink-0" strokeWidth={2.5} />
                 </div>
                 <div className="text-[11px] text-[#64748b] truncate mt-0.5">
-                  Local Library · Active on this device
+                  {user ? (user.desc || "Firebase Cloud Sync Active") : "Local Library · Tap to sign in with Email"}
                 </div>
               </div>
+              {!user && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setLoginOpen(true);
+                  }}
+                  className="px-3 py-1.5 rounded-full bg-[#1a73e8] text-white text-[11.5px] font-bold pressable active:scale-95 transition-all shrink-0"
+                >
+                  Sign In
+                </button>
+              )}
             </div>
 
             {/* History Shelf */}
@@ -2144,10 +2166,40 @@ export default function Profile({ wide }: { wide: boolean }) {
             </div>
           </div>
 
+          {user ? (
+            <div className="flex flex-col gap-2 mt-1">
+              <div className="text-[12px] text-[#64748b]">
+                Signed in as <strong className="text-[#0f172a]">{user.desc || user.nickname || user.username}</strong>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  logout();
+                  setLibraryInfoOpen(false);
+                  toast("Signed out successfully", "ok");
+                }}
+                className="w-full h-10 rounded-xl bg-red-50 text-red-600 border border-red-200/80 text-[13px] font-bold pressable active:scale-95 transition-all"
+              >
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setLibraryInfoOpen(false);
+                setLoginOpen(true);
+              }}
+              className="w-full h-10 rounded-xl bg-[#1a73e8] text-white text-[13px] font-bold pressable active:scale-95 transition-all mt-1"
+            >
+              Sign In with Email & Firebase
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => setLibraryInfoOpen(false)}
-            className="w-full h-10 rounded-xl bg-[#1a73e8] text-white text-[13px] font-bold pressable active:scale-95 transition-all mt-1"
+            className="w-full h-10 rounded-xl bg-slate-100 text-[#0f172a] text-[13px] font-bold pressable active:scale-95 transition-all"
           >
             Done
           </button>
