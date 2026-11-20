@@ -144,6 +144,8 @@ export default function Profile({ wide }: { wide: boolean }) {
   const [loading, setLoading] = useState(false);
   const [confirmClearAllOpen, setConfirmClearAllOpen] = useState(false);
   const [confirmDeleteSeriesOpen, setConfirmDeleteSeriesOpen] = useState(false);
+  const [manageStorageOpen, setManageStorageOpen] = useState(false);
+  const [seriesMenuOpen, setSeriesMenuOpen] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [collapsedDramas, setCollapsedDramas] = useState<Set<number>>(() => new Set());
@@ -628,17 +630,15 @@ export default function Profile({ wide }: { wide: boolean }) {
                 type="button"
                 onClick={() => setView("downloads")}
                 className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] hover:bg-slate-200/60 active:scale-95 transition-all"
+                aria-label="Back to Downloads"
               >
                 <IBack size={20} strokeWidth={2.4} />
               </button>
-              <h1 className="text-[18px] font-black tracking-tight text-[#0f172a] truncate max-w-[200px]">
-                {formatDramaTitle(selectedSeriesGroup.title)}
-              </h1>
             </div>
 
             <button
               type="button"
-              onClick={() => openSingleExport(selectedSeriesGroup.videoId, selectedSeriesGroup.episodes[0]?.episode || 1, selectedSeriesGroup.title)}
+              onClick={() => setSeriesMenuOpen(true)}
               className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] hover:bg-slate-200/60 pressable font-bold"
               aria-label="Series options"
             >
@@ -811,7 +811,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                         }
                         className="w-28 shrink-0 flex flex-col cursor-pointer pressable active:scale-[0.98] transition-transform"
                       >
-                        <div className="w-full h-[72px] rounded-xl overflow-hidden relative shadow-xs border border-slate-200/60 bg-slate-100">
+                        <div className="w-full h-[80px] rounded-xl overflow-hidden relative shadow-xs border border-slate-200/60 bg-slate-100">
                           {coverUrl ? (
                             <img
                               src={getCoverUrl(coverUrl, 240)}
@@ -884,7 +884,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                   role="button"
                   tabIndex={0}
                   onClick={() => setView("favs")}
-                  className="h-[70px] rounded-2xl overflow-hidden relative shadow-sm border border-white/60 p-2 flex flex-col justify-between cursor-pointer pressable active:scale-[0.98] transition-transform"
+                  className="min-h-[88px] h-[90px] rounded-2xl overflow-hidden relative shadow-sm border border-white/60 p-2.5 flex flex-col justify-between cursor-pointer pressable active:scale-[0.98] transition-transform"
                   style={{
                     background: "linear-gradient(135deg, #7986cb 0%, #a278b5 35%, #e1819d 70%, #fca380 100%)",
                   }}
@@ -919,7 +919,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                   role="button"
                   tabIndex={0}
                   onClick={() => setView("watchlater")}
-                  className="h-[70px] rounded-2xl overflow-hidden relative shadow-sm border border-white/60 p-2 flex flex-col justify-between cursor-pointer pressable active:scale-[0.98] transition-transform"
+                  className="min-h-[88px] h-[90px] rounded-2xl overflow-hidden relative shadow-sm border border-white/60 p-2.5 flex flex-col justify-between cursor-pointer pressable active:scale-[0.98] transition-transform"
                   style={{
                     background: "linear-gradient(135deg, #0d1b2a 0%, #1b263b 40%, #294362 70%, #466995 100%)",
                   }}
@@ -1011,7 +1011,7 @@ export default function Profile({ wide }: { wide: boolean }) {
 
             {/* Footer */}
             <div className="text-center text-[10.5px] text-[#94a3b8] font-medium pt-0.5 pb-1 tracking-tight">
-              AuraStream v0.1.15
+              AuraStream v0.1.16
             </div>
           </div>
         ) : view === "downloads" ? (
@@ -1074,7 +1074,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                   <div className="flex flex-col items-end gap-1 shrink-0">
                     <button
                       type="button"
-                      onClick={() => setConfirmClearAllOpen(true)}
+                      onClick={() => setManageStorageOpen(true)}
                       className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white border border-slate-200/80 text-[11.5px] font-bold text-[#334155] shadow-xs hover:bg-slate-50 pressable active:scale-95 transition-all"
                     >
                       <ISettings size={12} />
@@ -1422,7 +1422,10 @@ export default function Profile({ wide }: { wide: boolean }) {
                 </p>
                 <button
                   type="button"
-                  onClick={() => push({ kind: "ranks" })}
+                  onClick={() => {
+                    setView("overview");
+                    setTab("home");
+                  }}
                   className="mt-6 px-6 py-2.5 rounded-full bg-gradient-to-r from-[#1a73e8] to-[#2563eb] hover:from-[#1557b0] hover:to-[#1d4ed8] text-white font-bold text-[13.5px] shadow-md shadow-blue-500/25 pressable active:scale-95 transition-all flex items-center gap-2"
                 >
                   <IDownload size={15} strokeWidth={2.4} />
@@ -1436,23 +1439,23 @@ export default function Profile({ wide }: { wide: boolean }) {
               3. Series Detail View (Image 3 Screen 2)
               ===================================================================== */
           <div className="flex flex-col gap-4 a-rise">
-            {/* Top Showcase Card */}
-            <div className="bg-white/90 backdrop-blur-md rounded-2xl border border-white/70 shadow-sm p-4 flex gap-4">
-              <div className="w-20 aspect-[3/4] rounded-2xl overflow-hidden shrink-0 shadow-sm border border-black/5 bg-slate-100">
+            {/* Top Showcase Hero */}
+            <div className="flex items-center gap-3.5 px-0.5">
+              <div className="w-16 h-16 rounded-2xl overflow-hidden shrink-0 shadow-md border border-black/5 bg-slate-100">
                 <img
                   src={getCoverUrl(selectedSeriesGroup.cover, 240)}
                   alt=""
                   className="w-full h-full object-cover"
                 />
               </div>
-              <div className="flex-1 min-w-0 flex flex-col justify-center">
-                <h2 className="text-[18px] font-black text-[#0f172a] tracking-tight truncate">
+              <div className="flex-1 min-w-0">
+                <h2 className="text-[19px] font-black text-[#0f172a] tracking-tight leading-tight truncate">
                   {formatDramaTitle(selectedSeriesGroup.title)}
                 </h2>
                 <div className="text-[12.5px] text-[#64748b] mt-0.5 tabular-nums">
                   {selectedSeriesGroup.episodes.length} {selectedSeriesGroup.episodes.length === 1 ? "episode" : "episodes"} · {(selectedSeriesGroup.totalBytes / (1024 * 1024 * 1024) >= 1 ? `${(selectedSeriesGroup.totalBytes / (1024 * 1024 * 1024)).toFixed(1)} GB` : `${(selectedSeriesGroup.totalBytes / (1024 * 1024)).toFixed(0)} MB`)}
                 </div>
-                <div className="flex items-center gap-1.5 mt-2">
+                <div className="flex items-center gap-1.5 mt-1">
                   <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#16a34a]">
                     <ICheck size={12} strokeWidth={3} />
                     <span>All Downloaded</span>
@@ -1777,6 +1780,140 @@ export default function Profile({ wide }: { wide: boolean }) {
             >
               Delete
             </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Manage Downloads & Storage Modal */}
+      <Modal
+        open={manageStorageOpen}
+        onClose={() => setManageStorageOpen(false)}
+        label="Manage Downloads"
+      >
+        <div className="p-4 flex flex-col gap-3 text-center">
+          <div className="w-12 h-12 rounded-full bg-blue-100 text-[#1a73e8] mx-auto flex items-center justify-center">
+            <ISettings size={22} />
+          </div>
+          <div>
+            <h3 className="text-[16px] font-bold text-[#0f172a]">
+              Manage Downloads
+            </h3>
+            <p className="text-[12.5px] text-[#64748b] mt-0.5">
+              {formatBytes(totalDownloadsBytes)} used ({downloads.length} {downloads.length === 1 ? "episode" : "episodes"})
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 mt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setManageStorageOpen(false);
+                setSelectMode(true);
+              }}
+              className="w-full h-10 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#0f172a] text-[13px] font-semibold flex items-center justify-center gap-2 pressable"
+            >
+              <ICheck size={14} />
+              <span>Select Episodes to Delete</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setManageStorageOpen(false);
+                setConfirmClearAllOpen(true);
+              }}
+              className="w-full h-10 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 text-[13px] font-semibold flex items-center justify-center gap-2 pressable"
+            >
+              <ITrash size={14} />
+              <span>Clear All Offline Downloads</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setManageStorageOpen(false)}
+              className="w-full h-9 rounded-xl border border-slate-200 text-[#64748b] text-[12.5px] font-medium pressable"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Series Options Menu Modal */}
+      <Modal
+        open={seriesMenuOpen}
+        onClose={() => setSeriesMenuOpen(false)}
+        label="Series Options"
+      >
+        <div className="p-4 flex flex-col gap-3 text-center">
+          <div className="w-12 h-12 rounded-full bg-blue-100 text-[#1a73e8] mx-auto flex items-center justify-center">
+            <ILayers size={22} />
+          </div>
+          <div>
+            <h3 className="text-[16px] font-bold text-[#0f172a]">
+              {selectedSeriesGroup ? formatDramaTitle(selectedSeriesGroup.title) : "Series Options"}
+            </h3>
+            <p className="text-[12.5px] text-[#64748b] mt-0.5">
+              {selectedSeriesGroup?.episodes.length} episodes offline
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 mt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setSeriesMenuOpen(false);
+                if (selectedSeriesGroup && selectedSeriesGroup.episodes[0]) {
+                  push({
+                    kind: "feed",
+                    videoIds: [selectedSeriesGroup.videoId],
+                    index: 0,
+                    title: formatDramaTitle(selectedSeriesGroup.title),
+                    startEp: selectedSeriesGroup.episodes[0].episode,
+                  });
+                }
+              }}
+              className="w-full h-10 rounded-xl bg-[#1a73e8] hover:bg-[#1557b0] text-white text-[13px] font-semibold flex items-center justify-center gap-2 pressable"
+            >
+              <IPlayF size={12} />
+              <span>Play All Episodes</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSeriesMenuOpen(false);
+                if (selectedSeriesGroup) {
+                  setExportSheetState({
+                    isOpen: true,
+                    videoId: selectedSeriesGroup.videoId,
+                    title: formatDramaTitle(selectedSeriesGroup.title),
+                    batchItems: selectedSeriesGroup.episodes.map((e) => ({
+                      videoId: e.videoId,
+                      episode: e.episode,
+                      title: e.title,
+                    })),
+                  });
+                }
+              }}
+              className="w-full h-10 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#0f172a] text-[13px] font-semibold flex items-center justify-center gap-2 pressable"
+            >
+              <IDownload size={14} />
+              <span>Export All Episodes (ZIP)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSeriesMenuOpen(false);
+                setConfirmDeleteSeriesOpen(true);
+              }}
+              className="w-full h-10 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 text-[13px] font-semibold flex items-center justify-center gap-2 pressable"
+            >
+              <ITrash size={14} />
+              <span>Delete Entire Series</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSeriesMenuOpen(false)}
+              className="w-full h-9 rounded-xl border border-slate-200 text-[#64748b] text-[12.5px] font-medium pressable"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       </Modal>
