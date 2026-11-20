@@ -22,6 +22,7 @@ import {
   IGrid,
   IHist,
   ILogout,
+  IMore,
   IPauseF,
   IPlayF,
   ISearch,
@@ -98,6 +99,7 @@ export default function Profile({ wide }: { wide: boolean }) {
   const [activeSummary, setActiveSummary] = useState(getActiveDownloadsSummary);
   const [loading, setLoading] = useState(false);
   const [confirmClearAllOpen, setConfirmClearAllOpen] = useState(false);
+  const [confirmDeleteSeriesOpen, setConfirmDeleteSeriesOpen] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [collapsedDramas, setCollapsedDramas] = useState<Set<number>>(() => new Set());
@@ -564,10 +566,11 @@ export default function Profile({ wide }: { wide: boolean }) {
                   <button
                     type="button"
                     onClick={() => setSelectMode(true)}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] hover:bg-slate-200/60 pressable font-bold"
+                    disabled={downloads.length === 0}
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] hover:bg-slate-200/60 pressable font-bold disabled:opacity-40"
                     aria-label="Select mode"
                   >
-                    ⋮
+                    <IMore size={16} className="rotate-90" />
                   </button>
                 </>
               )}
@@ -592,8 +595,9 @@ export default function Profile({ wide }: { wide: boolean }) {
               type="button"
               onClick={() => openSingleExport(selectedSeriesGroup.videoId, selectedSeriesGroup.episodes[0]?.episode || 1, selectedSeriesGroup.title)}
               className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] hover:bg-slate-200/60 pressable font-bold"
+              aria-label="Series options"
             >
-              ⋮
+              <IMore size={16} className="rotate-90" />
             </button>
           </>
         ) : (
@@ -848,7 +852,7 @@ export default function Profile({ wide }: { wide: boolean }) {
 
                   <div className="flex items-center justify-between z-10">
                     <span />
-                    <span className="text-white/80 font-bold text-[11px] leading-none">⋮</span>
+                    <IMore size={13} className="rotate-90 text-white/80" />
                   </div>
 
                   <div className="flex items-end justify-between z-10">
@@ -859,7 +863,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                       </div>
                     </div>
                     <div className="px-1.5 py-0.5 rounded-full bg-black/40 backdrop-blur-xs text-white text-[9px] font-bold flex items-center gap-1 shadow-xs">
-                      <span>★</span>
+                      <IStarF size={9} className="text-white" />
                       <span>{favs.length}</span>
                     </div>
                   </div>
@@ -884,7 +888,7 @@ export default function Profile({ wide }: { wide: boolean }) {
 
                   <div className="flex items-center justify-between z-10">
                     <span />
-                    <span className="text-white/80 font-bold text-[11px] leading-none">⋮</span>
+                    <IMore size={13} className="rotate-90 text-white/80" />
                   </div>
 
                   <div className="flex items-end justify-between z-10">
@@ -895,7 +899,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                       </div>
                     </div>
                     <div className="px-1.5 py-0.5 rounded-full bg-black/40 backdrop-blur-xs text-white text-[9px] font-bold flex items-center gap-1 shadow-xs">
-                      <span>🕒</span>
+                      <IClock size={10} className="text-white" strokeWidth={2.5} />
                       <span>{watchLater?.length || 0}</span>
                     </div>
                   </div>
@@ -986,16 +990,22 @@ export default function Profile({ wide }: { wide: boolean }) {
                   <button
                     type="button"
                     onClick={() => setDownloadSearchQuery("")}
-                    className="w-5 h-5 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center pressable text-[10px]"
+                    className="w-5 h-5 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center pressable"
+                    aria-label="Clear search"
                   >
-                    ✕
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
                   </button>
                 )}
               </div>
             )}
 
-            {/* Storage Gauge Card */}
-            <div className="bg-white/85 backdrop-blur-md rounded-2xl border border-white/70 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-3.5 flex items-center justify-between gap-3">
+            {downloads.length > 0 ? (
+              <>
+                {/* Storage Gauge Card */}
+                <div className="bg-white/85 backdrop-blur-md rounded-2xl border border-white/70 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-3.5 flex items-center justify-between gap-3">
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#1a73e8] to-[#60a5fa] text-white flex items-center justify-center shadow-md shrink-0">
                 <IDownload size={22} strokeWidth={2.4} />
               </div>
@@ -1226,9 +1236,10 @@ export default function Profile({ wide }: { wide: boolean }) {
                             onClick={() => {
                               openSingleExport(group.videoId, group.episodes[0]?.episode || 1, group.title);
                             }}
-                            className="w-6 h-6 flex items-center justify-center text-slate-400 hover:text-slate-600 pressable font-bold"
+                            className="w-6 h-6 flex items-center justify-center text-slate-400 hover:text-slate-600 pressable"
+                            aria-label="Series options"
                           >
-                            ⋮
+                            <IMore size={14} className="rotate-90" />
                           </button>
                         </div>
                       </div>
@@ -1305,18 +1316,28 @@ export default function Profile({ wide }: { wide: boolean }) {
                   </div>
                 </div>
               </div>
-            ) : downloadSearchQuery.trim() ? (
+            ) : (
               <div className="p-8 text-center flex flex-col items-center justify-center gap-2 bg-white/80 rounded-2xl border border-white/60 shadow-xs">
-                <div className="text-[14px] font-bold text-[#0f172a]">No matches found</div>
-                <div className="text-[12px] text-[#64748b]">No downloaded shows match &ldquo;{downloadSearchQuery}&rdquo;</div>
-                <button
-                  type="button"
-                  onClick={() => setDownloadSearchQuery("")}
-                  className="mt-2 px-4 py-1.5 rounded-full bg-blue-50 text-[12px] font-bold text-[#1a73e8] pressable hover:bg-blue-100"
-                >
-                  Clear Search
-                </button>
+                <div className="text-[14px] font-bold text-[#0f172a]">
+                  {downloadSearchQuery.trim() ? "No matches found" : "No series available"}
+                </div>
+                <div className="text-[12px] text-[#64748b]">
+                  {downloadSearchQuery.trim()
+                    ? `No downloaded shows match "${downloadSearchQuery}"`
+                    : "No downloads match the current filter"}
+                </div>
+                {downloadSearchQuery.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => setDownloadSearchQuery("")}
+                    className="mt-2 px-4 py-1.5 rounded-full bg-blue-50 text-[12px] font-bold text-[#1a73e8] pressable hover:bg-blue-100"
+                  >
+                    Clear Search
+                  </button>
+                )}
               </div>
+            )}
+              </>
             ) : (
               /* Empty Downloads Screen (Image 3 Screen 4) */
               <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
@@ -1376,13 +1397,13 @@ export default function Profile({ wide }: { wide: boolean }) {
               <button
                 type="button"
                 onClick={() => {
-                  if (selectedSeriesGroup.episodes[0]) {
+                  if (displayEpisodes[0]) {
                     push({
                       kind: "feed",
                       videoIds: [selectedSeriesGroup.videoId],
                       index: 0,
                       title: formatDramaTitle(selectedSeriesGroup.title),
-                      startEp: selectedSeriesGroup.episodes[0].episode,
+                      startEp: displayEpisodes[0].episode,
                     });
                   }
                 }}
@@ -1393,13 +1414,7 @@ export default function Profile({ wide }: { wide: boolean }) {
               </button>
               <button
                 type="button"
-                onClick={async () => {
-                  await deleteOfflineEpisodesBatch(selectedSeriesGroup.episodes);
-                  setDownloads(getOfflineEpisodes());
-                  void getDetailedStorageStats().then(setStorageStats);
-                  toast(`Deleted ${selectedSeriesGroup.title}`, "ok");
-                  setView("downloads");
-                }}
+                onClick={() => setConfirmDeleteSeriesOpen(true)}
                 className="flex-1 h-11 rounded-full bg-white/90 border border-slate-200 text-slate-700 hover:text-red-500 font-bold text-[13px] shadow-xs flex items-center justify-center gap-2 pressable active:scale-95 transition-all"
               >
                 <ITrash size={13} />
@@ -1494,8 +1509,9 @@ export default function Profile({ wide }: { wide: boolean }) {
                           openSingleExport(item.videoId, item.episode, item.title);
                         }}
                         className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-slate-600 pressable"
+                        aria-label="Episode options"
                       >
-                        ⋮
+                        <IMore size={14} className="rotate-90" />
                       </button>
                     </div>
                   </div>
@@ -1647,6 +1663,50 @@ export default function Profile({ wide }: { wide: boolean }) {
               className="flex-1 h-9 rounded-xl bg-red-500 text-white text-[13px] font-bold pressable"
             >
               {t("profile.clear_all")}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Confirmation Modal: Delete Series */}
+      <Modal
+        open={confirmDeleteSeriesOpen}
+        onClose={() => setConfirmDeleteSeriesOpen(false)}
+        label="Delete Series"
+      >
+        <div className="p-4 flex flex-col gap-3 text-center">
+          <div className="w-12 h-12 rounded-full bg-red-100 text-red-500 mx-auto flex items-center justify-center">
+            <ITrash size={22} />
+          </div>
+          <div>
+            <h3 className="text-[16px] font-bold text-[#0f172a]">
+              Delete {selectedSeriesGroup ? formatDramaTitle(selectedSeriesGroup.title) : "Series"}?
+            </h3>
+            <p className="text-[12.5px] text-[#64748b] mt-1 leading-normal">
+              This will remove all {selectedSeriesGroup?.episodes.length} downloaded episodes from your device.
+            </p>
+          </div>
+          <div className="flex items-center gap-2.5 mt-2">
+            <Button
+              onClick={() => setConfirmDeleteSeriesOpen(false)}
+              className="flex-1 h-9 rounded-xl bg-slate-100 text-[#0f172a] text-[13px] font-medium pressable"
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              onClick={async () => {
+                if (selectedSeriesGroup) {
+                  setConfirmDeleteSeriesOpen(false);
+                  await deleteOfflineEpisodesBatch(selectedSeriesGroup.episodes);
+                  setDownloads(getOfflineEpisodes());
+                  void getDetailedStorageStats().then(setStorageStats);
+                  toast(`Deleted ${selectedSeriesGroup.title}`, "ok");
+                  setView("downloads");
+                }
+              }}
+              className="flex-1 h-9 rounded-xl bg-red-500 text-white text-[13px] font-bold pressable"
+            >
+              Delete
             </Button>
           </div>
         </div>
