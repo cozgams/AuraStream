@@ -821,19 +821,30 @@ export default function Profile({ wide }: { wide: boolean }) {
                         }
                         className="w-28 shrink-0 flex flex-col cursor-pointer pressable active:scale-[0.98] transition-transform"
                       >
-                        <div className="w-full h-[80px] rounded-xl overflow-hidden relative shadow-xs border border-slate-200/60 bg-slate-100">
+                        <div className="w-full h-[80px] rounded-xl overflow-hidden relative shadow-xs border border-slate-200/60 bg-slate-900">
                           {coverUrl ? (
                             <img
                               src={getCoverUrl(coverUrl, 240)}
-                              alt=""
+                              alt={dramaTitle}
                               className="w-full h-full object-cover"
                               loading="lazy"
+                              onError={(e) => {
+                                (e.target as HTMLElement).style.display = "none";
+                                const fallback = (e.target as HTMLElement).nextElementSibling as HTMLElement;
+                                if (fallback) fallback.style.display = "flex";
+                              }}
                             />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center bg-slate-100 text-slate-400">
-                              <IHist size={18} />
-                            </div>
-                          )}
+                          ) : null}
+                          <div
+                            className={`w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-800 to-slate-950 text-white/90 p-2 text-center ${
+                              coverUrl ? "hidden" : "flex"
+                            }`}
+                          >
+                            <IHist size={16} className="text-white/40 mb-0.5" />
+                            <span className="text-[10px] font-bold tracking-tight line-clamp-1 text-white/80">
+                              {dramaTitle}
+                            </span>
+                          </div>
 
                           {/* Blue Progress Bar along Bottom */}
                           {progressPct > 0 && (

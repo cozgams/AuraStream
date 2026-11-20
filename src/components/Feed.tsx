@@ -639,7 +639,14 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     const need = [videoIds[index], videoIds[index + 1], videoIds[index - 1]].filter(Boolean);
     need.forEach((id) => {
       if (details[id]) return;
-      api.video(id).then((d) => { if (alive) setDetails((m) => ({ ...m, [id]: d })); }).catch(() => {});
+      api.video(id).then((d) => {
+        if (alive) {
+          setDetails((m) => ({ ...m, [id]: d }));
+          if (id === curId && (d?.cover || d?.title)) {
+            saveHistoryRef.current?.(curEp);
+          }
+        }
+      }).catch(() => {});
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1435,20 +1442,22 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         )}
                         {posterUrl && <div className="absolute inset-0 bg-black/25" />}
 
-                        {/* Title and episode badge fallback backdrop */}
-                        <div className="relative z-0 flex flex-col items-center justify-center px-6 text-center max-w-md pointer-events-none mb-16">
-                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-[12px] font-medium text-white/80 mb-3 tracking-wide">
-                            <span>{kind === "post" ? "Post" : (episodes && episodes.length > 0 ? `EP ${curEp} / ${episodes.length}` : `Episode ${curEp}`)}</span>
+                        {/* Title and episode badge fallback backdrop when no poster available */}
+                        {!posterUrl && (
+                          <div className="relative z-0 flex flex-col items-center justify-center px-6 text-center max-w-md pointer-events-none mb-16">
+                            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-[12px] font-medium text-white/80 mb-3 tracking-wide">
+                              <span>{kind === "post" ? "Post" : (episodes && episodes.length > 0 ? `EP ${curEp} / ${episodes.length}` : `Episode ${curEp}`)}</span>
+                            </div>
+                            <h2 className="text-lg md:text-xl font-bold text-white/90 line-clamp-2 leading-snug drop-shadow-md">
+                              {dramaTitle}
+                            </h2>
+                            {epTitle && epTitle !== dramaTitle && epTitle !== `Episode ${curEp}` && (
+                              <p className="text-xs text-white/60 mt-1 line-clamp-1">
+                                {epTitle}
+                              </p>
+                            )}
                           </div>
-                          <h2 className="text-lg md:text-xl font-bold text-white/90 line-clamp-2 leading-snug drop-shadow-md">
-                            {dramaTitle}
-                          </h2>
-                          {epTitle && epTitle !== dramaTitle && epTitle !== `Episode ${curEp}` && (
-                            <p className="text-xs text-white/60 mt-1 line-clamp-1">
-                              {epTitle}
-                            </p>
-                          )}
-                        </div>
+                        )}
                       </div>
                       <VideoSurface ref={videoRef} src={playUrl} poster={posterUrl} autoPlay active={active} muted={muted}
                         diagnosticContext={{ active, view: mode, kind, video_id: curId, episode: curEp }}
@@ -2039,19 +2048,21 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     />
                   )}
                   {posterUrl && <div className="absolute inset-0 bg-black/40" />}
-                  <div className="relative z-10 flex flex-col items-center justify-center px-6 text-center max-w-md pointer-events-none mb-16">
-                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-[12px] font-medium text-white/80 mb-3 tracking-wide">
-                      <span>{kind === "post" ? "Post" : (episodes && episodes.length > 0 ? `EP ${curEp} / ${episodes.length}` : `Episode ${curEp}`)}</span>
+                  {!posterUrl && (
+                    <div className="relative z-10 flex flex-col items-center justify-center px-6 text-center max-w-md pointer-events-none mb-16">
+                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-[12px] font-medium text-white/80 mb-3 tracking-wide">
+                        <span>{kind === "post" ? "Post" : (episodes && episodes.length > 0 ? `EP ${curEp} / ${episodes.length}` : `Episode ${curEp}`)}</span>
+                      </div>
+                      <h2 className="text-lg md:text-xl font-bold text-white/90 line-clamp-2 leading-snug drop-shadow-md">
+                        {dramaTitle}
+                      </h2>
+                      {epTitle && epTitle !== dramaTitle && epTitle !== `Episode ${curEp}` && (
+                        <p className="text-xs text-white/60 mt-1 line-clamp-1">
+                          {epTitle}
+                        </p>
+                      )}
                     </div>
-                    <h2 className="text-lg md:text-xl font-bold text-white/90 line-clamp-2 leading-snug drop-shadow-md">
-                      {dramaTitle}
-                    </h2>
-                    {epTitle && epTitle !== dramaTitle && epTitle !== `Episode ${curEp}` && (
-                      <p className="text-xs text-white/60 mt-1 line-clamp-1">
-                        {epTitle}
-                      </p>
-                    )}
-                  </div>
+                  )}
                   {err ? (
                     <div className="absolute inset-0 z-20 flex items-center justify-center p-6">
                       <div

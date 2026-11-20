@@ -818,16 +818,25 @@ async function fetchSegmentData(
     for (let attempt = 0; attempt <= 2; attempt++) {
       if (signal?.aborted) throw new Error("aborted");
 
-      // If the segment URL is a proxied URL, reduce initial attempt timeout on slow/cellular
-      // connections to 10s before trying the direct target URL, ensuring downloads never stall for 60s at 1%.
-      const timeoutMs = isUrlProxied && hasDirectFallback && isSlowOrCellular && attempt === 0
-        ? 10000
-        : 60000;
+      // Initial connection timeout: 15s for proxied segment with fallback on slow/cellular,
+      // or 35s otherwise to establish HTTP response headers.
+      const initialConnectTimeoutMs = isUrlProxied && hasDirectFallback && isSlowOrCellular && attempt === 0
+        ? 15000
+        : 35000;
 
       const timeoutCtrl = new AbortController();
-      const timer = setTimeout(() => {
-        timeoutCtrl.abort("timeout");
-      }, timeoutMs);
+      let timer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+        timeoutCtrl.abort("connect_timeout");
+      }, initialConnectTimeoutMs);
+
+      // Inactivity watchdog: once chunks arrive, reset the stall timer on every received chunk.
+      // Downloads will never timeout while data is flowing, and will abort if stalled for 25s.
+      const resetInactivityTimer = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          timeoutCtrl.abort("inactivity_timeout");
+        }, 25000);
+      };
 
       let onAbort: (() => void) | null = null;
       if (signal) {
@@ -840,10 +849,13 @@ async function fetchSegmentData(
       try {
         const res = await fetch(url, { signal: timeoutCtrl.signal });
         if (!res.ok) {
-          clearTimeout(timer);
+          if (timer) clearTimeout(timer);
           if (onAbort && signal) signal.removeEventListener("abort", onAbort);
           throw new Error(`HTTP ${res.status}`);
         }
+
+        // Response headers received, arm the streaming inactivity watchdog
+        resetInactivityTimer();
 
         const reader = res.body?.getReader();
         if (reader) {
@@ -851,19 +863,20 @@ async function fetchSegmentData(
           while (true) {
             if (signal?.aborted) {
               void reader.cancel();
-              clearTimeout(timer);
+              if (timer) clearTimeout(timer);
               if (onAbort && signal) signal.removeEventListener("abort", onAbort);
               throw new Error("aborted");
             }
             const { done, value } = await reader.read();
             if (done) break;
             if (value) {
+              resetInactivityTimer();
               chunks.push(value);
               bytesFromThisAttempt += value.length;
               if (onChunk) onChunk(value.length);
             }
           }
-          clearTimeout(timer);
+          if (timer) clearTimeout(timer);
           if (onAbort && signal) signal.removeEventListener("abort", onAbort);
 
           const totalLen = chunks.reduce((acc, c) => acc + c.byteLength, 0);
@@ -876,13 +889,13 @@ async function fetchSegmentData(
           return combined.buffer;
         } else {
           const buf = await res.arrayBuffer();
-          clearTimeout(timer);
+          if (timer) clearTimeout(timer);
           if (onAbort && signal) signal.removeEventListener("abort", onAbort);
           if (onChunk) onChunk(buf.byteLength);
           return buf;
         }
       } catch (err: any) {
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         if (onAbort && signal) signal.removeEventListener("abort", onAbort);
         if (bytesFromThisAttempt > 0 && onChunk) {
           onChunk(-bytesFromThisAttempt);
