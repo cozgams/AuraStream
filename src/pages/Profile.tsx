@@ -104,6 +104,9 @@ export default function Profile({ wide }: { wide: boolean }) {
   const [selectedSeriesGroup, setSelectedSeriesGroup] = useState<DramaGroup | null>(null);
   const [downloadFilter, setDownloadFilter] = useState<"all" | "series">("all");
   const [downloadSort, setDownloadSort] = useState<"recent" | "size" | "title">("recent");
+  const [downloadSearchOpen, setDownloadSearchOpen] = useState(false);
+  const [downloadSearchQuery, setDownloadSearchQuery] = useState("");
+  const [episodeOrder, setEpisodeOrder] = useState<"asc" | "desc">("asc");
   const [detailCache, setDetailCache] = useState<Record<number, Detail>>({});
 
   useEffect(() => {
@@ -297,6 +300,14 @@ export default function Profile({ wide }: { wide: boolean }) {
     if (downloadFilter === "series") {
       list = list.filter((g) => g.episodes.length > 1);
     }
+    if (downloadSearchQuery.trim()) {
+      const q = downloadSearchQuery.trim().toLowerCase();
+      list = list.filter(
+        (g) =>
+          g.title.toLowerCase().includes(q) ||
+          g.episodes.some((e) => String(e.episode).includes(q))
+      );
+    }
     if (downloadSort === "size") {
       list.sort((a, b) => b.totalBytes - a.totalBytes);
     } else if (downloadSort === "title") {
@@ -309,7 +320,26 @@ export default function Profile({ wide }: { wide: boolean }) {
       });
     }
     return list;
-  }, [dramaGroups, downloadFilter, downloadSort]);
+  }, [dramaGroups, downloadFilter, downloadSort, downloadSearchQuery]);
+
+  const displayEpisodes = useMemo(() => {
+    if (!selectedSeriesGroup) return [];
+    const eps = [...selectedSeriesGroup.episodes];
+    return episodeOrder === "desc"
+      ? eps.sort((a, b) => b.episode - a.episode)
+      : eps.sort((a, b) => a.episode - b.episode);
+  }, [selectedSeriesGroup, episodeOrder]);
+
+  useEffect(() => {
+    if (view === "seriesDetail" && selectedSeriesGroup) {
+      const stillExists = dramaGroups.find((g) => g.videoId === selectedSeriesGroup.videoId);
+      if (!stillExists || stillExists.episodes.length === 0) {
+        setView("downloads");
+      } else if (stillExists !== selectedSeriesGroup) {
+        setSelectedSeriesGroup(stillExists);
+      }
+    }
+  }, [view, selectedSeriesGroup, dramaGroups]);
 
   const playSelected = () => {
     const selectedEpisodes = downloads.filter((d) => selectedKeys.has(`${d.videoId}_${d.episode}`));
@@ -518,8 +548,15 @@ export default function Profile({ wide }: { wide: boolean }) {
                 <>
                   <button
                     type="button"
-                    onClick={() => setTab("search")}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] hover:bg-slate-200/60 pressable"
+                    onClick={() => {
+                      setDownloadSearchOpen((v) => {
+                        if (v) setDownloadSearchQuery("");
+                        return !v;
+                      });
+                    }}
+                    className={`w-8 h-8 rounded-full flex items-center justify-center pressable transition-all ${
+                      downloadSearchOpen ? "bg-blue-100 text-[#1a73e8]" : "text-[#0f172a] hover:bg-slate-200/60"
+                    }`}
                     aria-label="Search downloads"
                   >
                     <ISearch size={18} />
@@ -759,7 +796,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                           {dramaTitle}
                         </div>
                         <div className="text-[10px] text-[#64748b] truncate">
-                          {isFinished ? "Ended" : `${epCount} eps`} · Ep. {h.ep}
+                          {isFinished ? "Ended" : `${epCount} ${epCount === 1 ? "ep" : "eps"}`} · Ep. {h.ep}
                         </div>
                       </div>
                     );
@@ -817,7 +854,9 @@ export default function Profile({ wide }: { wide: boolean }) {
                   <div className="flex items-end justify-between z-10">
                     <div>
                       <div className="text-white font-bold text-[12px] leading-tight">Favorites</div>
-                      <div className="text-white/80 text-[9.5px] mt-0.5">{favs.length} dramas</div>
+                      <div className="text-white/80 text-[9.5px] mt-0.5">
+                        {favs.length} {favs.length === 1 ? "drama" : "dramas"}
+                      </div>
                     </div>
                     <div className="px-1.5 py-0.5 rounded-full bg-black/40 backdrop-blur-xs text-white text-[9px] font-bold flex items-center gap-1 shadow-xs">
                       <span>★</span>
@@ -851,7 +890,9 @@ export default function Profile({ wide }: { wide: boolean }) {
                   <div className="flex items-end justify-between z-10">
                     <div>
                       <div className="text-white font-bold text-[12px] leading-tight">Watch Later</div>
-                      <div className="text-white/80 text-[9.5px] mt-0.5">{watchLater?.length || 0} dramas</div>
+                      <div className="text-white/80 text-[9.5px] mt-0.5">
+                        {watchLater?.length || 0} {(watchLater?.length || 0) === 1 ? "drama" : "dramas"}
+                      </div>
                     </div>
                     <div className="px-1.5 py-0.5 rounded-full bg-black/40 backdrop-blur-xs text-white text-[9px] font-bold flex items-center gap-1 shadow-xs">
                       <span>🕒</span>
@@ -877,7 +918,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                   <div>
                     <div className="text-[13.5px] font-bold text-[#0f172a]">Downloads</div>
                     <div className="text-[10.5px] text-[#64748b]">
-                      {downloads.length} episodes offline · {formatBytes(totalDownloadsBytes)}
+                      {downloads.length} {downloads.length === 1 ? "episode" : "episodes"} offline · {formatBytes(totalDownloadsBytes)}
                     </div>
                   </div>
                 </div>
@@ -929,6 +970,30 @@ export default function Profile({ wide }: { wide: boolean }) {
               2. Downloads Hub View (Image 2 & Image 3 Screen 1)
               ===================================================================== */
           <div className="flex flex-col gap-3.5 a-rise">
+            {/* Search Input Bar (when search is toggled in top bar) */}
+            {downloadSearchOpen && (
+              <div className="relative flex items-center bg-white/95 border border-blue-200/90 rounded-full px-3.5 py-2 shadow-xs a-fade-in">
+                <ISearch size={15} className="text-slate-400 shrink-0 mr-2" />
+                <input
+                  type="text"
+                  value={downloadSearchQuery}
+                  onChange={(e) => setDownloadSearchQuery(e.target.value)}
+                  placeholder="Search downloaded shows & episodes..."
+                  className="flex-1 bg-transparent text-[13px] text-[#0f172a] placeholder:text-slate-400 outline-none"
+                  autoFocus
+                />
+                {downloadSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setDownloadSearchQuery("")}
+                    className="w-5 h-5 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center pressable text-[10px]"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Storage Gauge Card */}
             <div className="bg-white/85 backdrop-blur-md rounded-2xl border border-white/70 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-3.5 flex items-center justify-between gap-3">
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#1a73e8] to-[#60a5fa] text-white flex items-center justify-center shadow-md shrink-0">
@@ -1075,8 +1140,20 @@ export default function Profile({ wide }: { wide: boolean }) {
                         <button
                           type="button"
                           onClick={() => {
-                            setSelectedSeriesGroup(group);
-                            setView("seriesDetail");
+                            if (selectMode) {
+                              setSelectedKeys((prev) => {
+                                const next = new Set(prev);
+                                if (allSelected) {
+                                  for (const k of allGroupKeys) next.delete(k);
+                                } else {
+                                  for (const k of allGroupKeys) next.add(k);
+                                }
+                                return next;
+                              });
+                            } else {
+                              setSelectedSeriesGroup(group);
+                              setView("seriesDetail");
+                            }
                           }}
                           className="w-14 aspect-[3/4] rounded-xl overflow-hidden shrink-0 shadow-xs border border-black/5 bg-slate-100 cursor-pointer pressable relative p-0 border-0 text-left block"
                         >
@@ -1087,15 +1164,27 @@ export default function Profile({ wide }: { wide: boolean }) {
                             loading="lazy"
                           />
                           <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded-md bg-black/60 backdrop-blur-xs text-[9px] font-bold text-white shadow-xs">
-                            {group.episodes.length} eps
+                            {group.episodes.length} {group.episodes.length === 1 ? "ep" : "eps"}
                           </div>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => {
-                            setSelectedSeriesGroup(group);
-                            setView("seriesDetail");
+                            if (selectMode) {
+                              setSelectedKeys((prev) => {
+                                const next = new Set(prev);
+                                if (allSelected) {
+                                  for (const k of allGroupKeys) next.delete(k);
+                                } else {
+                                  for (const k of allGroupKeys) next.add(k);
+                                }
+                                return next;
+                              });
+                            } else {
+                              setSelectedSeriesGroup(group);
+                              setView("seriesDetail");
+                            }
                           }}
                           className="flex-1 min-w-0 cursor-pointer pr-1 text-left bg-transparent border-0 p-0 block"
                         >
@@ -1103,7 +1192,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                             {formatDramaTitle(group.title)}
                           </div>
                           <div className="text-[11.5px] text-[#64748b] mt-0.5 tabular-nums">
-                            {group.episodes.length} episodes · {totalMB} MB
+                            {group.episodes.length} {group.episodes.length === 1 ? "episode" : "episodes"} · {totalMB} MB
                           </div>
                           <div className="flex items-center gap-1.5 mt-1">
                             <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#16a34a]">
@@ -1216,6 +1305,18 @@ export default function Profile({ wide }: { wide: boolean }) {
                   </div>
                 </div>
               </div>
+            ) : downloadSearchQuery.trim() ? (
+              <div className="p-8 text-center flex flex-col items-center justify-center gap-2 bg-white/80 rounded-2xl border border-white/60 shadow-xs">
+                <div className="text-[14px] font-bold text-[#0f172a]">No matches found</div>
+                <div className="text-[12px] text-[#64748b]">No downloaded shows match &ldquo;{downloadSearchQuery}&rdquo;</div>
+                <button
+                  type="button"
+                  onClick={() => setDownloadSearchQuery("")}
+                  className="mt-2 px-4 py-1.5 rounded-full bg-blue-50 text-[12px] font-bold text-[#1a73e8] pressable hover:bg-blue-100"
+                >
+                  Clear Search
+                </button>
+              </div>
             ) : (
               /* Empty Downloads Screen (Image 3 Screen 4) */
               <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
@@ -1259,7 +1360,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                   {formatDramaTitle(selectedSeriesGroup.title)}
                 </h2>
                 <div className="text-[12.5px] text-[#64748b] mt-0.5 tabular-nums">
-                  {selectedSeriesGroup.episodes.length} episodes · {(selectedSeriesGroup.totalBytes / (1024 * 1024 * 1024) >= 1 ? `${(selectedSeriesGroup.totalBytes / (1024 * 1024 * 1024)).toFixed(1)} GB` : `${(selectedSeriesGroup.totalBytes / (1024 * 1024)).toFixed(0)} MB`)}
+                  {selectedSeriesGroup.episodes.length} {selectedSeriesGroup.episodes.length === 1 ? "episode" : "episodes"} · {(selectedSeriesGroup.totalBytes / (1024 * 1024 * 1024) >= 1 ? `${(selectedSeriesGroup.totalBytes / (1024 * 1024 * 1024)).toFixed(1)} GB` : `${(selectedSeriesGroup.totalBytes / (1024 * 1024)).toFixed(0)} MB`)}
                 </div>
                 <div className="flex items-center gap-1.5 mt-2">
                   <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#16a34a]">
@@ -1307,7 +1408,12 @@ export default function Profile({ wide }: { wide: boolean }) {
             </div>
 
             {/* Storage Info Banner */}
-            <div className="p-3 rounded-2xl bg-white/90 border border-slate-200/80 flex items-center justify-between text-[12px] text-[#64748b] shadow-xs">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => openSingleExport(selectedSeriesGroup.videoId, selectedSeriesGroup.episodes[0]?.episode || 1, selectedSeriesGroup.title)}
+              className="p-3 rounded-2xl bg-white/90 border border-slate-200/80 flex items-center justify-between text-[12px] text-[#64748b] shadow-xs cursor-pointer pressable hover:bg-white active:scale-[0.99] transition-all"
+            >
               <div className="flex items-center gap-2.5 font-medium">
                 <div className="w-5 h-5 rounded-md bg-[#1a73e8]/15 text-[#1a73e8] flex items-center justify-center shrink-0">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
@@ -1326,15 +1432,19 @@ export default function Profile({ wide }: { wide: boolean }) {
               <h3 className="text-[15px] font-bold text-[#0f172a]">
                 Episodes ({selectedSeriesGroup.episodes.length})
               </h3>
-              <div className="flex items-center gap-1 text-[11.5px] font-semibold text-[#64748b]">
-                <span>Sort</span>
-                <IChevronDown size={12} />
-              </div>
+              <button
+                type="button"
+                onClick={() => setEpisodeOrder((prev) => (prev === "asc" ? "desc" : "asc"))}
+                className="flex items-center gap-1 text-[11.5px] font-semibold text-[#64748b] hover:text-[#1a73e8] pressable active:scale-95 transition-all"
+              >
+                <span>{episodeOrder === "asc" ? "Oldest First" : "Newest First"}</span>
+                <IChevronDown size={12} className={episodeOrder === "desc" ? "rotate-180 transition-transform" : "transition-transform"} />
+              </button>
             </div>
 
             {/* Episodes Vertical List */}
             <div className="flex flex-col gap-2.5">
-              {selectedSeriesGroup.episodes.map((item) => {
+              {displayEpisodes.map((item) => {
                 const epMB = (item.sizeBytes / (1024 * 1024)).toFixed(1);
                 return (
                   <div
