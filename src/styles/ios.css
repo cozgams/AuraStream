@@ -337,7 +337,7 @@ body.has-overlay .hg-tabbar {
    elastic transitions. The layout and semantic tokens stay shared across
    desktop, iOS, and Android; this layer only changes how the interface feels. */
 :root {
-  --motion-ink:#25241f;
+  --motion-ink:#1a73e8;
   --motion-on-ink:#fff;
   --motion-paper:#eeece7;
   --motion-paper-2:#e5e2db;
@@ -371,7 +371,7 @@ body.has-overlay .hg-tabbar {
   font-weight: 700 !important;
 }
 html.theme-light {
-  --motion-ink:#25241f;
+  --motion-ink:#1a73e8;
   --motion-on-ink:#fff;
   --motion-paper:#eeece7;
   --motion-paper-2:#e5e2db;
@@ -441,6 +441,31 @@ body { background:var(--motion-paper); }
 .ios-mobile-nav .hg-drop>.ios-liquid-fill { margin-inline:4px; width:calc(100% - 8px); background:var(--motion-ink); box-shadow:0 4px 0 rgb(25 25 25 / .12); }
 .ios-mobile-nav .ios-mobile-nav-item { color:var(--p-mut); transition:color .22s ease,scale .28s var(--motion-spring); }
 .ios-mobile-nav .ios-mobile-nav-item[aria-current=page] { color:var(--motion-on-ink); }
+
+/* Solid white floating capsule in light mode matching modern glassmorphic designs without messy content bleed */
+.ios-mobile-nav:not([data-over-video=true]) .hg-glass {
+  background: #ffffff !important;
+  border: 1px solid rgba(226, 232, 240, 0.95) !important;
+  box-shadow: 0 10px 30px -4px rgba(15, 23, 42, 0.12), 0 4px 12px -2px rgba(15, 23, 42, 0.08) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.ios-mobile-nav:not([data-over-video=true]) .hg-glass::before {
+  display: none !important;
+}
+.ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item {
+  color: #475569 !important;
+  font-weight: 600 !important;
+}
+.ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item[aria-current=page] {
+  color: #ffffff !important;
+  font-weight: 700 !important;
+}
+.ios-mobile-nav:not([data-over-video=true]) .hg-drop>.ios-liquid-fill {
+  background: #1a73e8 !important;
+  border-radius: 999px !important;
+  box-shadow: 0 4px 14px rgba(26, 115, 232, 0.4) !important;
+}
 
 .ios-dialog { border-radius:32px; background:var(--glass-bg); border-color:var(--glass-edge); box-shadow:var(--ios-shadow); backdrop-filter:blur(28px) saturate(150%); -webkit-backdrop-filter:blur(28px) saturate(150%); }
 .ios-overlay.is-open .ios-dialog { animation:motion-dialog-in .36s var(--motion-spring) both; }
