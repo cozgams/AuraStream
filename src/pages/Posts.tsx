@@ -22,6 +22,7 @@ export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean 
   const [page, setPage] = useState(0);
   const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
   const busy = useRef(false);
   const sentinel = useRef<HTMLDivElement>(null);
 
@@ -31,16 +32,20 @@ export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean 
     if (!reset && next > pages) return;
     busy.current = true;
     setLoading(true);
+    if (reset) setErr("");
     try {
       const res = await api.postCategory("remen-chigua", next, 20, "latest");
       setItems((prev) => {
         const base = reset ? [] : prev;
         const seen = new Set(base.map((x) => x.id));
-        return [...base, ...(res?.items || []).filter((x) => !seen.has(x.id))];
+        return [...base, ...(res?.items || []).filter((x) => x && typeof x.id === "number" && !seen.has(x.id))];
       });
       setPage(next);
       setPages(res?.pagination?.pages || next);
-    } catch { /* ignore */ } finally {
+      setErr("");
+    } catch (e) {
+      setErr(localizeError(e));
+    } finally {
       busy.current = false;
       setLoading(false);
     }
@@ -68,13 +73,15 @@ export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean 
         {items.length ? (
           <div className={`ios-media-grid ${wide ? "is-wide" : ""}`}>
             {items.map((p) => (
-              <MediaCard key={p.id} title={p.title} cover={p.cover} subtitle={`${fmt(p.hot)} views`} onOpen={() => push({ kind: "post", id: p.id })} />
+              <MediaCard key={p.id} title={formatDramaTitle(p.title)} cover={p.cover} subtitle={`${fmt(p.hot)} views`} onOpen={() => push({ kind: "post", id: p.id })} />
             ))}
           </div>
+        ) : err ? (
+          <Empty icon={<IFireF size={26} />} title="Failed to load posts" sub={err} action="Retry" onAction={() => void loadMore(true)} />
         ) : loading ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
         ) : (
-          <Empty icon={<IFireF size={26} />} title="No community posts yet" sub="Check back soon for new updates" />
+          <Empty icon={<IFireF size={26} />} title="No community posts yet" sub="Check back soon for new updates" action="Refresh" onAction={() => void loadMore(true)} />
         )}
         <div ref={sentinel} className="h-10" />
         {loading && <div className="flex justify-center py-2"><Loader className="w-6 h-6 spinner" /></div>}
@@ -138,7 +145,10 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
 
       <div className="flex-1 scroll-y pb-[calc(var(--sab,48px)+24px)]">
         {err ? (
-          <Empty icon={<IFireF size={26} />} title="Failed to load" sub={err} />
+          <Empty icon={<IFireF size={26} />} title="Failed to load post" sub={err} action="Retry" onAction={() => {
+            setErr(null);
+            api.post(id).then(setPost).catch((e) => setErr(localizeError(e)));
+          }} />
         ) : !post ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
         ) : (
@@ -151,7 +161,7 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
                     if (seg < segs.length - 1) setSeg(seg + 1); else setPlay(false);
                   }} />
               ) : (
-                <Button onClick={() => { if (src) setPlay(true); else if (!resolving) toast("No video attached to this post", "info"); }} className="absolute inset-0">
+                <Button aria-label={src ? "Play video" : "Post cover"} onClick={() => { if (src) setPlay(true); else if (!resolving) toast("No video attached to this post", "info"); }} className="absolute inset-0">
                   <Img src={post.cover} eager />
                   {src && (
                     <span className="absolute inset-0 flex items-center justify-center">
@@ -183,7 +193,7 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
                 <span className="flex items-center gap-1"><IFireF size={10} />{fmt(post.hot)}</span>
               </div>
               <div className="flex flex-wrap gap-1.5 mt-2.5">
-                {(post.tags || []).filter((t) => !t.includes(HIDDEN_POST_TAG)).slice(0, 8).map((t) => (
+                {(post.tags || []).filter((t) => typeof t === "string" && !t.includes(HIDDEN_POST_TAG)).slice(0, 8).map((t) => (
                   <span key={t} className="px-2 py-0.5 rounded-(--r-ctl) bg-s3 text-[12px] text-on/75">#{formatDramaTag(t)}</span>
                 ))}
               </div>

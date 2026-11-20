@@ -136,7 +136,7 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
 
         {CHANNELS.map((c) => {
           const list = rows[c.cate] || [];
-          const isBusy = loading[c.cate] !== false;
+          const isBusy = Boolean(loading[c.cate]);
           const err = errors[c.cate];
           return (
             <section key={c.cate} aria-label={c.name} className="mb-6 a-rise">
@@ -157,7 +157,7 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
               </Button>
               <div className="scroll-x flex gap-2.5 px-4 snap-x">
                 {list.map((v) => (
-                  <RowCard key={v.id} v={v} onOpen={() => push({ kind: "feed", videoIds: list.map((x) => x.id), index: list.findIndex((x) => x.id === v.id), title: c.name })} />
+                  <RowCard key={v.id} v={v} onOpen={() => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: c.name })} />
                 ))}
                 {!list.length && <PreviewStatus name={c.name} loading={isBusy} error={err} onRetry={() => void loadPreview(c.cate)} />}
               </div>
@@ -183,13 +183,12 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
               <div key={post.id} className="ios-row-card"><MediaCard title={post.title} cover={post.cover}
                 subtitle={`${fmt(post.hot)} views`} onOpen={() => push({ kind: "post", id: post.id })} /></div>
             ))}
-            {!posts.length && <PreviewStatus name="Community" loading={loading.posts !== false} error={errors.posts} onRetry={() => void loadPreview("posts")} />}
+            {!posts.length && <PreviewStatus name="Community" loading={Boolean(loading.posts)} error={errors.posts} onRetry={() => void loadPreview("posts")} />}
           </div>
         </section>
 
         <div className="px-4 text-center text-[12px] text-dim pt-1">— All Channels Displayed —</div>
       </div>
-      {wide && <div />}
     </div>
   );
 }
@@ -328,7 +327,7 @@ export function ChannelPage({ cate, name, onBack, wide }: { cate: string; name: 
       </div>
       <div ref={scrollContainer} className="flex-1 scroll-y px-4 pt-3 pb-36">
         {items.length ? (
-          <Masonry videos={items} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: items.map((x) => x.id), index: items.findIndex((x) => x.id === v.id), title: name })} />
+          <Masonry videos={items} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: items.map((x) => x.id), index: Math.max(0, items.findIndex((x) => x.id === v.id)), title: name })} />
         ) : err ? (
           <Empty icon={<IGrid size={26} />} title="Failed to load" sub={err} action="Retry" onAction={() => void loadMore(true)} />
         ) : loading ? (
@@ -342,7 +341,7 @@ export function ChannelPage({ cate, name, onBack, wide }: { cate: string; name: 
           <div className="text-center text-[12px] text-dim py-3">— You've reached the end —</div>
         )}
       </div>
-      {searching && <InplaceSearch kind="video" scope={cate === "original" ? "original" : undefined} wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: list.findIndex((x) => x.id === v.id), title: `Search · ${name}` })} />}
+      {searching && <InplaceSearch kind="video" scope={cate === "original" ? "original" : undefined} wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: `Search · ${name}` })} />}
     </div>
   );
 }

@@ -223,9 +223,8 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         if (data.type === Hls.ErrorTypes.NETWORK_ERROR && recoverCountRef.current < 4) { retry(); return; }
         if (data.type === Hls.ErrorTypes.MEDIA_ERROR && recoverCountRef.current < 4) { retry(); return; }
         onError?.(`${data.type}/${data.details}`);
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
-        else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
-        else { hls.destroy(); hlsRef.current = null; }
+        hls.destroy();
+        hlsRef.current = null;
       });
     } else {
       video.src = url;
@@ -236,7 +235,16 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
       video.removeEventListener("resize", onVideoResize);
       if (recoverTimerRef.current) { window.clearTimeout(recoverTimerRef.current); recoverTimerRef.current = null; }
       trace("source.cleanup");
-      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      } else if (video) {
+        try {
+          video.pause();
+          video.removeAttribute("src");
+          video.load();
+        } catch { /* ignore */ }
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src, proxyRecovery.revision]);
@@ -413,6 +421,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
       }}
       onStalled={() => {
         isBufferingRef.current = true;
+        onWaiting?.();
       }}
       onSeeked={() => {
         lastAdvanceTimeRef.current = Date.now();

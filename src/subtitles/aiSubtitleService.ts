@@ -411,7 +411,7 @@ Rules:
     cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   }
 
-  let cues: SubtitleCue[] = [];
+  let cues: unknown = [];
   try {
     cues = JSON.parse(cleaned);
   } catch {
@@ -423,13 +423,23 @@ Rules:
     }
   }
 
-  return cues.map((cue, idx) => ({
-    id: cue.id || idx + 1,
-    start: Number(cue.start) || 0,
-    end: Number(cue.end) || 0,
-    en: String(cue.en || cue.zh || ""),
-    zh: String(cue.zh || cue.en || ""),
-  }));
+  const rawList: any[] = Array.isArray(cues)
+    ? cues
+    : (cues as any)?.cues || (cues as any)?.subtitles || (cues as any)?.segments || [];
+
+  return rawList.map((cue: any, idx: number) => {
+    const s = Number(cue?.start);
+    const e = Number(cue?.end);
+    const validStart = Number.isFinite(s) ? Math.max(0, s) : 0;
+    const validEnd = Number.isFinite(e) && e > validStart ? e : validStart + 1.5;
+    return {
+      id: Number(cue?.id) || idx + 1,
+      start: validStart,
+      end: validEnd,
+      en: String(cue?.en || cue?.zh || ""),
+      zh: String(cue?.zh || cue?.en || ""),
+    };
+  });
 }
 
 /**
@@ -601,7 +611,8 @@ export function exportToVtt(track: SubtitleTrack, _lang: "en" = "en"): string {
  * Formats a SubtitleTrack into standard SubRip (.SRT) format string (English)
  */
 export function exportToSrt(track: SubtitleTrack, _lang: "en" = "en"): string {
-  const formatSrtTime = (sec: number) => {
+  const formatSrtTime = (rawSec: number) => {
+    const sec = Number.isFinite(rawSec) && rawSec >= 0 ? rawSec : 0;
     const hrs = Math.floor(sec / 3600);
     const mins = Math.floor((sec % 3600) / 60);
     const secs = Math.floor(sec % 60);

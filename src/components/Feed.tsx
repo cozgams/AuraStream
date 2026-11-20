@@ -602,7 +602,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     if (swipeEp && kind === "video") {
       const ep = epMap[curId] || 1;
       const total = episodes.length;
-      const want = dir === 1 ? (total === 0 || ep < total ? ep + 1 : 0) : (ep > 1 ? ep - 1 : 0);
+      const want = dir === 1 ? (total > 0 && ep < total ? ep + 1 : 0) : (ep > 1 ? ep - 1 : 0);
       if (want) {
         setEpMap((m) => ({ ...m, [curId]: want }));
         setPanel(null);
@@ -1034,7 +1034,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         const dir = dy < 0 ? 1 : -1;
         const ep = epMap[curId] || 1;
         const total = episodes.length;
-        const want = dir === 1 ? (total === 0 || ep < total ? ep + 1 : 0) : (ep > 1 ? ep - 1 : 0);
+        const want = dir === 1 ? (total > 0 && ep < total ? ep + 1 : 0) : (ep > 1 ? ep - 1 : 0);
         if (swipeEp && kind === "video" && want) {
           setEpMap((m) => ({ ...m, [curId]: want }));
           toast(total ? `Ep. ${want} / ${total}` : `Ep. ${want}`, "info");

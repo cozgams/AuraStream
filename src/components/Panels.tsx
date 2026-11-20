@@ -67,8 +67,8 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bar
       ) : (
         <div className="shrink-0 flex items-center gap-2 px-4 h-12">
           <span className="text-[14px] font-bold text-on">{t("player.episodes")}</span>
-          <span className="text-[12px] text-mut">{episodes.length} Episodes</span>
-          {episodes.length > 1 && (
+          <span className="text-[12px] text-mut">{(episodes?.length || 0)} Episodes</span>
+          {(episodes?.length || 0) > 1 && (
             <Button
               onClick={() => setBatchOpen(true)}
               className="ml-auto px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[11px] font-bold flex items-center gap-1 pressable"
@@ -95,6 +95,7 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bar
             const isDl = isEpisodeDownloaded(videoId, e.ep_num);
             return (
               <Button key={e.ep_num} onClick={() => onPick(e.ep_num)}
+                aria-label={`Episode ${e.ep_num}`}
                 ref={e.ep_num === current ? (el) => { activeEpRef.current = el; } : undefined}
                 className={`h-10 rounded-(--r-sm) text-[13px] font-semibold relative pressable ${e.ep_num === current ? "bg-primary text-on-primary" : "bg-s3 text-on/80"}`}>
                 <span>{e.ep_num}</span>
@@ -105,7 +106,7 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bar
             );
           })}
         </div>
-        {!episodes.length && <div className="text-center text-[12px] text-dim py-8">No episodes available</div>}
+        {!(episodes?.length || 0) && <div className="text-center text-[12px] text-dim py-8">No episodes available</div>}
       </div>
       {!bare && (
         <div className="shrink-0 px-4 py-2.5 text-[12px] text-dim bg-s2/60 truncate">
@@ -143,7 +144,7 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
     setLikedComments((prev) => {
       const next = !prev[commentId];
       setItems((list) =>
-        list.map((it) => (it.id === commentId ? { ...it, like_count: (it.like_count || 0) + (next ? 1 : -1) } : it))
+        list.map((it) => (it.id === commentId ? { ...it, like_count: Math.max(0, (it.like_count || 0) + (next ? 1 : -1)) } : it))
       );
       try { navigator.vibrate?.(12); } catch {}
       return { ...prev, [commentId]: next };
@@ -202,7 +203,7 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
       <div className="flex-1 scroll-y px-4">
         {items.length ? items.map((c) => (
           <div key={c.id} className="flex gap-2.5 py-3 border-b border-s3 last:border-0">
-            <Avatar size={32} src={c.avatar} name={formatDramaAuthor(c.nickname)} hue={(c.user_id * 37) % 360} />
+            <Avatar size={32} src={c.avatar} name={formatDramaAuthor(c.nickname)} hue={((Number(c.user_id) || 0) * 37) % 360} />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5">
                 <span className="text-[12px] font-semibold text-on/90">{formatDramaAuthor(c.nickname)}</span>

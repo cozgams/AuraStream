@@ -379,8 +379,8 @@ export default function Profile({ wide }: { wide: boolean }) {
       list.sort((a, b) => a.title.localeCompare(b.title));
     } else {
       list.sort((a, b) => {
-        const atA = Math.max(...a.episodes.map((e) => e.downloadedAt || 0));
-        const atB = Math.max(...b.episodes.map((e) => e.downloadedAt || 0));
+        const atA = a.episodes.reduce((max, e) => Math.max(max, e.downloadedAt || 0), 0);
+        const atB = b.episodes.reduce((max, e) => Math.max(max, e.downloadedAt || 0), 0);
         return atB - atA;
       });
     }
@@ -1105,7 +1105,7 @@ export default function Profile({ wide }: { wide: boolean }) {
 
             {/* Footer */}
             <div className="text-center text-[10.5px] text-[#94a3b8] font-medium pt-0.5 pb-1 tracking-tight">
-              AuraStream v0.1.18
+              AuraStream v{APP_VERSION}
             </div>
           </div>
         ) : view === "downloads" ? (
@@ -1140,94 +1140,6 @@ export default function Profile({ wide }: { wide: boolean }) {
                 )}
               </div>
             )}
-
-            {downloads.length > 0 ? (
-              <>
-                {/* Storage Gauge Card */}
-                <div className="bg-white/85 backdrop-blur-md rounded-2xl border border-white/70 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-3.5 flex items-center justify-between gap-3">
-                  <FolderDownloadIcon size={46} className="shrink-0 drop-shadow-sm" />
-
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[11.5px] font-semibold text-[#64748b]">Storage Used</div>
-                    <div className="text-[16px] font-black text-[#0f172a] tracking-tight">
-                      {formatBytes(totalDownloadsBytes)}{" "}
-                      <span className="text-[12px] text-[#64748b] font-normal">
-                        / {storageStats?.quotaBytes ? (storageStats.quotaBytes / (1024 * 1024 * 1024)).toFixed(0) : "2"} GB
-                      </span>
-                    </div>
-                    <div className="w-full h-1.5 rounded-full bg-slate-200 overflow-hidden mt-1.5">
-                      <div
-                        className="h-full bg-[#1a73e8] rounded-full transition-all duration-300"
-                        style={{
-                          width: `${Math.min(100, Math.max(5, storageStats?.percentUsed != null ? Math.round(storageStats.percentUsed) : 26))}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setManageStorageOpen(true)}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white border border-slate-200/80 text-[11.5px] font-bold text-[#334155] shadow-xs hover:bg-slate-50 pressable active:scale-95 transition-all"
-                    >
-                      <ISettings size={12} />
-                      <span>Manage</span>
-                    </button>
-                    <span className="text-[11px] font-bold text-[#1a73e8] tabular-nums">
-                      {storageStats?.percentUsed != null ? `${Math.round(storageStats.percentUsed)}%` : "26%"}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Filter Pills */}
-                <div className="flex items-center justify-between px-0.5">
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setDownloadFilter("all")}
-                      className={`px-3.5 py-1.5 rounded-full text-[12px] font-bold flex items-center gap-1.5 pressable transition-all shadow-xs ${
-                        downloadFilter === "all"
-                          ? "bg-[#1a73e8] text-white"
-                          : "bg-white/80 border border-slate-200 text-[#64748b]"
-                      }`}
-                    >
-                      <IPlayF size={10} />
-                      <span>All</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDownloadFilter("series")}
-                      className={`px-3.5 py-1.5 rounded-full text-[12px] font-bold flex items-center gap-1.5 pressable transition-all shadow-xs ${
-                        downloadFilter === "series"
-                          ? "bg-[#1a73e8] text-white"
-                          : "bg-white/80 border border-slate-200 text-[#64748b]"
-                      }`}
-                    >
-                      <ILayers size={12} />
-                      <span>Series</span>
-                    </button>
-                  </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (downloadSort === "recent") setDownloadSort("size");
-                  else if (downloadSort === "size") setDownloadSort("title");
-                  else setDownloadSort("recent");
-                }}
-                className="flex items-center gap-1 text-[11.5px] font-semibold text-[#475569] bg-white/80 hover:bg-white border border-slate-200 px-2.5 py-1 rounded-full pressable transition-all shadow-2xs"
-              >
-                <span>
-                  {downloadSort === "recent"
-                    ? "Recently Added"
-                    : downloadSort === "size"
-                    ? "Largest Size"
-                    : "Title A-Z"}
-                </span>
-                <IChevronDown size={12} />
-              </button>
-            </div>
 
             {/* Active Downloads in Progress */}
             {activeDownloads.length > 0 && (
@@ -1340,6 +1252,94 @@ export default function Profile({ wide }: { wide: boolean }) {
                 ))}
               </div>
             )}
+
+            {downloads.length > 0 ? (
+              <>
+                {/* Storage Gauge Card */}
+                <div className="bg-white/85 backdrop-blur-md rounded-2xl border border-white/70 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-3.5 flex items-center justify-between gap-3">
+                  <FolderDownloadIcon size={46} className="shrink-0 drop-shadow-sm" />
+
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11.5px] font-semibold text-[#64748b]">Storage Used</div>
+                    <div className="text-[16px] font-black text-[#0f172a] tracking-tight">
+                      {formatBytes(totalDownloadsBytes)}{" "}
+                      <span className="text-[12px] text-[#64748b] font-normal">
+                        / {storageStats?.quotaBytes ? (storageStats.quotaBytes / (1024 * 1024 * 1024)).toFixed(0) : "2"} GB
+                      </span>
+                    </div>
+                    <div className="w-full h-1.5 rounded-full bg-slate-200 overflow-hidden mt-1.5">
+                      <div
+                        className="h-full bg-[#1a73e8] rounded-full transition-all duration-300"
+                        style={{
+                          width: `${Math.min(100, Math.max(5, storageStats?.percentUsed != null ? Math.round(storageStats.percentUsed) : 26))}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setManageStorageOpen(true)}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white border border-slate-200/80 text-[11.5px] font-bold text-[#334155] shadow-xs hover:bg-slate-50 pressable active:scale-95 transition-all"
+                    >
+                      <ISettings size={12} />
+                      <span>Manage</span>
+                    </button>
+                    <span className="text-[11px] font-bold text-[#1a73e8] tabular-nums">
+                      {storageStats?.percentUsed != null ? `${Math.round(storageStats.percentUsed)}%` : "26%"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Filter Pills */}
+                <div className="flex items-center justify-between px-0.5">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDownloadFilter("all")}
+                      className={`px-3.5 py-1.5 rounded-full text-[12px] font-bold flex items-center gap-1.5 pressable transition-all shadow-xs ${
+                        downloadFilter === "all"
+                          ? "bg-[#1a73e8] text-white"
+                          : "bg-white/80 border border-slate-200 text-[#64748b]"
+                      }`}
+                    >
+                      <IPlayF size={10} />
+                      <span>All</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDownloadFilter("series")}
+                      className={`px-3.5 py-1.5 rounded-full text-[12px] font-bold flex items-center gap-1.5 pressable transition-all shadow-xs ${
+                        downloadFilter === "series"
+                          ? "bg-[#1a73e8] text-white"
+                          : "bg-white/80 border border-slate-200 text-[#64748b]"
+                      }`}
+                    >
+                      <ILayers size={12} />
+                      <span>Series</span>
+                    </button>
+                  </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (downloadSort === "recent") setDownloadSort("size");
+                  else if (downloadSort === "size") setDownloadSort("title");
+                  else setDownloadSort("recent");
+                }}
+                className="flex items-center gap-1 text-[11.5px] font-semibold text-[#475569] bg-white/80 hover:bg-white border border-slate-200 px-2.5 py-1 rounded-full pressable transition-all shadow-2xs"
+              >
+                <span>
+                  {downloadSort === "recent"
+                    ? "Recently Added"
+                    : downloadSort === "size"
+                    ? "Largest Size"
+                    : "Title A-Z"}
+                </span>
+                <IChevronDown size={12} />
+              </button>
+            </div>
 
             {/* Grouped Downloaded Shows */}
             {sortedDramaGroups.length > 0 ? (
@@ -1714,7 +1714,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                   </svg>
                 </div>
                 <span className="text-[#334155] font-semibold">
-                  Downloaded on: {selectedSeriesGroup.episodes[0]?.downloadedAt ? new Date(selectedSeriesGroup.episodes[0].downloadedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Nov 19, 2026"} · {(selectedSeriesGroup.totalBytes / (1024 * 1024 * 1024) >= 1 ? `${(selectedSeriesGroup.totalBytes / (1024 * 1024 * 1024)).toFixed(1)} GB` : `${(selectedSeriesGroup.totalBytes / (1024 * 1024)).toFixed(0)} MB`)}
+                  Downloaded on: {selectedSeriesGroup.episodes[0]?.downloadedAt ? new Date(selectedSeriesGroup.episodes[0].downloadedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Recently"} · {(selectedSeriesGroup.totalBytes / (1024 * 1024 * 1024) >= 1 ? `${(selectedSeriesGroup.totalBytes / (1024 * 1024 * 1024)).toFixed(1)} GB` : `${(selectedSeriesGroup.totalBytes / (1024 * 1024)).toFixed(0)} MB`)}
                 </span>
               </div>
               <IChevR size={13} className="text-slate-400" />

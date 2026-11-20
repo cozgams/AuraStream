@@ -62,6 +62,15 @@ export function useMediaSession({
     } catch {
       // ignore metadata errors
     }
+
+    return () => {
+      try {
+        navigator.mediaSession.metadata = null;
+        navigator.mediaSession.playbackState = "none";
+      } catch {
+        // ignore
+      }
+    };
   }, [active, title, artist, album, coverUrl]);
 
   useEffect(() => {

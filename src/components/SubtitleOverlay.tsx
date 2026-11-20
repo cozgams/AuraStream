@@ -116,11 +116,17 @@ export default function SubtitleOverlay({
   // Load subtitles when videoId or episode changes
   useEffect(() => {
     let canceled = false;
-    getSubtitlesForEpisode(videoId, episode, title).then((track) => {
-      if (!canceled) {
-        setCues(track.cues);
-      }
-    });
+    getSubtitlesForEpisode(videoId, episode, title)
+      .then((track) => {
+        if (!canceled) {
+          setCues(track?.cues || []);
+        }
+      })
+      .catch(() => {
+        if (!canceled) {
+          setCues([]);
+        }
+      });
     return () => {
       canceled = true;
     };

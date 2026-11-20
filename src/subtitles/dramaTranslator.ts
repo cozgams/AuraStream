@@ -450,8 +450,9 @@ export function formatDramaAuthor(rawAuthor: string | undefined): string {
   if (!rawAuthor) return "AAA";
   const author = rawAuthor.replace(/^@/, "").trim();
   if (KNOWN_AUTHORS[author]) return KNOWN_AUTHORS[author];
-  const translated = formatDramaTitle(author).replace(/\s+/g, "");
-  return translated || "AAA";
+  const translated = formatDramaTitle(author);
+  const result = /[\u4e00-\u9fff]/.test(author) ? translated.replace(/\s+/g, "") : translated.trim();
+  return result || "AAA";
 }
 
 export function formatDramaDesc(rawDesc: string | undefined): string {
