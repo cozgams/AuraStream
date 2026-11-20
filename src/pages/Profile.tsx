@@ -1011,7 +1011,7 @@ export default function Profile({ wide }: { wide: boolean }) {
 
             {/* Footer */}
             <div className="text-center text-[10.5px] text-[#94a3b8] font-medium pt-0.5 pb-1 tracking-tight">
-              AuraStream v1.0.0
+              AuraStream v0.1.15
             </div>
           </div>
         ) : view === "downloads" ? (
