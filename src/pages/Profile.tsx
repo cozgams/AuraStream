@@ -21,6 +21,7 @@ import {
   IExport,
   IGrid,
   IHist,
+  ILayers,
   ILogout,
   IMore,
   IPauseF,
@@ -58,6 +59,49 @@ import {
 } from "../offline/downloadService";
 import BatchDownloadSheet from "../components/BatchDownloadSheet";
 import { formatDramaTag, formatDramaTitle } from "../subtitles/dramaTranslator";
+
+function FolderDownloadIcon({ size = 44, className = "" }: { size?: number; className?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true">
+      <defs>
+        <linearGradient id="fdBack" x1="6" y1="10" x2="42" y2="39" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#1a73e8" />
+          <stop offset="100%" stopColor="#3b82f6" />
+        </linearGradient>
+        <linearGradient id="fdFront" x1="6" y1="15" x2="42" y2="39" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#2563eb" />
+          <stop offset="100%" stopColor="#60a5fa" />
+        </linearGradient>
+      </defs>
+      {/* Back tab */}
+      <path
+        d="M6 14C6 11.79 7.79 10 10 10H18.5C20.09 10 21.58 10.79 22.47 12.12L23.73 14C24.17 14.67 24.92 15.07 25.71 15.07H38C40.21 15.07 42 16.86 42 19.07V35C42 37.21 40.21 39 38 39H10C7.79 39 6 37.21 6 35V14Z"
+        fill="url(#fdBack)"
+      />
+      {/* Front flap */}
+      <path
+        d="M6 18.5C6 16.57 7.57 15 9.5 15H38.5C40.43 15 42 16.57 42 18.5V35.5C42 37.43 40.43 39 38.5 39H9.5C7.57 39 6 37.43 6 35.5V18.5Z"
+        fill="url(#fdFront)"
+      />
+      {/* Download Arrow */}
+      <path
+        d="M24 20V28M24 28L20.5 24.5M24 28L27.5 24.5M19 32H29"
+        stroke="white"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function SparkleStar({ className = "", size = 16 }: { className?: string; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M12 0 C12 6.6 6.6 12 0 12 C6.6 12 12 17.4 12 24 C12 17.4 17.4 12 24 12 C17.4 12 12 6.6 12 0 Z" />
+    </svg>
+  );
+}
 
 type DramaGroup = {
   videoId: number;
@@ -913,16 +957,16 @@ export default function Profile({ wide }: { wide: boolean }) {
               role="button"
               tabIndex={0}
               onClick={() => setView("downloads")}
-              className="bg-white/85 backdrop-blur-md rounded-2xl border border-white/70 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-2 flex flex-col gap-1 cursor-pointer pressable hover:bg-white active:scale-[0.99] transition-all"
+              className="bg-white/85 backdrop-blur-md rounded-2xl border border-white/70 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-3.5 flex flex-col gap-2.5 cursor-pointer pressable hover:bg-white active:scale-[0.99] transition-all"
             >
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded-full bg-[#dcfce7] text-[#16a34a] flex items-center justify-center shrink-0 shadow-xs">
-                    <IDownload size={14} strokeWidth={2.4} />
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-[#dcfce7] text-[#16a34a] flex items-center justify-center shrink-0 shadow-xs">
+                    <IDownload size={20} strokeWidth={2.4} />
                   </div>
                   <div>
-                    <div className="text-[13.5px] font-bold text-[#0f172a]">Downloads</div>
-                    <div className="text-[10.5px] text-[#64748b]">
+                    <div className="text-[14.5px] font-bold text-[#0f172a]">Downloads</div>
+                    <div className="text-[11px] text-[#64748b]">
                       {downloads.length} {downloads.length === 1 ? "episode" : "episodes"} offline · {formatBytes(totalDownloadsBytes)}
                     </div>
                   </div>
@@ -951,23 +995,23 @@ export default function Profile({ wide }: { wide: boolean }) {
               role="button"
               tabIndex={0}
               onClick={() => push({ kind: "settings" })}
-              className="bg-white/85 backdrop-blur-md rounded-2xl border border-white/70 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-2 flex items-center justify-between cursor-pointer pressable hover:bg-white active:scale-[0.99] transition-all"
+              className="bg-white/85 backdrop-blur-md rounded-2xl border border-white/70 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-3.5 flex items-center justify-between cursor-pointer pressable hover:bg-white active:scale-[0.99] transition-all"
             >
-              <div className="flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-full bg-[#f1f5f9] text-[#334155] flex items-center justify-center shrink-0 shadow-xs">
-                  <ISettings size={14} strokeWidth={2} />
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-[#f1f5f9] text-[#475569] flex items-center justify-center shrink-0 shadow-xs">
+                  <ISettings size={20} strokeWidth={2.2} />
                 </div>
                 <div>
-                  <div className="text-[13.5px] font-bold text-[#0f172a]">Settings</div>
-                  <div className="text-[10.5px] text-[#64748b]">Playback, quality, subtitles & display</div>
+                  <div className="text-[14.5px] font-bold text-[#0f172a]">Settings</div>
+                  <div className="text-[11px] text-[#64748b]">Playback, quality, subtitles & display</div>
                 </div>
               </div>
               <IChevR size={14} className="text-slate-400" strokeWidth={2.5} />
             </div>
 
             {/* Footer */}
-            <div className="text-center text-[10px] text-[#94a3b8] font-medium pt-0 pb-1 tracking-tight">
-              AuraStream v0.1.14
+            <div className="text-center text-[10.5px] text-[#94a3b8] font-medium pt-0.5 pb-1 tracking-tight">
+              AuraStream v1.0.0
             </div>
           </div>
         ) : view === "downloads" ? (
@@ -1007,71 +1051,69 @@ export default function Profile({ wide }: { wide: boolean }) {
               <>
                 {/* Storage Gauge Card */}
                 <div className="bg-white/85 backdrop-blur-md rounded-2xl border border-white/70 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-3.5 flex items-center justify-between gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#1a73e8] to-[#60a5fa] text-white flex items-center justify-center shadow-md shrink-0">
-                <IDownload size={22} strokeWidth={2.4} />
-              </div>
+                  <FolderDownloadIcon size={46} className="shrink-0 drop-shadow-sm" />
 
-              <div className="flex-1 min-w-0">
-                <div className="text-[11.5px] font-semibold text-[#64748b]">Storage Used</div>
-                <div className="text-[16px] font-black text-[#0f172a] tracking-tight">
-                  {formatBytes(totalDownloadsBytes)}{" "}
-                  <span className="text-[12px] text-[#64748b] font-normal">
-                    / {storageStats?.quotaBytes ? (storageStats.quotaBytes / (1024 * 1024 * 1024)).toFixed(0) : "2"} GB
-                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11.5px] font-semibold text-[#64748b]">Storage Used</div>
+                    <div className="text-[16px] font-black text-[#0f172a] tracking-tight">
+                      {formatBytes(totalDownloadsBytes)}{" "}
+                      <span className="text-[12px] text-[#64748b] font-normal">
+                        / {storageStats?.quotaBytes ? (storageStats.quotaBytes / (1024 * 1024 * 1024)).toFixed(0) : "2"} GB
+                      </span>
+                    </div>
+                    <div className="w-full h-1.5 rounded-full bg-slate-200 overflow-hidden mt-1.5">
+                      <div
+                        className="h-full bg-[#1a73e8] rounded-full transition-all duration-300"
+                        style={{
+                          width: `${Math.min(100, Math.max(5, storageStats?.percentUsed != null ? Math.round(storageStats.percentUsed) : 26))}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmClearAllOpen(true)}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white border border-slate-200/80 text-[11.5px] font-bold text-[#334155] shadow-xs hover:bg-slate-50 pressable active:scale-95 transition-all"
+                    >
+                      <ISettings size={12} />
+                      <span>Manage</span>
+                    </button>
+                    <span className="text-[11px] font-bold text-[#1a73e8] tabular-nums">
+                      {storageStats?.percentUsed != null ? `${Math.round(storageStats.percentUsed)}%` : "26%"}
+                    </span>
+                  </div>
                 </div>
-                <div className="w-full h-1.5 rounded-full bg-slate-200 overflow-hidden mt-1.5">
-                  <div
-                    className="h-full bg-[#1a73e8] rounded-full transition-all duration-300"
-                    style={{
-                      width: `${Math.min(100, Math.max(5, storageStats?.percentUsed != null ? Math.round(storageStats.percentUsed) : 26))}%`,
-                    }}
-                  />
-                </div>
-              </div>
 
-              <div className="flex flex-col items-end gap-1 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setConfirmClearAllOpen(true)}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white border border-slate-200/80 text-[11.5px] font-bold text-[#334155] shadow-xs hover:bg-slate-50 pressable active:scale-95 transition-all"
-                >
-                  <ISettings size={12} />
-                  <span>Manage</span>
-                </button>
-                <span className="text-[11px] font-bold text-[#1a73e8] tabular-nums">
-                  {storageStats?.percentUsed != null ? `${Math.round(storageStats.percentUsed)}%` : "26%"}
-                </span>
-              </div>
-            </div>
-
-            {/* Filter Pills */}
-            <div className="flex items-center justify-between px-0.5">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setDownloadFilter("all")}
-                  className={`px-3.5 py-1.5 rounded-full text-[12px] font-bold flex items-center gap-1.5 pressable transition-all shadow-xs ${
-                    downloadFilter === "all"
-                      ? "bg-[#1a73e8] text-white"
-                      : "bg-white/80 border border-slate-200 text-[#64748b]"
-                  }`}
-                >
-                  <IPlayF size={10} />
-                  <span>All</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDownloadFilter("series")}
-                  className={`px-3.5 py-1.5 rounded-full text-[12px] font-bold flex items-center gap-1.5 pressable transition-all shadow-xs ${
-                    downloadFilter === "series"
-                      ? "bg-[#1a73e8] text-white"
-                      : "bg-white/80 border border-slate-200 text-[#64748b]"
-                  }`}
-                >
-                  <IGrid size={11} />
-                  <span>Series</span>
-                </button>
-              </div>
+                {/* Filter Pills */}
+                <div className="flex items-center justify-between px-0.5">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDownloadFilter("all")}
+                      className={`px-3.5 py-1.5 rounded-full text-[12px] font-bold flex items-center gap-1.5 pressable transition-all shadow-xs ${
+                        downloadFilter === "all"
+                          ? "bg-[#1a73e8] text-white"
+                          : "bg-white/80 border border-slate-200 text-[#64748b]"
+                      }`}
+                    >
+                      <IPlayF size={10} />
+                      <span>All</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDownloadFilter("series")}
+                      className={`px-3.5 py-1.5 rounded-full text-[12px] font-bold flex items-center gap-1.5 pressable transition-all shadow-xs ${
+                        downloadFilter === "series"
+                          ? "bg-[#1a73e8] text-white"
+                          : "bg-white/80 border border-slate-200 text-[#64748b]"
+                      }`}
+                    >
+                      <ILayers size={12} />
+                      <span>Series</span>
+                    </button>
+                  </div>
 
               <button
                 type="button"
@@ -1306,9 +1348,11 @@ export default function Profile({ wide }: { wide: boolean }) {
                 {/* All Downloads Up to Date banner (Image 2 & 3) */}
                 <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-50/90 via-white/95 to-blue-50/90 border border-blue-100 flex items-center gap-3.5 shadow-xs mt-1">
                   <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#1a73e8] to-[#38bdf8] text-white flex items-center justify-center shrink-0 shadow-xs">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                      <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
-                      <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                      <rect x="3" y="6" width="18" height="14" rx="3" stroke="currentColor" strokeWidth="2" />
+                      <path d="M3 11h18" stroke="currentColor" strokeWidth="1.8" />
+                      <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" stroke="currentColor" strokeWidth="1.8" />
+                      <path d="M12 13.5 L14.5 16 L12 18.5 L9.5 16 Z" fill="white" />
                     </svg>
                   </div>
                   <div>
@@ -1341,13 +1385,37 @@ export default function Profile({ wide }: { wide: boolean }) {
               </>
             ) : (
               /* Empty Downloads Screen (Image 3 Screen 4) */
-              <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-                <div className="relative mb-5">
-                  <div className="w-24 h-24 rounded-full bg-blue-100/70 blur-xl absolute inset-0" />
-                  <div className="w-24 h-24 rounded-3xl bg-gradient-to-tr from-[#1a73e8] to-[#60a5fa] text-white flex items-center justify-center shadow-xl relative z-10">
-                    <IDownload size={42} strokeWidth={2.4} />
+              <div className="flex flex-col items-center justify-center py-16 px-4 text-center select-none relative">
+                {/* Floating graphic with orbital ring and sparkles */}
+                <div className="relative mb-5 flex items-center justify-center">
+                  {/* Aura blur behind */}
+                  <div className="w-32 h-32 rounded-full bg-blue-300/35 blur-2xl absolute inset-0 m-auto pointer-events-none" />
+
+                  {/* Translucent tilted orbital ring */}
+                  <div className="w-48 h-24 rounded-[50%] border-2 border-blue-300/40 -rotate-12 absolute pointer-events-none" />
+
+                  {/* Faint floating play circle (left) */}
+                  <div className="absolute -left-12 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-blue-100/50 border border-white/70 shadow-sm flex items-center justify-center text-blue-400/60 pointer-events-none">
+                    <IPlayF size={12} className="ml-0.5" />
+                  </div>
+
+                  {/* Faint floating play circle (right) */}
+                  <div className="absolute -right-12 top-1/3 -translate-y-1/2 w-10 h-10 rounded-full bg-blue-100/50 border border-white/70 shadow-sm flex items-center justify-center text-blue-400/60 pointer-events-none">
+                    <IPlayF size={11} className="ml-0.5" />
+                  </div>
+
+                  {/* 4-point sparkle star (top-left) */}
+                  <SparkleStar size={18} className="absolute -top-3 left-1 text-[#38bdf8] pointer-events-none animate-pulse" />
+
+                  {/* 4-point sparkle star (bottom-right) */}
+                  <SparkleStar size={14} className="absolute -bottom-2 right-2 text-[#60a5fa] pointer-events-none animate-pulse" />
+
+                  {/* Glowing Blue Folder in Center */}
+                  <div className="relative z-10 drop-shadow-xl">
+                    <FolderDownloadIcon size={84} />
                   </div>
                 </div>
+
                 <h3 className="text-[20px] font-black text-[#0f172a] tracking-tight">No Downloads Yet</h3>
                 <p className="text-[13.5px] text-[#64748b] max-w-xs mt-1.5 leading-relaxed">
                   Download your favorite series and watch them offline anytime!
@@ -1355,9 +1423,9 @@ export default function Profile({ wide }: { wide: boolean }) {
                 <button
                   type="button"
                   onClick={() => push({ kind: "ranks" })}
-                  className="mt-6 px-6 py-2.5 rounded-full bg-[#1a73e8] hover:bg-[#1557b0] text-white font-bold text-[13.5px] shadow-md pressable active:scale-95 transition-all flex items-center gap-2"
+                  className="mt-6 px-6 py-2.5 rounded-full bg-gradient-to-r from-[#1a73e8] to-[#2563eb] hover:from-[#1557b0] hover:to-[#1d4ed8] text-white font-bold text-[13.5px] shadow-md shadow-blue-500/25 pressable active:scale-95 transition-all flex items-center gap-2"
                 >
-                  <IDownload size={15} />
+                  <IDownload size={15} strokeWidth={2.4} />
                   <span>Browse Content</span>
                 </button>
               </div>
@@ -1451,9 +1519,9 @@ export default function Profile({ wide }: { wide: boolean }) {
               <button
                 type="button"
                 onClick={() => setEpisodeOrder((prev) => (prev === "asc" ? "desc" : "asc"))}
-                className="flex items-center gap-1 text-[11.5px] font-semibold text-[#64748b] hover:text-[#1a73e8] pressable active:scale-95 transition-all"
+                className="flex items-center gap-1 text-[12px] font-semibold text-[#64748b] hover:text-[#1a73e8] pressable active:scale-95 transition-all"
               >
-                <span>{episodeOrder === "asc" ? "Oldest First" : "Newest First"}</span>
+                <span>Sort</span>
                 <IChevronDown size={12} className={episodeOrder === "desc" ? "rotate-180 transition-transform" : "transition-transform"} />
               </button>
             </div>
