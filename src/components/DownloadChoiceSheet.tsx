@@ -326,8 +326,9 @@ export default function DownloadChoiceSheet({
               style={{ width: `${usedPercent}%` }}
             />
           </div>
-          <div className="text-[10.5px] text-mut leading-tight">
-            ⚡ <strong>Permanent Offline Storage:</strong> Downloads are kept safely on device and never auto-deleted on app exit.
+          <div className="text-[10.5px] text-mut leading-tight flex items-center gap-1.5">
+            <IBoltF size={12} className="text-amber-500 shrink-0" />
+            <span><strong>Permanent Offline Storage:</strong> Downloads are kept safely on device and never auto-deleted on app exit.</span>
           </div>
         </div>
       </div>

@@ -542,8 +542,9 @@ export default function Profile({ wide }: { wide: boolean }) {
                     }}
                     className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] hover:bg-slate-200/60 pressable font-bold"
                     title={selectedKeys.size === downloads.length ? "Deselect All" : "Select All"}
+                    aria-label="Select all toggle"
                   >
-                    ⋮
+                    <IMore size={16} className="rotate-90" />
                   </button>
                 </>
               ) : (
