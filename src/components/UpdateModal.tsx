@@ -61,7 +61,12 @@ export default function UpdateModal({
         setTotalBytes(ev.totalBytes ?? (asset?.size || 0));
         setSpeedBps(ev.speedBytesPerSec ?? 0);
       } else if (ev.status === "downloaded") {
-        const path = ev.filePath || "";
+        const path = (ev.filePath || "").trim();
+        if (!path) {
+          setErrMsg("Downloaded APK path is missing");
+          setStage("error");
+          return;
+        }
         setApkPath(path);
         setProgress(100);
         if (!canInstallOtaPackages()) {
@@ -87,8 +92,11 @@ export default function UpdateModal({
 
   useEffect(() => {
     if (stage !== "need_permission" || !apkPath) return;
+    let triggered = false;
     const checkAndResumeInstall = () => {
+      if (triggered) return;
       if (canInstallOtaPackages()) {
+        triggered = true;
         setStage("ready");
         const res = installOtaApk(apkPath);
         if (res.startsWith("ERROR:")) {
@@ -166,9 +174,7 @@ export default function UpdateModal({
     <Modal
       open={Boolean(info?.has_update)}
       onClose={() => {
-        if (stage === "downloading") {
-          cancelOtaUpdateDownload();
-        }
+        if (stage === "downloading") return;
         onClose();
       }}
       width={392}

@@ -2,7 +2,7 @@ import { Button, Input } from "./ios/controls";
 import { Loader } from "./ios/effects";
 import React, { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
-import { fmtTime, isLocalMedia, platform, playlist } from "../api";
+import { fmtTime, isLocalMedia, isMobile, platform, playlist } from "../api";
 import { mediaErrorMessage } from "../mediaErrors";
 import { mediaHost, mediaResource, observeHls, usePlayerDiagnostics } from "../playbackDiagnostics";
 import { usePlaybackActivity } from "../usePlaybackActivity";
@@ -49,6 +49,19 @@ export default function Player({
   const [rate, setRate] = useState(1);
   const [errMsg, setErrMsg] = useState<string>("");
   const [controlsLocked, setControlsLocked] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(false);
+  const controlsTimerRef = useRef<number | null>(null);
+  const flashControls = () => {
+    setControlsVisible(true);
+    if (controlsTimerRef.current) window.clearTimeout(controlsTimerRef.current);
+    controlsTimerRef.current = window.setTimeout(() => {
+      setControlsVisible(false);
+      controlsTimerRef.current = null;
+    }, 3200);
+  };
+  useEffect(() => () => {
+    if (controlsTimerRef.current) window.clearTimeout(controlsTimerRef.current);
+  }, []);
   const autoPlayRef = useRef(!!autoPlay);
   autoPlayRef.current = !!autoPlay;
   const rateRef = useRef(rate);
@@ -108,9 +121,10 @@ export default function Player({
     const resume = proxyRecovery.resume();
     const isBlob = src.startsWith("blob:");
     const isHlsBlob = isBlob && (src.includes(".m3u8") || src.includes("type=hls") || src.includes("#.m3u8"));
+    const isDirectOfflineFile = src.includes("/offline/") && !src.toLowerCase().includes(".m3u8");
     const proxied = isLocalMedia(src) || isBlob;
     const url = isBlob ? src : (proxied ? src : playlist(src));
-    const useHls = (isHlsBlob || !isBlob) && !url.includes("/seg?u=");
+    const useHls = (isHlsBlob || (!isBlob && !isDirectOfflineFile)) && !url.includes("/seg?u=");
     trace("source.load", { engine: useHls && Hls.isSupported() ? "hls.js" : "native", auto_play: autoPlayRef.current, resource: mediaResource(src), host: mediaHost(src) });
 
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
@@ -287,13 +301,18 @@ export default function Player({
         ref={videoRef}
         poster={poster}
         playsInline
-        disablePictureInPicture
+        disablePictureInPicture={platform === "android"}
         controlsList="nodownload noplaybackrate nopictureinpicture"
         preload="auto"
         muted={muted}
         loop={loop}
         className="relative z-10 w-full h-full object-contain bg-transparent"
-        onClick={toggle}
+        onClick={() => {
+          if (isMobile && playing) {
+            flashControls();
+          }
+          toggle();
+        }}
         onPlay={() => { if (activity.isActive()) { setPlaying(true); onTogglePlay?.(true); } }}
         onPause={() => { setPlaying(false); onTogglePlay?.(false); }}
         onWaiting={() => setWaiting(true)}
@@ -360,23 +379,24 @@ export default function Player({
       )}
 
       {controls && (
-        <div className="player-inline-controls absolute inset-x-0 bottom-0 z-20 px-3 pb-2 pt-8 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className={`player-inline-controls absolute inset-x-0 bottom-0 z-20 px-3 pb-2 pt-8 transition-opacity ${!playing || controlsVisible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"}`}>
           <Input aria-label="Playback progress" type="range" {...seek.inputProps}
+            onPointerDown={(e) => { if (isMobile) flashControls(); seek.inputProps.onPointerDown?.(e); }}
             className="hg-range w-full" style={{ ...seek.inputProps.style, "--fill": `${pct}%` } as React.CSSProperties} />
           <div className="flex items-center gap-3 mt-1 text-white">
-            <Button onClick={toggle} aria-label={playing ? "Pause" : "Play"} className="pressable">
+            <Button onClick={() => { if (isMobile) flashControls(); toggle(); }} aria-label={playing ? "Pause" : "Play"} className="ios-compact pressable">
               {playing ? <IPauseF size={16} /> : <IPlayF size={16} />}
             </Button>
-            <Button onClick={() => onToggleMute?.()} aria-label={muted ? "Unmute" : "Mute"} className="pressable">
+            <Button onClick={() => { if (isMobile) flashControls(); onToggleMute?.(); }} aria-label={muted ? "Unmute" : "Mute"} className="ios-compact pressable">
               {muted ? <IVolMute size={16} /> : <IVol size={16} />}
             </Button>
             <span className="text-[12px] tabular-nums text-white/85">{fmtTime(seek.time)} / {fmtTime(duration)}</span>
             <div className="flex-1" />
-            <Button onClick={() => setControlsLocked(true)} aria-label="Lock controls" title="Lock controls" aria-pressed={false} className="pressable">
+            <Button onClick={() => setControlsLocked(true)} aria-label="Lock controls" title="Lock controls" aria-pressed={false} className="ios-compact pressable">
               <ILockF size={16} />
             </Button>
-            <Button onClick={cycleRate} className="text-[12px] font-bold text-white/85 pressable tabular-nums">{rate}x</Button>
-            <Button onClick={toggleFull} aria-label="Fullscreen" className="pressable">
+            <Button onClick={() => { if (isMobile) flashControls(); cycleRate(); }} className="ios-compact text-[12px] font-bold text-white/85 pressable tabular-nums">{rate}x</Button>
+            <Button onClick={() => { if (isMobile) flashControls(); toggleFull(); }} aria-label="Fullscreen" className="ios-compact pressable">
               {full ? <ICompress size={16} /> : <IExpand size={16} />}
             </Button>
           </div>

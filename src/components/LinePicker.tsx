@@ -216,7 +216,7 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
           hint="Global & CDN routes"
           actions={
             <Button onClick={() => probe(fixed, "fixed")} disabled={busyAll || !fixed.length}
-              className="text-[12px] text-primary pressable disabled:opacity-50">
+              className="ios-compact text-[12px] text-primary pressable disabled:opacity-50">
               {probing === "fixed" ? "Testing…" : "Test All"}
             </Button>
           }
@@ -235,7 +235,7 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
           actions={
             recommended?.length ? (
               <Button onClick={() => probe(recommended, "recommended")} disabled={busyAll}
-                className="text-[12px] text-primary pressable disabled:opacity-50">
+                className="ios-compact text-[12px] text-primary pressable disabled:opacity-50">
                 {probing === "recommended" ? "Testing…" : `Test All (${recommended.length})`}
               </Button>
             ) : undefined
@@ -258,12 +258,12 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
           actions={
             <>
               <Button onClick={() => { void readMirrors(); }} disabled={loadingMirrors}
-                className="inline-flex items-center gap-1 text-[12px] text-primary pressable disabled:opacity-50">
+                className="ios-compact inline-flex items-center gap-1 text-[12px] text-primary pressable disabled:opacity-50">
                 <IRefresh size={12} />{loadingMirrors ? "Fetching…" : "Refresh"}
               </Button>
               {!!mirrors?.length && (
                 <Button onClick={() => probe(mirrors, "mirrors")} disabled={busyAll}
-                  className="text-[12px] text-primary pressable disabled:opacity-50">
+                  className="ios-compact text-[12px] text-primary pressable disabled:opacity-50">
                   {probing === "mirrors" ? "Testing…" : `Test All (${mirrors.length})`}
                 </Button>
               )}

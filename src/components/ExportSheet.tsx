@@ -385,7 +385,7 @@ export default function ExportSheet({
       onClose={exporting ? () => {} : onClose}
       label={isBatch ? "Export Series" : "Export Episode"}
     >
-      <div className="flex flex-col max-h-[85vh] overflow-hidden bg-canvas text-on">
+      <div className="flex flex-col max-h-[85vh] overflow-hidden bg-s1 text-on">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-edge/30 shrink-0">
           <div className="flex items-center gap-2.5">

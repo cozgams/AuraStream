@@ -188,6 +188,7 @@ pub fn run() {
             let uri = request.uri().clone();
             let path = uri.path().to_string();
             let query = uri.query().unwrap_or("").to_string();
+            let is_head = request.method() == tauri::http::Method::HEAD;
             // Handle single-range GET request for iOS native player
             let range = if request.method() == tauri::http::Method::GET
                 && !request.headers().contains_key("If-Range")
@@ -199,7 +200,7 @@ pub fn run() {
             };
             // Platform-specific local origin defined in media::LOCAL_ORIGIN
             tauri::async_runtime::spawn(async move {
-                let mut resp = media::handle(&path, &query, media::LOCAL_ORIGIN, range.as_deref()).await;
+                let mut resp = media::handle_with_method(&path, &query, media::LOCAL_ORIGIN, range.as_deref(), is_head).await;
                 if let Some(origin) =
                     request_origin.and_then(|s| tauri::http::HeaderValue::from_str(&s).ok())
                 {

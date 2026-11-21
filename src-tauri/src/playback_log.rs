@@ -312,6 +312,7 @@ fn debug_lines(dir: &Path) -> Result<Vec<String>, String> {
             None => (None, line),
         };
         let rest = rest.strip_prefix(&format!("[pid={pid}] ")).unwrap_or(rest);
+        let scrubbed_text = scrub(&json!(rest.chars().take(2000).collect::<String>()), 0);
         out.push(
             json!({
                 "ts": stamp,
@@ -319,7 +320,7 @@ fn debug_lines(dir: &Path) -> Result<Vec<String>, String> {
                 "seq": SEQ.load(Ordering::Relaxed),
                 "event": "debug.line",
                 "strict": strict,
-                "data": { "source_ts": source_ts, "text": rest.chars().take(2000).collect::<String>() },
+                "data": { "source_ts": source_ts, "text": scrubbed_text },
             })
             .to_string(),
         );

@@ -712,7 +712,15 @@ export default function SubtitleSheet({
                 type="button"
                 disabled={!hasRealTrack}
                 onClick={async () => {
-                  const res = await processSubtitleExport(videoId, episode, "srt", title || "Episode");
+                  const res = await processSubtitleExport(
+                    videoId,
+                    episode,
+                    "srt",
+                    title || "Episode",
+                    "en",
+                    "save_downloads",
+                    streamUrl
+                  );
                   if (res.success) {
                     toast(`Exported ${res.fileName}`, "ok");
                   } else {
@@ -728,7 +736,15 @@ export default function SubtitleSheet({
                 type="button"
                 disabled={!hasRealTrack}
                 onClick={async () => {
-                  const res = await processSubtitleExport(videoId, episode, "vtt", title || "Episode");
+                  const res = await processSubtitleExport(
+                    videoId,
+                    episode,
+                    "vtt",
+                    title || "Episode",
+                    "en",
+                    "save_downloads",
+                    streamUrl
+                  );
                   if (res.success) {
                     toast(`Exported ${res.fileName}`, "ok");
                   } else {

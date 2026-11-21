@@ -96,10 +96,27 @@ export async function processSubtitleExport(
   format: "srt" | "vtt" = "srt",
   title?: string,
   lang: "en" = "en",
-  action: "save_movies" | "save_downloads" = "save_downloads"
+  action: "save_movies" | "save_downloads" = "save_downloads",
+  streamUrl?: string,
+  fallbackCues?: { id: number; start: number; end: number; en?: string; zh?: string }[]
 ): Promise<{ success: boolean; fileName: string; savedPath?: string; error?: string }> {
   try {
-    const track = await getSubtitlesForEpisode(videoId, episode, title);
+    let track = await getSubtitlesForEpisode(videoId, episode, title, undefined, streamUrl);
+    if ((!track?.cues?.length) && fallbackCues && fallbackCues.length > 0) {
+      track = {
+        videoId,
+        episode,
+        cues: fallbackCues.map((c, idx) => ({
+          id: c.id || idx + 1,
+          start: c.start,
+          end: c.end,
+          en: c.en || c.zh || "",
+          zh: c.zh || c.en || "",
+        })),
+        source: "native_track",
+        generatedAt: Date.now(),
+      };
+    }
     const cleanTitle = formatDramaTitle(title || `Episode_${episode}`);
     const safeTitle = sanitizeFileName(cleanTitle);
     const ext = format === "srt" ? "srt" : "vtt";
@@ -294,7 +311,7 @@ function splitHlsAttributes(attrList: string): string[] {
   return parts;
 }
 
-function parseExtXKey(line: string): { method: string; uri?: string; iv?: string } {
+export function parseExtXKey(line: string): { method: string; uri?: string; iv?: string } {
   const colonIdx = line.indexOf(":");
   if (colonIdx < 0) return { method: "" };
   const attrs = splitHlsAttributes(line.slice(colonIdx + 1));
@@ -318,7 +335,7 @@ function parseExtXKey(line: string): { method: string; uri?: string; iv?: string
   return { method, uri, iv };
 }
 
-function parseHlsIv(ivStr: string): Uint8Array {
+export function parseHlsIv(ivStr: string): Uint8Array {
   let hex = ivStr.trim();
   if (hex.startsWith("0x") || hex.startsWith("0X")) {
     hex = hex.slice(2);
@@ -334,7 +351,7 @@ function parseHlsIv(ivStr: string): Uint8Array {
   return out;
 }
 
-function sequenceToIv(seq: number): Uint8Array {
+export function sequenceToIv(seq: number): Uint8Array {
   const iv = new Uint8Array(16);
   const view = new DataView(iv.buffer);
   const high = Math.floor(seq / 0x100000000) >>> 0;
@@ -584,7 +601,7 @@ async function getEpisodeBlob(videoId: number, episode: number): Promise<{ blob:
         throw new Error(`No video segments stored for episode ${episode}`);
       }
       const resolveNativeFile = (rawUri: string) =>
-        rawUri.startsWith("http://") || rawUri.startsWith("https://")
+        rawUri.startsWith("http://") || rawUri.startsWith("https://") || rawUri.startsWith("hg://")
           ? rawUri
           : `${LOCAL}/offline/${id}/${rawUri.replace(/^\/+/, "")}`;
 

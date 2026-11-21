@@ -65,6 +65,10 @@ export const setAutoLine = (on: boolean): Promise<void> => {
 };
 
 export async function pickLine(reason: string, force = false): Promise<void> {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    if (started) schedule(30_000);
+    return;
+  }
   if (!autoLineEnabled() || picking || (!force && document.visibilityState !== "visible")) return;
   if (!force && lastPickAt !== null && Date.now() - lastPickAt < PICK_COOLDOWN_MS) return;
   picking = true;
@@ -85,7 +89,9 @@ export async function pickLine(reason: string, force = false): Promise<void> {
       down = true;
       logLine(`[line] auto(${reason}) all-down, keep ${hostOf(result.base)} | ${candidates}`);
       tracePlayback("line.allDown", { reason, line: hostOf(result.base), candidates });
-      window.dispatchEvent(new Event("hg:line-down"));
+      if (typeof navigator === "undefined" || navigator.onLine !== false) {
+        window.dispatchEvent(new Event("hg:line-down"));
+      }
       return;
     }
     lastPick = { base: result.base, tier: result.pick.tier, ms: result.pick.ms };
@@ -107,6 +113,7 @@ export async function pickLine(reason: string, force = false): Promise<void> {
 }
 
 async function tryMain(reason: string): Promise<void> {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return;
   if (!autoLineEnabled() || picking) return;
   picking = true;
   try {
@@ -129,6 +136,10 @@ async function tryMain(reason: string): Promise<void> {
 }
 
 async function check(reason: string): Promise<void> {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    if (started) schedule(30_000);
+    return;
+  }
   if (!autoLineEnabled() || checking) return;
   if (picking) {
     schedule(HEALTH_STEPS[step]);

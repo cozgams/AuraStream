@@ -239,11 +239,7 @@ function readAccentPreference(): AccentColor {
 function applyAccent(accent: AccentColor) {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
-  if (accent === "blue") {
-    root.removeAttribute("data-accent");
-  } else {
-    root.dataset.accent = accent;
-  }
+  root.dataset.accent = accent;
 }
 
 function applyTheme(theme: Theme) {
@@ -330,12 +326,16 @@ let seq = 0;
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [p, setP] = useState<Persist>(loadPersist);
+  const pRef = useRef(p);
+  pRef.current = p;
   const [themePreference, setThemePreferenceState] = useState<ThemePreference>(readThemePreference);
   const [theme, setThemeState] = useState<Theme>(() => resolveTheme(readThemePreference()));
   const themeRef = useRef(theme);
   const [tab, setTabRaw] = useState<Tab>("home");
   const [stack, setStack] = useState<Page[]>([]);
   const [user, setUserState] = useState<User | null>(loadLocalUser);
+  const userRef = useRef(user);
+  userRef.current = user;
   const [cloudHydratedUid, setCloudHydratedUid] = useState<string | null>(null);
   const cloudHydratedUidRef = useRef<string | null>(null);
   const hydratingUidRef = useRef<string | null>(null);
@@ -640,20 +640,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     const unsub = subscribeAuthState((fbUser) => {
-      if (fbUser && fbUser.email) {
+      if (fbUser && fbUser.uid) {
         let hash = 0;
         for (let i = 0; i < fbUser.uid.length; i++) {
           hash = ((hash << 5) - hash) + fbUser.uid.charCodeAt(i);
           hash |= 0;
         }
+        const emailPrefix = fbUser.email ? fbUser.email.split("@")[0] : "";
         setUser({
           id: Math.abs(hash) || 10001,
-          username: fbUser.email.split("@")[0] || "User",
-          nickname: fbUser.displayName || fbUser.email.split("@")[0] || "User",
+          username: emailPrefix || "User",
+          nickname: fbUser.displayName || emailPrefix || "User",
           avatar: fbUser.photoURL || "",
           avatar_color: "#1a73e8",
           sign: "Firebase Cloud Sync Active",
-          desc: fbUser.email,
+          desc: fbUser.email || fbUser.uid,
           user_type: "firebase",
         });
         void hydrateCloudForUid(fbUser.uid);
@@ -661,7 +662,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         cloudHydratedUidRef.current = null;
         hydratingUidRef.current = null;
         setCloudHydratedUid(null);
-        setUserState((prev) => (prev?.user_type === "firebase" ? null : prev));
+        if (userRef.current?.user_type === "firebase") {
+          setUser(null);
+        } else {
+          setUserState((prev) => {
+            if (prev?.user_type === "firebase") {
+              removeStorage(STORAGE_KEYS.localUser);
+              return null;
+            }
+            return prev;
+          });
+        }
       }
     });
     return () => unsub?.();
@@ -684,20 +695,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const pop = useCallback(() => setStack((s) => s.slice(0, -1)), []);
 
   const toggleLikeLocal = useCallback((id: number) => {
-    let on = false;
+    const on = !pRef.current.likes.includes(id);
     setP((s) => {
-      on = !s.likes.includes(id);
-      const likes = on ? [id, ...s.likes] : s.likes.filter((x) => x !== id);
+      const likes = on ? (s.likes.includes(id) ? s.likes : [id, ...s.likes]) : s.likes.filter((x) => x !== id);
       const favs = on ? (s.favs.includes(id) ? s.favs : [id, ...s.favs]) : s.favs.filter((x) => x !== id);
       return { ...s, likes, favs };
     });
     return on;
   }, []);
   const toggleFavLocal = useCallback((id: number) => {
-    let on = false;
+    const on = !pRef.current.favs.includes(id);
     setP((s) => {
-      on = !s.favs.includes(id);
-      const favs = on ? [id, ...s.favs] : s.favs.filter((x) => x !== id);
+      const favs = on ? (s.favs.includes(id) ? s.favs : [id, ...s.favs]) : s.favs.filter((x) => x !== id);
       const likes = on ? (s.likes.includes(id) ? s.likes : [id, ...s.likes]) : s.likes.filter((x) => x !== id);
       return { ...s, likes, favs };
     });
@@ -705,20 +714,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
   const clearFavs = useCallback(() => setP((s) => ({ ...s, favs: [], likes: [] })), []);
   const toggleWatchLaterLocal = useCallback((id: number) => {
-    let on = false;
+    const on = !(pRef.current.watchLater || []).includes(id);
     setP((s) => {
       const list = s.watchLater || [];
-      on = !list.includes(id);
-      return { ...s, watchLater: on ? [id, ...list] : list.filter((x) => x !== id) };
+      return { ...s, watchLater: on ? (list.includes(id) ? list : [id, ...list]) : list.filter((x) => x !== id) };
     });
     return on;
   }, []);
   const clearWatchLater = useCallback(() => setP((s) => ({ ...s, watchLater: [] })), []);
   const toggleFollowLocal = useCallback((uid: number) => {
-    let on = false;
+    const on = !pRef.current.follows.includes(uid);
     setP((s) => {
-      on = !s.follows.includes(uid);
-      return { ...s, follows: on ? [uid, ...s.follows] : s.follows.filter((x) => x !== uid) };
+      return { ...s, follows: on ? (s.follows.includes(uid) ? s.follows : [uid, ...s.follows]) : s.follows.filter((x) => x !== uid) };
     });
     return on;
   }, []);
@@ -743,7 +750,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const entry: WatchProgress = {
           id,
           ep: ep ?? prev?.ep ?? 1,
-          t: epChanged ? 0 : (t ?? prev?.t ?? 0),
+          t: t ?? (epChanged ? 0 : (prev?.t ?? 0)),
           dur: dur ?? prev?.dur ?? 0,
           at: Date.now(),
           title: meta?.title?.trim() ? meta.title : prev?.title,

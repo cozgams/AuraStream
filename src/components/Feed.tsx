@@ -101,6 +101,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [duration, setDuration] = useState(0);
   const [vsize, setVsize] = useState({ w: 0, h: 0 });
   const bufferedRef = useRef(0);
+  const sessionKeyRef = useRef(`feed_${Math.random().toString(36).slice(2)}`);
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
   const [paused, setPaused] = useState(false);
   const [controlsLocked, setControlsLocked] = useState(false);
   const [rate, setRate] = useState(1);
@@ -282,7 +284,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [offlineRev, setOfflineRev] = useState(0);
   const rawOfflineList = useMemo(() => {
     void offlineRev;
-    return getOfflineEpisodes().filter((e) => e.videoId === curId);
+    return getOfflineEpisodes()
+      .filter((e) => e.videoId === curId)
+      .sort((a, b) => a.episode - b.episode);
   }, [curId, offlineRev]);
 
   const offlineEps = useMemo(() => {
@@ -294,7 +298,20 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     }));
   }, [rawOfflineList]);
 
+  useEffect(() => {
+    if (!offlineOnly || !curId || rawOfflineList.length === 0) return;
+    if (!isEpisodeDownloaded(curId, curEp)) {
+      setEpMap((m) => ({ ...m, [curId]: rawOfflineList[0].episode }));
+    }
+  }, [offlineOnly, curId, curEp, rawOfflineList]);
+
   const episodes = (detail?.episodes && detail.episodes.length > 0) ? detail.episodes : offlineEps;
+  const curEpIndex = episodes.findIndex((e) => e.ep_num === curEp);
+  const prevEpObj = curEpIndex > 0 ? episodes[curEpIndex - 1] : undefined;
+  const nextEpObj =
+    curEpIndex >= 0 && curEpIndex < episodes.length - 1
+      ? episodes[curEpIndex + 1]
+      : episodes.find((e) => e.ep_num === curEp + 1);
   const post = posts[curId];
   const [exportModalOpen, setExportModalOpen] = useState<boolean>(false);
   const [targetExportEpisode, setTargetExportEpisode] = useState<number | null>(null);
@@ -328,6 +345,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     const unsubSleep = subscribeSleepTimer((rem, opt) => {
       setLocalSleepTimer(opt);
       if (rem === 0) {
+        videoRef.current?.pause();
         setPaused(true);
         toast("Sleep timer expired: Playback paused", "info");
       }
@@ -362,21 +380,51 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
             : rawOfflineList[0]?.title
               ? formatDramaTitle(rawOfflineList[0].title)
               : "AuraStream";
+  /** Unified view model: short dramas and posts share playback surface */
+  const meta = kind === "post"
+    ? {
+        title: post?.title || "",
+        cover: post?.cover || "",
+        desc: post?.content || post?.desc || "",
+        author: "Community",
+        authorId: -1,
+        tags: post?.tags || [],
+        score: 0,
+        like: 0,
+        comment: 0,
+        collect: 0,
+        episodes: [] as Episode[],
+      }
+    : {
+        title: detail?.title || cards[curId]?.title || title || historyItem?.title || rawOfflineList[0]?.title || "",
+        cover: detail?.cover || cards[curId]?.cover || historyItem?.cover || rawOfflineList[0]?.cover || "",
+        desc: detail?.description || "",
+        author: detail?.author?.name || "AAA",
+        authorId: detail?.author?.id || -1,
+        authorAvatar: detail?.author?.avatar || "",
+        tags: (detail?.tags && detail.tags.length > 0) ? detail.tags : (historyItem?.tags && historyItem.tags.length > 0) ? historyItem.tags : [],
+        score: detail?.score || 0,
+        like: detail?.counts?.like ?? cards[curId]?.like_count ?? 0,
+        comment: detail?.counts?.comment ?? cards[curId]?.comment_count ?? 0,
+        collect: detail?.counts?.collect ?? cards[curId]?.collect_count ?? 0,
+        episodes: (detail?.episodes && detail.episodes.length > 0) ? detail.episodes : offlineEps,
+      };
+
+  const curOfflineEpMeta = rawOfflineList.find((e) => e.episode === curEp) || rawOfflineList[0];
+  const hasLocalPoster = Boolean(curOfflineEpMeta?.storage === "native" && curOfflineEpMeta?.hasLocalCover);
+  const posterUrl = hasLocalPoster
+    ? getOfflineCoverUrl(curOfflineEpMeta, 900)
+    : offlineOnly || (typeof navigator !== "undefined" && navigator.onLine === false)
+      ? ""
+      : meta.cover
+        ? cover(meta.cover, 900)
+        : "";
+
   const epTitle = (episodes && episodes.find((e) => e.ep_num === curEp)?.title) || `Episode ${curEp}`;
   const mediaSessionTitle = episodes && episodes.length > 1 ? `${dramaTitle} · ${epTitle}` : dramaTitle;
   const authorName = detail?.author?.name || "AAA";
   const mediaSessionArtist = formatDramaAuthor(authorName);
-  const mediaSessionCover = detail?.cover
-    ? cover(detail.cover)
-    : post?.cover
-      ? cover(post.cover)
-      : cards[curId]?.cover
-        ? cover(cards[curId].cover)
-        : historyItem?.cover
-          ? cover(historyItem.cover)
-          : rawOfflineList[0]?.cover
-            ? cover(rawOfflineList[0].cover)
-            : "";
+  const mediaSessionCover = posterUrl;
 
   useMediaSession({
     title: mediaSessionTitle,
@@ -391,8 +439,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     onPlay: () => videoRef.current?.play(),
     onPause: () => videoRef.current?.pause(),
     onSeek: (target) => videoRef.current?.seek(target, "mediasession"),
-    onPreviousTrack: curEp > 1 ? () => setEpMap((m) => ({ ...m, [curId]: curEp - 1 })) : undefined,
-    onNextTrack: episodes && curEp < episodes.length ? () => setEpMap((m) => ({ ...m, [curId]: curEp + 1 })) : undefined,
+    onPreviousTrack: prevEpObj ? () => setEpMap((m) => ({ ...m, [curId]: prevEpObj.ep_num })) : undefined,
+    onNextTrack: nextEpObj ? () => setEpMap((m) => ({ ...m, [curId]: nextEpObj.ep_num })) : undefined,
   });
 
   /* Watch progress periodic sync */
@@ -411,15 +459,16 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         duration > 0 &&
         t / duration >= 0.75 &&
         episodes.length > 0 &&
-        !isEpisodeDownloaded(curId, curEp + 1)
+        nextEpObj &&
+        !isEpisodeDownloaded(curId, nextEpObj.ep_num)
       ) {
         void checkSmartDownloadNextEpisode(curId, curEp, episodes.length, {
           title: formatDramaTitle(meta?.title) || `Episode ${curEp}`,
-          cover: posterUrl || meta?.cover || "",
+          cover: meta?.cover || "",
         });
       }
-      if (t > 3 && episodes.some((e) => e.ep_num === curEp + 1) && !isEpisodeDownloaded(curId, curEp + 1)) {
-        void preloadEpisode(curId, curEp + 1, {
+      if (t > 3 && nextEpObj && !isEpisodeDownloaded(curId, nextEpObj.ep_num)) {
+        void preloadEpisode(curId, nextEpObj.ep_num, {
           preferHevc,
           title: formatDramaTitle(meta?.title),
           maxSegments: 5,
@@ -456,44 +505,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       }
     }
   };
-
-  /** Unified view model: short dramas and posts share playback surface */
-  const meta = kind === "post"
-    ? {
-        title: post?.title || "",
-        cover: post?.cover || "",
-        desc: post?.content || post?.desc || "",
-        author: "Community",
-        authorId: -1,
-        tags: post?.tags || [],
-        score: 0,
-        like: 0,
-        comment: 0,
-        collect: 0,
-        episodes: [] as Episode[],
-      }
-    : {
-        title: detail?.title || cards[curId]?.title || title || historyItem?.title || rawOfflineList[0]?.title || "",
-        cover: detail?.cover || cards[curId]?.cover || historyItem?.cover || rawOfflineList[0]?.cover || "",
-        desc: detail?.description || "",
-        author: detail?.author?.name || "AAA",
-        authorId: detail?.author?.id || -1,
-        authorAvatar: detail?.author?.avatar || "",
-        tags: (detail?.tags && detail.tags.length > 0) ? detail.tags : (historyItem?.tags && historyItem.tags.length > 0) ? historyItem.tags : [],
-        score: detail?.score || 0,
-        like: detail?.counts?.like ?? cards[curId]?.like_count ?? 0,
-        comment: detail?.counts?.comment ?? cards[curId]?.comment_count ?? 0,
-        collect: detail?.counts?.collect ?? cards[curId]?.collect_count ?? 0,
-        episodes: (detail?.episodes && detail.episodes.length > 0) ? detail.episodes : offlineEps,
-      };
-
-  const curOfflineEpMeta = rawOfflineList.find((e) => e.episode === curEp) || rawOfflineList[0];
-  const hasLocalPoster = Boolean(curOfflineEpMeta?.storage === "native" && curOfflineEpMeta?.hasLocalCover);
-  const posterUrl = hasLocalPoster
-    ? getOfflineCoverUrl(curOfflineEpMeta, 900)
-    : offlineOnly
-      ? ""
-      : cover(meta.cover, 900);
 
   const saveHistory = useCallback((ep?: number, currentT?: number, currentDur?: number) => {
     if (!curId) return;
@@ -589,9 +600,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
      Desktop arrow keys and side controls mirror mobile swipe behavior. */
   const stepDir = useCallback((dir: number) => {
     if (swipeEp && kind === "video") {
-      const ep = epMap[curId] || 1;
-      const total = episodes.length;
-      const want = dir === 1 ? (total > 0 && ep < total ? ep + 1 : 0) : (ep > 1 ? ep - 1 : 0);
+      const want = dir === 1 ? nextEpObj?.ep_num : prevEpObj?.ep_num;
       if (want) {
         setEpMap((m) => ({ ...m, [curId]: want }));
         setPanel(null);
@@ -599,13 +608,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       }
     }
     go(dir);
-  }, [swipeEp, kind, epMap, curId, episodes.length, go]);
+  }, [swipeEp, kind, nextEpObj, prevEpObj, curId, go]);
 
   const canStep = (dir: number) => {
     if (swipeEp && kind === "video") {
-      const ep = epMap[curId] || 1;
-      const total = episodes.length;
-      if (dir === 1 ? (total === 0 || ep < total) : ep > 1) return true;
+      if (dir === 1 ? Boolean(nextEpObj) : Boolean(prevEpObj)) return true;
     }
     const next = index + dir;
     return next >= 0 && next < videoIds.length;
@@ -679,7 +686,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       if (isEpisodeDownloaded(curId, curEp)) {
         if (offlineUrls[playKey]) return;
         try {
-          const localUrl = await getOfflinePlaybackUrl(curId, curEp, "feed-active");
+          const localUrl = await getOfflinePlaybackUrl(curId, curEp, sessionKeyRef.current);
           if (!alive) return;
           if (localUrl) {
             logLine(`[play] id=${curId} ep=${curEp} playing from local offline cache`);
@@ -753,21 +760,27 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
     return () => {
       alive = false;
-      setOfflineUrls((m) => {
-        if (!m[playKey]?.startsWith("blob:")) return m;
-        const next = { ...m };
-        delete next[playKey];
-        return next;
-      });
-      setPlayUrls((m) => {
-        if (!m[playKey]?.startsWith("blob:")) return m;
-        const next = { ...m };
-        delete next[playKey];
-        return next;
-      });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [curId, curEp, proxyRetry, offlineOnly, offlineRev]);
+
+  useEffect(() => {
+    const key = playKey;
+    return () => {
+      setOfflineUrls((m) => {
+        if (!m[key]?.startsWith("blob:")) return m;
+        const next = { ...m };
+        delete next[key];
+        return next;
+      });
+      setPlayUrls((m) => {
+        if (!m[key]?.startsWith("blob:")) return m;
+        const next = { ...m };
+        delete next[key];
+        return next;
+      });
+    };
+  }, [playKey]);
 
   /* Episode warmup: strictly skipped in zeroDataMode or for already-downloaded episodes */
   useEffect(() => {
@@ -816,7 +829,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [curId, curEp, episodes.length, index, videoIds, kind, zeroDataMode]);
 
-  /* Reset playback state on item/episode change */
+  /* Reset playback state and track video element on item/episode change */
   useEffect(() => {
     setTime(0); setDuration(0); bufferedRef.current = 0; setErr(""); setWaiting(true); setVideoStarted(false); setPaused(false); setDescOpen(false);
     setCancelAutoNext(false);
@@ -825,6 +838,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     setVsize({ w: 0, h: 0 });
     setPortraitFit("contain");
   }, [playKey]);
+
+  useEffect(() => {
+    setVideoEl(videoRef.current?.el() ?? null);
+  }, [playKey, active]);
 
   /* Volume and mute state synchronization */
   useEffect(() => { videoRef.current?.mute(muted); }, [muted]);
@@ -836,7 +853,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   useEffect(() => () => {
     const s = liveRef.current;
     if (s.id && s.dur) saveHistoryRef.current(s.ep, s.t, s.dur);
-    revokeOfflinePlaybackUrls();
+    revokeOfflinePlaybackUrls(sessionKeyRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1057,9 +1074,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       const dx2 = e.clientX - g.x;
       if (Math.abs(dy) > 56 && Math.abs(dy) > Math.abs(dx2)) {
         const dir = dy < 0 ? 1 : -1;
-        const ep = epMap[curId] || 1;
+        const want = dir === 1 ? nextEpObj?.ep_num : prevEpObj?.ep_num;
         const total = episodes.length;
-        const want = dir === 1 ? (total > 0 && ep < total ? ep + 1 : 0) : (ep > 1 ? ep - 1 : 0);
         if (swipeEp && kind === "video" && want) {
           setEpMap((m) => ({ ...m, [curId]: want }));
           toast(total ? `Ep. ${want} / ${total}` : `Ep. ${want}`, "info");
@@ -1138,10 +1154,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   }, []);
 
   const enterFs = useCallback((landscape: boolean) => {
+    const wasPlaying = videoRef.current?.el()?.paused === false;
     setClean(false);
     setFs(true);
     wake();
-    keepAlive();
+    if (wasPlaying) keepAlive();
     if (!isDesktop) {
       try { void invoke("set_orientation", { landscape }); } catch { /* ignore */ }
       if (landscape) {
@@ -1153,14 +1170,21 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   }, [isDesktop, keepAlive, setClean, setFs]);
 
   const exitFs = useCallback(() => {
+    const wasPlaying = videoRef.current?.el()?.paused === false;
     setClean(false);
     setFs(false);
-    keepAlive();
+    if (wasPlaying) keepAlive();
     if (!isDesktop) {
       try { void invoke("set_orientation", { landscape: false }); } catch { /* ignore */ }
       try { screen.orientation?.unlock?.(); } catch { /* ignore */ }
     }
   }, [isDesktop, keepAlive, setClean, setFs]);
+
+  useEffect(() => {
+    if (isDesktop || fs) return;
+    try { void invoke("set_orientation", { landscape: false }); } catch { /* ignore */ }
+    try { screen.orientation?.unlock?.(); } catch { /* ignore */ }
+  }, [isDesktop, fs]);
 
   /* Re-request landscape orientation if video dimensions resolve after fullscreen entry */
   useEffect(() => {
@@ -1176,11 +1200,14 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   useEffect(() => {
     if (isDesktop) return undefined;
     const onViewportChange = () => {
+      const ae = document.activeElement?.tagName;
+      if (ae === "INPUT" || ae === "TEXTAREA" || panel !== null) return;
       const isLand = window.innerWidth > window.innerHeight;
       setVpLandscape((prev) => {
         if (prev !== isLand && active) {
+          const wasPlaying = videoRef.current?.el()?.paused === false;
           setFs(isLand);
-          keepAlive();
+          if (wasPlaying) keepAlive();
         }
         return isLand;
       });
@@ -1191,7 +1218,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       window.removeEventListener("resize", onViewportChange);
       window.removeEventListener("orientationchange", onViewportChange);
     };
-  }, [isDesktop, active, setFs, keepAlive]);
+  }, [isDesktop, active, panel, setFs, keepAlive]);
 
   /* Calibrates scroll container scrollTop after orientation change
      - Aligns active video item to top of viewport
@@ -1294,20 +1321,16 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState === "hidden" && !inPip) {
-        // Record whether playback was active or waiting to load before exiting to background
         wasPlayingBeforeHiddenRef.current = !paused || waiting;
-        // Allow the video to keep buffering the full episode from the background!
-        // Mute video audio so sound doesn't blast when in background/other apps
         if (videoRef.current) {
-          videoRef.current.mute(true);
+          videoRef.current.pause();
         }
       } else if (document.visibilityState === "visible") {
-        // Restore user's original muted preference
         if (videoRef.current) {
           videoRef.current.mute(muted);
         }
-        // When returning from background: if it was playing or buffering before leaving, auto-resume smoothly
-        if (wasPlayingBeforeHiddenRef.current && videoRef.current) {
+        if (active && wasPlayingBeforeHiddenRef.current && videoRef.current) {
+          wasPlayingBeforeHiddenRef.current = false;
           setPaused(false);
           setWaiting(false);
           try {
@@ -1320,7 +1343,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [inPip, waiting, paused, muted]);
+  }, [active, inPip, waiting, paused, muted]);
 
   useEffect(() => {
     // Mini PiP popup on app switch / home disabled per user requirement
@@ -1481,11 +1504,20 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         onClick={() => { if (isDesktop) videoRef.current?.toggle(); }}
                         onTime={(t) => {
                           if (t > 0.1 && !videoStarted) setVideoStarted(true);
+                          const v = videoRef.current?.el();
+                          if (v && v !== videoEl) setVideoEl(v);
+                          if (v && v.buffered.length > 0) {
+                            bufferedRef.current = v.buffered.end(v.buffered.length - 1);
+                          }
                           onTimeTick(t);
                         }}
                         onDuration={onDurationTick}
                         onSize={(w, h) => setVsize((prev) => (prev.w === w && prev.h === h ? prev : { w, h }))}
-                        onPlaying={() => { setPaused(false); setWaiting(false); setErr(""); setVideoStarted(true); }}
+                        onPlaying={() => {
+                          const v = videoRef.current?.el();
+                          if (v && v !== videoEl) setVideoEl(v);
+                          setPaused(false); setWaiting(false); setErr(""); setVideoStarted(true);
+                        }}
                         onPause={() => setPaused(true)}
                         onWaiting={() => setWaiting(true)}
                         onEnded={() => {
@@ -1501,9 +1533,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                               setPaused(true);
                               return;
                             }
-                            const next = episodes.find((e) => e.ep_num === curEp + 1);
-                            if (next) {
-                              pickEp(next.ep_num);
+                            if (nextEpObj) {
+                              pickEp(nextEpObj.ep_num);
                             } else if (mode === "home" && index < videoIds.length - 1) {
                               go(1);
                               toast("Series ended, starting next drama", "info");
@@ -1511,11 +1542,13 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                           }
                         }}
                         onError={(m) => {
-                          setErr(localizeError(m, store.language));
                           if (preferHevc && hevcUrl) {
+                            setErr("");
                             setPreferHevc(false);
                             toast("HD playback unavailable, switched to SD", "info");
+                            return;
                           }
+                          setErr(localizeError(m, store.language));
                         }} />
                     </div>
                   </div>
@@ -1531,7 +1564,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     clean={clean}
                     fs={fs}
                     bottomOffset={bottomInset}
-                    videoEl={videoRef.current?.el()}
+                    videoEl={videoEl ?? videoRef.current?.el()}
                     onTrackStatus={setSubtitleTrackInfo}
                   />
 
@@ -1563,7 +1596,19 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 </>
               ) : (
                 <div className="absolute inset-0">
-                  <Img src={detail?.cover || cards[vid]?.cover || posts[vid]?.cover || ""} eager={Math.abs(i - index) <= 1} />
+                  <Img
+                    src={(() => {
+                      const localMatch = getOfflineEpisodes().find(
+                        (ep) => ep.videoId === vid && ep.storage === "native" && ep.hasLocalCover
+                      );
+                      if (localMatch) return getOfflineCoverUrl(localMatch, 900);
+                      if (offlineOnly || (typeof navigator !== "undefined" && navigator.onLine === false)) {
+                        return "";
+                      }
+                      return detail?.cover || cards[vid]?.cover || posts[vid]?.cover || "";
+                    })()}
+                    eager={Math.abs(i - index) <= 1}
+                  />
                   <div className="absolute inset-0" style={{ background: "rgba(0,0,0,.25)" }} />
                 </div>
               )}
@@ -1593,15 +1638,15 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                   <div className="absolute inset-x-0 z-20 flex items-center gap-2 px-2.5" style={{ top: "calc(var(--sat, 0px) + 8px)", paddingRight: mode === "context" ? 170 : 210 }}>
                     <Button onClick={onBack} aria-label={t("common.back")} className="hg-chip w-9 h-9 rounded-full flex items-center justify-center pressable elev-1"><IBack size={20} /></Button>
                     <span className="text-[15px] font-semibold hg-ink hg-ov-shadow truncate max-w-[130px]">{title}</span>
+                    {!panel && (
+                      <span className="feed-position-pill shrink-0 px-2.5 py-0.5 rounded-full hg-chip text-[11.5px] font-semibold tabular-nums"
+                        style={{ color: "rgba(255,255,255,.94)" }}>
+                        {index + 1} / {videoIds.length}
+                      </span>
+                    )}
                   </div>
                 )
               ) : null}
-              {!fs && !clean && !isDesktop && mode === "context" && !panel && (
-                <span className="feed-position-pill absolute z-20 px-2.5 py-1 rounded-full hg-chip text-[12px] font-semibold tabular-nums"
-                  style={{ top: "calc(max(var(--sat, 0px), 36px) + 12px)", left: 14, color: "rgba(255,255,255,.94)" }}>
-                  {index + 1} / {videoIds.length}
-                </span>
-              )}
 
               {/* Portrait quick action controls:
                   Reset zoom pill if zoomed in.
@@ -1631,10 +1676,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                   <Button
                     type="button"
                     onClick={onFav}
-                    onTouchEnd={(e) => {
-                      e.preventDefault();
-                      onFav();
-                    }}
                     style={{ touchAction: "manipulation" }}
                     className="flex flex-col items-center justify-center min-w-[50px] min-h-[50px] gap-0.5 pressable cursor-pointer select-none active:scale-95 transition-transform"
                     aria-pressed={isFav(curId)}
@@ -1650,10 +1691,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                   <Button
                     type="button"
                     onClick={() => setPanel("comments")}
-                    onTouchEnd={(e) => {
-                      e.preventDefault();
-                      setPanel("comments");
-                    }}
                     style={{ touchAction: "manipulation" }}
                     className="flex flex-col items-center justify-center min-w-[50px] min-h-[50px] gap-0.5 pressable cursor-pointer select-none active:scale-95 transition-transform"
                     aria-label={t("player.comments")}
@@ -1666,10 +1703,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                   <Button
                     type="button"
                     onClick={() => setDownloadChoiceOpen(true)}
-                    onTouchEnd={(e) => {
-                      e.preventDefault();
-                      setDownloadChoiceOpen(true);
-                    }}
                     style={{ touchAction: "manipulation" }}
                     className="flex flex-col items-center justify-center min-w-[50px] min-h-[50px] gap-0.5 pressable cursor-pointer select-none active:scale-95 transition-transform"
                     aria-label="Offline Download"
@@ -1708,10 +1741,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                   <Button
                     type="button"
                     onClick={shareLink}
-                    onTouchEnd={(e) => {
-                      e.preventDefault();
-                      shareLink();
-                    }}
                     style={{ touchAction: "manipulation" }}
                     className="flex flex-col items-center justify-center min-w-[50px] min-h-[50px] gap-0.5 pressable cursor-pointer select-none active:scale-95 transition-transform"
                     aria-label={t("player.share")}
@@ -1724,10 +1753,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                   <Button
                     type="button"
                     onClick={() => setPanel("more")}
-                    onTouchEnd={(e) => {
-                      e.preventDefault();
-                      setPanel("more");
-                    }}
                     style={{ touchAction: "manipulation" }}
                     className="flex flex-col items-center justify-center min-w-[50px] min-h-[50px] gap-0.5 pressable cursor-pointer select-none active:scale-95 transition-transform"
                     aria-label="More Options"
@@ -1871,14 +1896,14 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     </div>
                   )}
 
-                  {duration > 20 && duration - time <= 8 && duration - time > 0.4 && !paused && !cancelAutoNext && dismissNextEp !== curEp && episodes.some((e) => e.ep_num === curEp + 1) && (
+                  {duration > 20 && duration - time <= 8 && duration - time > 0.4 && !paused && !cancelAutoNext && dismissNextEp !== curEp && Boolean(nextEpObj) && (
                     <div className="px-4 pb-2 pointer-events-auto max-w-[320px]">
                       <div className="flex items-center justify-between gap-3 px-3.5 py-2 rounded-2xl bg-black/85 backdrop-blur-xl border border-amber-400/35 text-white shadow-[0_8px_32px_rgba(0,0,0,0.65)] a-pop">
                         <div className="flex items-center gap-2 min-w-0">
                           <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
                           <div className="flex flex-col min-w-0">
                             <span className="text-[10.5px] font-medium text-white/70 leading-tight">Next in {Math.ceil(duration - time)}s</span>
-                            <span className="text-[12px] font-bold text-amber-400 truncate leading-tight">Episode {curEp + 1}</span>
+                            <span className="text-[12px] font-bold text-amber-400 truncate leading-tight">Episode {nextEpObj!.ep_num}</span>
                           </div>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
@@ -1896,7 +1921,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                           </Button>
                           <Button
                             type="button"
-                            onClick={() => pickEp(curEp + 1)}
+                            onClick={() => pickEp(nextEpObj!.ep_num)}
                             className="h-6 px-2.5 rounded-lg bg-primary text-on-primary font-bold text-[11px] flex items-center gap-1 shadow-md pressable"
                           >
                             <IPlayF size={9} />
@@ -1921,7 +1946,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       </span>
                     )}
                   </div>
-                    <div ref={barRef} className="mx-4 mt-2 relative" style={{ height: 14, touchAction: "none" }}
+                    <div ref={barRef} className="mx-4 mt-1 relative pointer-events-auto" style={{ height: 24, touchAction: "none" }}
                       onPointerDown={onBarDown} onPointerMove={onBarMove} onPointerUp={onBarUp} onPointerCancel={onBarUp}>
                       {/* Scrub track */}
                       <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-[2px] rounded-full" style={{ background: "rgba(255,255,255,.1)" }}>
@@ -1966,10 +1991,17 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               {/* Play / Pause / Buffering state */}
               {isActive && paused && !err && (
                 <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-                  <span className="w-[66px] h-[66px] rounded-full flex items-center justify-center backdrop-blur-md"
+                  <button
+                    type="button"
+                    aria-label="Play"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      videoRef.current?.toggle();
+                    }}
+                    className="pointer-events-auto w-[66px] h-[66px] rounded-full flex items-center justify-center backdrop-blur-md pressable cursor-pointer"
                     style={{ background: "rgba(0,0,0,.55)", boxShadow: "inset 0 0 0 1px rgba(255,255,255,.12)" }}>
                     <IPlayF size={28} className="hg-ink ml-0.5" />
-                  </span>
+                  </button>
                 </div>
               )}
               {isActive && waiting && !err && !paused && (
@@ -2144,7 +2176,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       )}
 
       {/* Screen brightness dimming overlay */}
-      {brightness < 1 && (
+      {active && brightness < 1 && (
         <div
           className="pointer-events-none fixed inset-0 z-[35] transition-opacity duration-100"
           style={{ backgroundColor: "#000", opacity: (1 - brightness) * 0.85 }}
@@ -2160,8 +2192,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           visible={active && !idle}
           seekEnabled={active && !controlsLocked}
           seekKey={playKey}
-          nextDisabled={!episodes.some((e) => e.ep_num === curEp + 1) && index >= videoIds.length - 1}
-          nextTitle={episodes.some((e) => e.ep_num === curEp + 1) ? `${t("player.next_ep")} E` : `${t("player.next")} ↓`}
+          nextDisabled={!nextEpObj && index >= videoIds.length - 1}
+          nextTitle={nextEpObj ? `${t("player.next_ep")} ${nextEpObj.ep_num}` : `${t("player.next")} ↓`}
           swipeEp={swipeEp}
           onToggleSwipe={() => { setSwipeEp(!swipeEp); toast(swipeEp ? t("player.swipe_ep_off") : t("player.swipe_ep_on")); }}
           onToggle={() => videoRef.current?.toggle()}
@@ -2175,8 +2207,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           onTheater={() => setTheater((v) => !v)}
           onFullscreen={toggleFull}
           onNext={() => {
-            const nx = episodes.find((e) => e.ep_num === curEp + 1);
-            if (nx) pickEp(nx.ep_num);
+            if (nextEpObj) pickEp(nextEpObj.ep_num);
             else go(1);
           }}
         />
@@ -2255,10 +2286,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               className={`ml-auto shrink-0 flex items-center gap-1 px-2.5 h-8 rounded-full text-[13px] font-bold pressable ${effRate !== 1 ? "bg-primary text-on-primary" : "hg-chip hg-ink-2"}`}>
               <IBoltF size={12} />{effRate}x
             </Button>
-            {curEp < episodes.length && (
-              <Button onClick={() => pickEp(curEp + 1)}
+            {nextEpObj && (
+              <Button onClick={() => pickEp(nextEpObj.ep_num)}
                 className="shrink-0 flex items-center gap-1 px-2.5 h-8 rounded-full text-[13px] font-semibold hg-chip hg-ink-2 pressable"
-                aria-label={`${t("player.next_ep")} ${t("player.episode_num", { num: curEp + 1 })}`}>
+                aria-label={`${t("player.next_ep")} ${t("player.episode_num", { num: nextEpObj.ep_num })}`}>
                 <IVertSwap size={12} />{t("player.next_ep")}
               </Button>
             )}
@@ -2272,7 +2303,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         <div className={`desktop-dock-panel ${panel ? "is-open" : ""}`}>
           <div className="desktop-dock-inner">
             {panel === "episodes" ? (
-              <EpisodesPanel videoId={curId} episodes={episodes} current={curEp} onPick={pickEp} onClose={() => setPanel(null)} title={formatDramaTitle(meta.title)} cover={posterUrl || meta.cover || ""} />
+              <EpisodesPanel videoId={curId} episodes={episodes} current={curEp} onPick={pickEp} onClose={() => setPanel(null)} title={formatDramaTitle(meta.title)} cover={posterUrl} />
             ) : panel === "comments" ? (
               <CommentsPanel videoId={curId} ep={curEp} total={meta.comment} kind={kind} onClose={() => setPanel(null)} />
             ) : null}
@@ -2311,13 +2342,13 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
               <div className="flex-1 min-h-0">
                 {panel === "episodes" ? (
-                  <EpisodesPanel bare videoId={curId} episodes={episodes} current={curEp} onPick={pickEp} onClose={() => setPanel(null)} title={formatDramaTitle(meta.title)} cover={posterUrl || meta.cover || ""} />
+                  <EpisodesPanel bare videoId={curId} episodes={episodes} current={curEp} onPick={pickEp} onClose={() => setPanel(null)} title={formatDramaTitle(meta.title)} cover={posterUrl} />
                 ) : (
                   <div className="h-full scroll-y px-4 pb-[calc(var(--sab,0px)+24px)]">
                     {/* Cover / Title / Score / Metrics */}
                     <div className="flex gap-3">
                       <Surface className="relative w-[84px] shrink-0 rounded-(--r-sm) overflow-hidden bg-s3" style={{ aspectRatio: "3 / 4" }}>
-                        <Img src={meta.cover} />
+                        <Img src={posterUrl || (offlineOnly || (typeof navigator !== "undefined" && navigator.onLine === false) ? "" : meta.cover)} />
                       </Surface>
                       <div className="flex-1 min-w-0">
                         <div className="text-[14px] font-bold text-on leading-snug clamp-2">{formatDramaTitle(meta.title)}</div>
@@ -2695,8 +2726,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         type="button"
                         onClick={() => {
                           setSleepTimer(val as SleepTimerOption, () => {
+                            videoRef.current?.pause();
                             setPaused(true);
-                            toast("Sleep timer: Playback paused", "info");
                           });
                           setLocalSleepTimer(val as SleepTimerOption);
                           toast(val === "off" ? "Sleep timer disabled" : `Sleep timer set to ${label}`, "ok");
@@ -2871,7 +2902,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         downloadProgress={currentDownload?.progress || 0}
         onStartSingleDownload={async (targetEp?: number) => {
           const epToDownload = targetEp || curEp;
-          let url = playUrl;
+          let url = epToDownload === curEp ? playUrl : "";
           let prefQuality = getDownloadQualityPreference();
           let isHevc = false;
           try {
@@ -2885,10 +2916,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               url = info.video_url;
             }
           } catch {
-            // fallback to playUrl
+            // only fall back to playUrl when targeting current episode
           }
           if (!url) {
-            toast("Waiting for stream URL...", "info");
+            toast(epToDownload === curEp ? "Waiting for stream URL..." : "Could not resolve stream URL for selected episode", "info");
             return;
           }
           toast(`Downloading Ep. ${epToDownload} in background...`, "info");
@@ -2897,7 +2928,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               curId,
               epToDownload,
               formatDramaTitle(meta?.title) || formatDramaTitle(detail?.title) || formatDramaTitle(title) || `Drama #${curId}`,
-              posterUrl || meta.cover || "",
+              meta.cover || "",
               url,
               false,
               prefQuality,

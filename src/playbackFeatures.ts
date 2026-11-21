@@ -16,8 +16,13 @@ let sleepTimerOption: SleepTimerOption = "off";
 let sleepTimerCallback: (() => void) | null = null;
 const sleepTimerListeners = new Set<(remainingSec: number | null, option: SleepTimerOption) => void>();
 
-function notifySleepTimer() {
-  const remaining = sleepTimerEndTime ? Math.max(0, Math.round((sleepTimerEndTime - Date.now()) / 1000)) : null;
+function notifySleepTimer(remainingOverride?: number | null) {
+  const remaining =
+    remainingOverride !== undefined
+      ? remainingOverride
+      : sleepTimerEndTime
+        ? Math.max(0, Math.round((sleepTimerEndTime - Date.now()) / 1000))
+        : null;
   for (const listener of sleepTimerListeners) {
     try {
       listener(remaining, sleepTimerOption);
@@ -57,7 +62,7 @@ export function setSleepTimer(option: SleepTimerOption, onTrigger?: () => void):
     sleepTimerTimeout = null;
     sleepTimerEndTime = null;
     sleepTimerOption = "off";
-    notifySleepTimer();
+    notifySleepTimer(0);
     if (sleepTimerCallback) {
       sleepTimerCallback();
     }

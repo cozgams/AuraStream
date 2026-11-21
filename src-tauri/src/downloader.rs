@@ -8,14 +8,14 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter};
-use tokio::sync::{Notify, Semaphore};
+use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::Notify;
 
 const MAX_CONCURRENT_WIFI: usize = 2;
 const MAX_CONCURRENT_CELLULAR: usize = 1;
@@ -32,6 +32,8 @@ static CELLULAR_MODE: AtomicBool = AtomicBool::new(false);
 static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
 
 static CANCEL_TOKENS: Lazy<Mutex<HashMap<String, Arc<AtomicBool>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+static ACTIVE_ABORTS: Lazy<Mutex<HashMap<String, tokio::task::AbortHandle>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -103,8 +105,6 @@ pub struct QueueDownloadItem {
     pub is_hevc: bool,
     #[serde(default = "default_true")]
     pub auto_resume: bool,
-    #[serde(default)]
-    pub auth_token: Option<String>,
     #[serde(default)]
     pub cues: Vec<Value>,
     #[serde(skip, default)]
@@ -196,6 +196,65 @@ pub fn offline_file_path(id: &str, file_name: &str) -> Option<PathBuf> {
         return None;
     }
     offline_root().map(|r| r.join(id).join(file_name))
+}
+
+pub fn unwrap_local_proxy_url(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if let Ok(parsed) = url::Url::parse(trimmed) {
+        let is_local_origin = parsed.scheme() == "hg"
+            || matches!(parsed.host_str(), Some("hg.localhost" | "127.0.0.1" | "localhost"));
+        if is_local_origin && matches!(parsed.path(), "/img" | "/hls" | "/seg") {
+            if let Some((_, val)) = parsed.query_pairs().find(|(k, _)| k == "u") {
+                let inner = val.trim();
+                if !inner.is_empty() {
+                    return inner.to_string();
+                }
+            }
+        }
+    }
+    trimmed.to_string()
+}
+
+pub fn parse_offline_asset_ref(raw: &str) -> Option<(String, String)> {
+    let parsed = url::Url::parse(raw.trim()).ok()?;
+    let is_local_origin = parsed.scheme() == "hg"
+        || matches!(parsed.host_str(), Some("hg.localhost" | "127.0.0.1" | "localhost"));
+    if !is_local_origin {
+        return None;
+    }
+    let rest = parsed.path().strip_prefix("/offline/")?;
+    let (id, file_name) = rest.split_once('/')?;
+    if is_safe_segment(id) && is_safe_segment(file_name) {
+        Some((id.to_string(), file_name.to_string()))
+    } else {
+        None
+    }
+}
+
+fn current_session_token(origin: &str) -> Option<String> {
+    if crate::network_policy::strict_security() && !crate::net::trusted_auth_origin(origin) {
+        return None;
+    }
+    let app = { APP_HANDLE.lock().unwrap_or_else(|e| e.into_inner()).clone() };
+    app.and_then(|h| h.state::<crate::api::Api>().session.token(origin))
+}
+
+fn remove_part_dir_async(root: &Path, id: &str) {
+    let part_dir = root.join(format!("{id}.part"));
+    if !part_dir.exists() {
+        return;
+    }
+    let trash_dir = root.join(format!(".trash_{}_{}", id, now_ms()));
+    if fs::rename(&part_dir, &trash_dir).is_ok() {
+        std::thread::spawn(move || {
+            let _ = fs::remove_dir_all(&trash_dir);
+        });
+    } else {
+        let dir = part_dir;
+        std::thread::spawn(move || {
+            let _ = fs::remove_dir_all(&dir);
+        });
+    }
 }
 
 fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -308,19 +367,16 @@ fn emit_frontend_snapshot(st: &DownloadEngineState) {
 }
 
 fn maybe_emit_and_write_status(force: bool) {
-    let snapshot_and_write = {
-        let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
-        let now = now_ms();
-        if !force && now.saturating_sub(st.last_emit_ms) < 350 {
-            return;
-        }
-        st.last_emit_ms = now;
-        if let Some(root) = offline_root() {
-            write_active_status_locked(&st, &root);
-        }
-        emit_frontend_snapshot(&st);
-    };
-    let _ = snapshot_and_write;
+    let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let now = now_ms();
+    if !force && now.saturating_sub(st.last_emit_ms) < 350 {
+        return;
+    }
+    st.last_emit_ms = now;
+    if let Some(root) = offline_root() {
+        write_active_status_locked(&st, &root);
+    }
+    emit_frontend_snapshot(&st);
 }
 
 pub fn format_bytes(bytes: u64) -> String {
@@ -368,6 +424,27 @@ pub fn bind(app: AppHandle, dir: PathBuf) {
 
     let root = dir.join("offline_downloads");
     let _ = fs::create_dir_all(&root);
+    // Clean up any leftover async-delete trash folders from previous runs
+    if let Ok(entries) = fs::read_dir(&root) {
+        let trash_dirs: Vec<PathBuf> = entries
+            .flatten()
+            .filter_map(|e| {
+                let name = e.file_name();
+                if name.to_string_lossy().starts_with(".trash_") {
+                    Some(e.path())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if !trash_dirs.is_empty() {
+            std::thread::spawn(move || {
+                for d in trash_dirs {
+                    let _ = fs::remove_dir_all(d);
+                }
+            });
+        }
+    }
 
     let mut completed: Vec<CompletedOfflineEpisode> = fs::read_to_string(root.join("index.json"))
         .ok()
@@ -420,14 +497,27 @@ fn new_cancel_flag(id: &str) -> Arc<AtomicBool> {
 }
 
 fn trigger_cancel_flag(id: &str) {
-    let mut map = CANCEL_TOKENS.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(prev) = map.remove(id) {
-        prev.store(true, Ordering::Release);
+    {
+        let mut map = CANCEL_TOKENS.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(prev) = map.remove(id) {
+            prev.store(true, Ordering::Release);
+        }
+    }
+    {
+        let mut aborts = ACTIVE_ABORTS.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(ah) = aborts.remove(id) {
+            ah.abort();
+        }
     }
 }
 
-fn clear_cancel_flag(id: &str) {
-    CANCEL_TOKENS.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+fn clear_cancel_flag_if_same(id: &str, flag: &Arc<AtomicBool>) {
+    let mut map = CANCEL_TOKENS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(cur) = map.get(id) {
+        if Arc::ptr_eq(cur, flag) {
+            map.remove(id);
+        }
+    }
 }
 
 fn poll_external_control_file() {
@@ -448,7 +538,7 @@ fn poll_external_control_file() {
 }
 
 async fn coordinator_loop() {
-    let mut active_tasks: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
+    let mut active_tasks: HashMap<String, (u64, tokio::task::JoinHandle<()>)> = HashMap::new();
     let mut tick = tokio::time::interval(Duration::from_millis(350));
 
     loop {
@@ -458,7 +548,7 @@ async fn coordinator_loop() {
         }
 
         poll_external_control_file();
-        active_tasks.retain(|_, handle| !handle.is_finished());
+        active_tasks.retain(|_, (_, handle)| !handle.is_finished());
 
         let max_workers = if CELLULAR_MODE.load(Ordering::Acquire) {
             MAX_CONCURRENT_CELLULAR
@@ -468,6 +558,19 @@ async fn coordinator_loop() {
 
         let to_spawn: Vec<QueueDownloadItem> = {
             let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+            let active_ids: Vec<String> = active_tasks.keys().cloned().collect();
+            for aid in active_ids {
+                let expected_tok = active_tasks.get(&aid).map(|(tok, _)| *tok).unwrap_or(0);
+                let still_running = st
+                    .queue
+                    .iter()
+                    .any(|q| q.id == aid && q.run_token == expected_tok && q.status == "downloading");
+                if !still_running {
+                    if let Some((_, handle)) = active_tasks.remove(&aid) {
+                        handle.abort();
+                    }
+                }
+            }
             let currently_running = st
                 .queue
                 .iter()
@@ -500,12 +603,19 @@ async fn coordinator_loop() {
 
         for item in to_spawn {
             let id = item.id.clone();
+            let run_tok = item.run_token;
             let cancel = new_cancel_flag(&id);
+            let id_cl = id.clone();
             let handle = tokio::spawn(async move {
                 run_episode_download(item, cancel).await;
+                ACTIVE_ABORTS.lock().unwrap_or_else(|e| e.into_inner()).remove(&id_cl);
                 ENGINE_NOTIFY.notify_one();
             });
-            active_tasks.insert(id, handle);
+            ACTIVE_ABORTS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(id.clone(), handle.abort_handle());
+            active_tasks.insert(id, (run_tok, handle));
         }
     }
 }
@@ -566,8 +676,8 @@ fn is_owner_active(id: &str, token: u64, cancel: &AtomicBool) -> bool {
         .any(|q| q.id == id && q.run_token == token && q.status == "downloading")
 }
 
-fn update_item_progress(
-    id: &str,
+struct ProgressUpdate<'a> {
+    id: &'a str,
     token: u64,
     pct: u8,
     downloaded: u64,
@@ -577,24 +687,26 @@ fn update_item_progress(
     eta_sec: u64,
     eta_fmt: String,
     force_emit: bool,
-) {
+}
+
+fn update_item_progress(upd: ProgressUpdate<'_>) {
     {
         let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(item) = st.queue.iter_mut().find(|q| q.id == id && q.run_token == token) else {
+        let Some(item) = st.queue.iter_mut().find(|q| q.id == upd.id && q.run_token == upd.token) else {
             return;
         };
         if item.status != "downloading" {
             return;
         }
-        item.progress = pct.min(99);
-        item.downloaded_bytes = downloaded;
-        item.total_bytes = total;
-        item.speed_bytes_per_sec = speed_bps;
-        item.speed_formatted = speed_fmt;
-        item.eta_seconds = eta_sec;
-        item.eta_formatted = eta_fmt;
+        item.progress = upd.pct.min(99);
+        item.downloaded_bytes = upd.downloaded;
+        item.total_bytes = upd.total;
+        item.speed_bytes_per_sec = upd.speed_bps;
+        item.speed_formatted = upd.speed_fmt;
+        item.eta_seconds = upd.eta_sec;
+        item.eta_formatted = upd.eta_fmt;
     }
-    maybe_emit_and_write_status(force_emit);
+    maybe_emit_and_write_status(upd.force_emit);
 }
 
 fn pick_stream_url_from_play_info(info: &Value, quality: &str) -> Option<(String, String, bool)> {
@@ -700,11 +812,11 @@ pub fn select_best_variant_url(master_text: &str, master_url: &str) -> Option<St
                 .or_else(|| attrs.get("AVERAGE-BANDWIDTH"))
                 .and_then(|s| s.parse::<i64>().ok())
                 .unwrap_or(0);
-            for j in (i + 1)..lines.len() {
-                if !lines[j].starts_with('#') {
+            for (j, line_after) in lines.iter().enumerate().skip(i + 1) {
+                if !line_after.starts_with('#') {
                     if bw > best_bw || best_url.is_none() {
                         best_bw = bw;
-                        best_url = Some(resolve_hls_url(master_url, lines[j]));
+                        best_url = Some(resolve_hls_url(master_url, line_after));
                     }
                     i = j;
                     break;
@@ -721,45 +833,59 @@ pub fn select_best_variant_url(master_text: &str, master_url: &str) -> Option<St
     })
 }
 
+async fn resolve_fresh_episode_stream(item: &QueueDownloadItem, token: u64) -> Result<(String, String, bool), String> {
+    let origin = crate::net::base();
+    let auth_tok = current_session_token(&origin);
+    let play = crate::api::resolve_episode_play(
+        &origin,
+        auth_tok.as_deref(),
+        item.video_id,
+        item.episode.max(1) as u32,
+    )
+    .await?;
+    let (url, q, hevc) = pick_stream_url_from_play_info(&play, &item.quality)
+        .ok_or_else(|| format!("No stream URL available for Episode {}", item.episode))?;
+    let url = unwrap_local_proxy_url(&url);
+    {
+        let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(q_item) = st.queue.iter_mut().find(|x| x.id == item.id && x.run_token == token) {
+            q_item.stream_url = Some(url.clone());
+            q_item.quality = q.clone();
+            q_item.is_hevc = hevc;
+        }
+    }
+    Ok((url, q, hevc))
+}
+
+fn is_stale_cdn_error(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    lower.contains("http 401") || lower.contains("http 403") || lower.contains("http 410")
+}
+
 async fn run_episode_download(mut item: QueueDownloadItem, cancel: Arc<AtomicBool>) {
     let id = item.id.clone();
     let token = item.run_token;
     let Some(root) = offline_root() else {
+        clear_cancel_flag_if_same(&id, &cancel);
         mark_item_error(&id, token, "Offline storage not initialized".into());
         return;
     };
 
     let result: Result<(u64, bool, Option<String>), String> = async {
         // Resolve stream URL natively if queued without a concrete URL (batch episodes)
-        let (stream_url, final_quality, final_hevc) = if let Some(u) = item
+        let mut used_cached_url = false;
+        let (mut stream_url, mut final_quality, mut final_hevc) = if let Some(u) = item
             .stream_url
             .clone()
-            .map(|s| s.trim().to_string())
+            .map(|s| unwrap_local_proxy_url(&s))
             .filter(|s| !s.is_empty())
         {
+            used_cached_url = true;
             (u, item.quality.clone(), item.is_hevc)
         } else {
-            let origin = crate::net::base();
-            let play = crate::api::resolve_episode_play(
-                &origin,
-                item.auth_token.as_deref(),
-                item.video_id,
-                item.episode.max(1) as u32,
-            )
-            .await?;
-            let (url, q, hevc) = pick_stream_url_from_play_info(&play, &item.quality)
-                .ok_or_else(|| format!("No stream URL available for Episode {}", item.episode))?;
-            {
-                let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(q_item) = st.queue.iter_mut().find(|x| x.id == id && x.run_token == token) {
-                    q_item.stream_url = Some(url.clone());
-                    q_item.quality = q.clone();
-                    q_item.is_hevc = hevc;
-                }
-            }
-            (url, q, hevc)
+            resolve_fresh_episode_stream(&item, token).await?
         };
-        item.quality = final_quality;
+        item.quality = final_quality.clone();
         item.is_hevc = final_hevc;
 
         if !is_owner_active(&id, token, &cancel) {
@@ -769,52 +895,97 @@ async fn run_episode_download(mut item: QueueDownloadItem, cancel: Arc<AtomicBoo
         let part_dir = root.join(format!("{id}.part"));
         fs::create_dir_all(&part_dir).map_err(|e| format!("Failed creating download folder: {e}"))?;
 
-        let is_hls = stream_url.to_ascii_lowercase().contains(".m3u8") || stream_url.contains("/hls?u=");
-        if is_hls {
-            let total_bytes = download_hls_to_dir(
-                &item,
-                &stream_url,
-                &part_dir,
-                token,
-                &cancel,
-            )
-            .await?;
-            Ok((total_bytes, true, Some(stream_url)))
+        let mut is_hls = stream_url.to_ascii_lowercase().contains(".m3u8") || stream_url.contains("/hls?u=");
+        let first_attempt = if is_hls {
+            download_hls_to_dir(&item, &stream_url, &part_dir, token, &cancel).await
         } else {
-            let total_bytes = download_direct_to_dir(
-                &item,
-                &stream_url,
-                &part_dir,
-                token,
-                &cancel,
-            )
-            .await?;
-            Ok((total_bytes, false, Some(stream_url)))
-        }
+            download_direct_to_dir(&item, &stream_url, &part_dir, token, &cancel).await
+        };
+
+        let total_bytes = match first_attempt {
+            Ok(b) => b,
+            Err(err) if used_cached_url && is_stale_cdn_error(&err) && is_owner_active(&id, token, &cancel) => {
+                // Re-resolve expired signed CDN URL and retry once
+                let (fresh_url, q, hevc) = resolve_fresh_episode_stream(&item, token).await?;
+                stream_url = fresh_url;
+                final_quality = q.clone();
+                final_hevc = hevc;
+                item.quality = q;
+                item.is_hevc = hevc;
+                is_hls = stream_url.to_ascii_lowercase().contains(".m3u8") || stream_url.contains("/hls?u=");
+                if is_hls {
+                    download_hls_to_dir(&item, &stream_url, &part_dir, token, &cancel).await?
+                } else {
+                    download_direct_to_dir(&item, &stream_url, &part_dir, token, &cancel).await?
+                }
+            }
+            Err(err) => return Err(err),
+        };
+        let _ = (&final_quality, final_hevc);
+        Ok((total_bytes, is_hls, Some(stream_url)))
     }
     .await;
-
-    clear_cancel_flag(&id);
 
     match result {
         Ok((total_bytes, is_hls, _resolved_url)) => {
             if !is_owner_active(&id, token, &cancel) {
+                clear_cancel_flag_if_same(&id, &cancel);
                 return;
             }
             let part_dir = root.join(format!("{id}.part"));
+            let has_media = if is_hls {
+                part_dir.join("index.m3u8").is_file()
+            } else {
+                part_dir.join("video.mp4").is_file()
+            };
+            if !has_media {
+                clear_cancel_flag_if_same(&id, &cancel);
+                mark_item_error(&id, token, "Downloaded media files missing".into());
+                return;
+            }
+
             let mut has_local_cover = part_dir.join("cover.img").is_file();
-            if !has_local_cover && !item.cover.trim().is_empty() {
-                if let Ok((_, cover_bytes)) = crate::media::load_image(&item.cover).await {
-                    if !cover_bytes.is_empty() && atomic_write_bytes(&part_dir.join("cover.img"), &cover_bytes).is_ok() {
-                        has_local_cover = true;
+            let raw_cover = item.cover.trim().to_string();
+            if !has_local_cover && !raw_cover.is_empty() {
+                if let Some((src_id, src_file)) = parse_offline_asset_ref(&raw_cover) {
+                    if let Some(src_path) = offline_file_path(&src_id, &src_file) {
+                        if let Ok(cover_bytes) = fs::read(src_path) {
+                            if is_owner_active(&id, token, &cancel)
+                                && !cover_bytes.is_empty()
+                                && atomic_write_bytes(&part_dir.join("cover.img"), &cover_bytes).is_ok()
+                            {
+                                has_local_cover = true;
+                            }
+                        }
+                    }
+                } else {
+                    let cover_url = unwrap_local_proxy_url(&raw_cover);
+                    if !cover_url.is_empty() {
+                        if let Ok((_, cover_bytes)) = crate::media::load_image(&cover_url).await {
+                            if !is_owner_active(&id, token, &cancel) {
+                                clear_cancel_flag_if_same(&id, &cancel);
+                                return;
+                            }
+                            if !cover_bytes.is_empty()
+                                && atomic_write_bytes(&part_dir.join("cover.img"), &cover_bytes).is_ok()
+                            {
+                                has_local_cover = true;
+                            }
+                        }
                     }
                 }
+            }
+
+            if !is_owner_active(&id, token, &cancel) {
+                clear_cancel_flag_if_same(&id, &cancel);
+                return;
             }
             let final_dir = root.join(&id);
             if final_dir.exists() {
                 let _ = fs::remove_dir_all(&final_dir);
             }
             if let Err(e) = fs::rename(&part_dir, &final_dir) {
+                clear_cancel_flag_if_same(&id, &cancel);
                 mark_item_error(&id, token, format!("Failed finalizing download folder: {e}"));
                 return;
             }
@@ -825,7 +996,7 @@ async fn run_episode_download(mut item: QueueDownloadItem, cancel: Arc<AtomicBoo
                 video_id: item.video_id,
                 episode: item.episode,
                 title: item.title.clone(),
-                cover: item.cover.clone(),
+                cover: raw_cover,
                 size_bytes: total_bytes,
                 duration: None,
                 downloaded_at: finished_at,
@@ -837,39 +1008,54 @@ async fn run_episode_download(mut item: QueueDownloadItem, cancel: Arc<AtomicBoo
                 storage: "native".to_string(),
             };
 
-            {
+            let finalized = {
                 let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
-                st.completed.retain(|c| c.id != id);
-                st.completed.insert(0, completed_ep);
-                if let Some(q) = st.queue.iter_mut().find(|q| q.id == id) {
-                    q.status = "completed".to_string();
-                    q.progress = 100;
-                    q.downloaded_bytes = total_bytes;
-                    q.total_bytes = total_bytes;
-                    q.speed_bytes_per_sec = 0.0;
-                    q.speed_formatted = "Finished".to_string();
-                    q.eta_seconds = 0;
-                    q.eta_formatted = "Done".to_string();
-                    q.auto_resume = false;
+                let still_downloading = !cancel.load(Ordering::Acquire)
+                    && st
+                        .queue
+                        .iter()
+                        .any(|q| q.id == id && q.run_token == token && q.status == "downloading");
+                if still_downloading {
+                    st.completed.retain(|c| c.id != id);
+                    st.completed.insert(0, completed_ep);
+                    if let Some(q) = st.queue.iter_mut().find(|q| q.id == id && q.run_token == token) {
+                        q.status = "completed".to_string();
+                        q.progress = 100;
+                        q.downloaded_bytes = total_bytes;
+                        q.total_bytes = total_bytes;
+                        q.speed_bytes_per_sec = 0.0;
+                        q.speed_formatted = "Finished".to_string();
+                        q.eta_seconds = 0;
+                        q.eta_formatted = "Done".to_string();
+                        q.auto_resume = false;
+                    }
+                    st.recent_completed.retain(|r| r.id != id);
+                    st.recent_completed.insert(
+                        0,
+                        RecentCompletedItem {
+                            id: id.clone(),
+                            video_id: item.video_id,
+                            episode: item.episode,
+                            title: item.title.clone(),
+                            subtitle: format!("Episode {}", item.episode),
+                            size: format_bytes(total_bytes),
+                            completed_at: finished_at,
+                        },
+                    );
+                    if st.recent_completed.len() > 20 {
+                        st.recent_completed.truncate(20);
+                    }
+                    persist_all_locked(&st);
+                    emit_frontend_snapshot(&st);
+                    true
+                } else {
+                    false
                 }
-                st.recent_completed.retain(|r| r.id != id);
-                st.recent_completed.insert(
-                    0,
-                    RecentCompletedItem {
-                        id: id.clone(),
-                        video_id: item.video_id,
-                        episode: item.episode,
-                        title: item.title.clone(),
-                        subtitle: format!("Episode {}", item.episode),
-                        size: format_bytes(total_bytes),
-                        completed_at: finished_at,
-                    },
-                );
-                if st.recent_completed.len() > 20 {
-                    st.recent_completed.truncate(20);
-                }
-                persist_all_locked(&st);
-                emit_frontend_snapshot(&st);
+            };
+            clear_cancel_flag_if_same(&id, &cancel);
+            if !finalized {
+                let _ = fs::remove_dir_all(&final_dir);
+                return;
             }
 
             // Retain completed entry briefly for UI 100% transition, then clear from active queue
@@ -880,7 +1066,9 @@ async fn run_episode_download(mut item: QueueDownloadItem, cancel: Arc<AtomicBoo
             emit_frontend_snapshot(&st);
         }
         Err(err) => {
-            if err == "__cancelled__" || cancel.load(Ordering::Acquire) {
+            let cancelled = err == "__cancelled__" || cancel.load(Ordering::Acquire);
+            clear_cancel_flag_if_same(&id, &cancel);
+            if cancelled {
                 return;
             }
             mark_item_error(&id, token, err);
@@ -909,6 +1097,14 @@ fn mark_item_error(id: &str, token: u64, err: String) {
     }
 }
 
+fn validate_extm3u(text: &str) -> Result<(), String> {
+    if text.trim_start_matches('\u{feff}').trim_start().starts_with("#EXTM3U") {
+        Ok(())
+    } else {
+        Err("Response is not a valid HLS (#EXTM3U) playlist".to_string())
+    }
+}
+
 async fn download_hls_to_dir(
     item: &QueueDownloadItem,
     stream_url: &str,
@@ -916,10 +1112,12 @@ async fn download_hls_to_dir(
     token: u64,
     cancel: &Arc<AtomicBool>,
 ) -> Result<u64, String> {
-    let (_, raw_pl) = crate::net::fetch_bytes(stream_url).await?;
+    let clean_stream_url = unwrap_local_proxy_url(stream_url);
+    let (_, raw_pl) = crate::net::fetch_bytes(&clean_stream_url).await?;
     let mut playlist_text = String::from_utf8(raw_pl)
         .map_err(|_| "Playlist is not valid UTF-8 text".to_string())?;
-    let mut playlist_url = stream_url.to_string();
+    validate_extm3u(&playlist_text)?;
+    let mut playlist_url = clean_stream_url;
 
     if playlist_text.contains("#EXT-X-STREAM-INF") {
         let best_url = select_best_variant_url(&playlist_text, &playlist_url)
@@ -927,6 +1125,7 @@ async fn download_hls_to_dir(
         let (_, variant_bytes) = crate::net::fetch_bytes(&best_url).await?;
         playlist_text = String::from_utf8(variant_bytes)
             .map_err(|_| "Variant playlist is not valid UTF-8 text".to_string())?;
+        validate_extm3u(&playlist_text)?;
         playlist_url = best_url;
     }
 
@@ -946,6 +1145,7 @@ async fn download_hls_to_dir(
     let mut rewritten_lines: Vec<String> = Vec::with_capacity(lines.len());
     let mut received_bytes: u64 = 0;
     let mut seg_idx: usize = 0;
+    let mut has_fmp4_map = false;
 
     // First download keys and init maps, and enumerate segments
     for line in &lines {
@@ -970,6 +1170,9 @@ async fn download_hls_to_dir(
                         if key_bytes.is_empty() {
                             return Err("Empty HLS decryption key received".into());
                         }
+                        if !is_owner_active(&item.id, token, cancel.as_ref()) {
+                            return Err("__cancelled__".to_string());
+                        }
                         atomic_write_bytes(&key_path, &key_bytes)?;
                     }
                     key_map.insert(abs_uri.clone(), local_name.clone());
@@ -981,6 +1184,7 @@ async fn download_hls_to_dir(
                 rewritten_lines.push(line.clone());
             }
         } else if line.starts_with("#EXT-X-MAP:") {
+            has_fmp4_map = true;
             let attrs = parse_hls_attrs(line);
             if let Some(raw_uri) = attrs.get("URI") {
                 let abs_uri = resolve_hls_url(&playlist_url, raw_uri);
@@ -996,6 +1200,9 @@ async fn download_hls_to_dir(
                         if init_bytes.is_empty() {
                             return Err("Empty HLS init segment received".into());
                         }
+                        if !is_owner_active(&item.id, token, cancel.as_ref()) {
+                            return Err("__cancelled__".to_string());
+                        }
                         received_bytes += init_bytes.len() as u64;
                         atomic_write_bytes(&init_path, &init_bytes)?;
                     }
@@ -1010,7 +1217,13 @@ async fn download_hls_to_dir(
             continue;
         } else if !line.starts_with('#') {
             let abs_uri = resolve_hls_url(&playlist_url, line);
-            let local_name = format!("seg_{seg_idx:05}.ts");
+            let url_path = abs_uri.split('?').next().unwrap_or(&abs_uri).to_ascii_lowercase();
+            let ext = if has_fmp4_map || url_path.ends_with(".m4s") || url_path.ends_with(".mp4") {
+                "m4s"
+            } else {
+                "ts"
+            };
+            let local_name = format!("seg_{seg_idx:05}.{ext}");
             seg_tasks.push((seg_idx, abs_uri, local_name.clone()));
             rewritten_lines.push(local_name);
             seg_idx += 1;
@@ -1031,52 +1244,89 @@ async fn download_hls_to_dir(
     if seg_tasks.is_empty() {
         return Err("No media segments found in HLS playlist".into());
     }
+    if !is_owner_active(&item.id, token, cancel.as_ref()) {
+        return Err("__cancelled__".to_string());
+    }
 
     let rewritten_playlist = format!("{}\n", rewritten_lines.join("\n"));
     atomic_write_bytes(&part_dir.join("index.m3u8"), rewritten_playlist.as_bytes())?;
 
     let total_segments = seg_tasks.len();
     let initial_est_bytes = (total_segments as u64) * 1_600_000;
-    update_item_progress(
-        &item.id,
+    update_item_progress(ProgressUpdate {
+        id: &item.id,
         token,
-        1,
-        received_bytes,
-        initial_est_bytes,
-        0.0,
-        "Connecting...".to_string(),
-        0,
-        "--".to_string(),
-        true,
-    );
+        pct: 1,
+        downloaded: received_bytes,
+        total: initial_est_bytes,
+        speed_bps: 0.0,
+        speed_fmt: "Connecting...".to_string(),
+        eta_sec: 0,
+        eta_fmt: "--".to_string(),
+        force_emit: true,
+    });
 
     let concurrency = if CELLULAR_MODE.load(Ordering::Acquire) {
         HLS_SEG_WORKERS_CELLULAR
     } else {
         HLS_SEG_WORKERS_WIFI
     };
-    let sem = Arc::new(Semaphore::new(concurrency));
     let completed_count = Arc::new(AtomicU64::new(0));
     let bytes_counter = Arc::new(AtomicU64::new(received_bytes));
     let tracker = Arc::new(Mutex::new(SpeedTracker::new()));
+    let failed = Arc::new(AtomicBool::new(false));
+    let mut join_set: tokio::task::JoinSet<Result<(), String>> = tokio::task::JoinSet::new();
 
-    let mut handles = Vec::with_capacity(total_segments);
     for (_idx, seg_url, local_name) in seg_tasks {
-        let permit = sem.clone().acquire_owned().await.map_err(|_| "Semaphore closed".to_string())?;
-        if !is_owner_active(&item.id, token, cancel.as_ref()) {
-            drop(permit);
+        while join_set.len() >= concurrency {
+            match join_set.join_next().await {
+                Some(Ok(Ok(()))) => {}
+                Some(Ok(Err(e))) => {
+                    failed.store(true, Ordering::Release);
+                    join_set.abort_all();
+                    return Err(e);
+                }
+                Some(Err(e)) => {
+                    if !e.is_cancelled() {
+                        failed.store(true, Ordering::Release);
+                        join_set.abort_all();
+                        return Err(format!("Download task panicked: {e}"));
+                    }
+                }
+                None => break,
+            }
+        }
+        while let Some(res) = join_set.try_join_next() {
+            match res {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    failed.store(true, Ordering::Release);
+                    join_set.abort_all();
+                    return Err(e);
+                }
+                Err(e) if !e.is_cancelled() => {
+                    failed.store(true, Ordering::Release);
+                    join_set.abort_all();
+                    return Err(format!("Download task panicked: {e}"));
+                }
+                Err(_) => {}
+            }
+        }
+        if !is_owner_active(&item.id, token, cancel.as_ref()) || failed.load(Ordering::Acquire) {
+            join_set.abort_all();
             return Err("__cancelled__".to_string());
         }
+
         let seg_path = part_dir.join(&local_name);
         let id = item.id.clone();
         let cancel_cl = cancel.clone();
+        let failed_cl = failed.clone();
         let completed_cl = completed_count.clone();
         let bytes_cl = bytes_counter.clone();
         let tracker_cl = tracker.clone();
 
-        handles.push(tokio::spawn(async move {
-            let _permit = permit;
-            if !is_owner_active(&id, token, cancel_cl.as_ref()) {
+        join_set.spawn(async move {
+            if !is_owner_active(&id, token, cancel_cl.as_ref()) || failed_cl.load(Ordering::Acquire) {
                 return Err("__cancelled__".to_string());
             }
             let seg_len = if let Ok(meta) = fs::metadata(&seg_path) {
@@ -1092,25 +1342,25 @@ async fn download_hls_to_dir(
             let len = match seg_len {
                 Some(existing_len) => existing_len,
                 None => {
-                    let mut last_err = String::from("Segment download failed");
-                    let mut got: Option<Vec<u8>> = None;
-                    for attempt in 0..4 {
-                        if !is_owner_active(&id, token, cancel_cl.as_ref()) {
-                            return Err("__cancelled__".to_string());
-                        }
-                        match crate::net::fetch_bytes(&seg_url).await {
-                            Ok((_, b)) if !b.is_empty() => {
-                                got = Some(b);
-                                break;
+                    // net::fetch_bytes already retries transient failures up to 3x; only retry once if body was empty
+                    let data = match crate::net::fetch_bytes(&seg_url).await {
+                        Ok((_, b)) if !b.is_empty() => b,
+                        Ok(_) => {
+                            if !is_owner_active(&id, token, cancel_cl.as_ref()) || failed_cl.load(Ordering::Acquire) {
+                                return Err("__cancelled__".to_string());
                             }
-                            Ok(_) => last_err = "Empty segment received (0 bytes)".to_string(),
-                            Err(e) => last_err = e,
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                            match crate::net::fetch_bytes(&seg_url).await {
+                                Ok((_, b)) if !b.is_empty() => b,
+                                Ok(_) => return Err("Empty segment received (0 bytes)".to_string()),
+                                Err(e) => return Err(e),
+                            }
                         }
-                        if attempt < 3 {
-                            tokio::time::sleep(Duration::from_millis(250 * (attempt + 1) as u64)).await;
-                        }
+                        Err(e) => return Err(e),
+                    };
+                    if !is_owner_active(&id, token, cancel_cl.as_ref()) || failed_cl.load(Ordering::Acquire) {
+                        return Err("__cancelled__".to_string());
                     }
-                    let data = got.ok_or(last_err)?;
                     let l = data.len() as u64;
                     atomic_write_bytes(&seg_path, &data)?;
                     l
@@ -1126,31 +1376,51 @@ async fn download_hls_to_dir(
                 let mut tr = tracker_cl.lock().unwrap_or_else(|e| e.into_inner());
                 tr.sample(new_bytes, est_total)
             };
-            update_item_progress(
-                &id,
+            update_item_progress(ProgressUpdate {
+                id: &id,
                 token,
                 pct,
-                new_bytes,
-                est_total,
+                downloaded: new_bytes,
+                total: est_total,
                 speed_bps,
                 speed_fmt,
                 eta_sec,
                 eta_fmt,
-                false,
-            );
+                force_emit: false,
+            });
             Ok(())
-        }));
+        });
     }
 
-    for h in handles {
-        match h.await {
+    while let Some(res) = join_set.join_next().await {
+        match res {
             Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(e),
-            Err(e) => return Err(format!("Download task panicked: {e}")),
+            Ok(Err(e)) => {
+                failed.store(true, Ordering::Release);
+                join_set.abort_all();
+                return Err(e);
+            }
+            Err(e) => {
+                if !e.is_cancelled() {
+                    failed.store(true, Ordering::Release);
+                    join_set.abort_all();
+                    return Err(format!("Download task panicked: {e}"));
+                }
+            }
         }
     }
 
     Ok(bytes_counter.load(Ordering::Acquire))
+}
+
+fn parse_content_range_total(header_val: Option<&str>) -> Option<u64> {
+    let val = header_val?.trim();
+    let (_, total_part) = val.split_once('/')?;
+    if total_part == "*" {
+        None
+    } else {
+        total_part.parse::<u64>().ok()
+    }
 }
 
 async fn download_direct_to_dir(
@@ -1160,21 +1430,53 @@ async fn download_direct_to_dir(
     token: u64,
     cancel: &AtomicBool,
 ) -> Result<u64, String> {
+    let clean_url = unwrap_local_proxy_url(stream_url);
     let referer = format!("{}/", crate::net::base());
-    let mut resp = crate::net::get(stream_url, Duration::from_secs(120), None, Some(&referer)).await?;
-    if !resp.status().is_success() {
-        return Err(format!("Failed to download stream: HTTP {}", resp.status()));
-    }
-    let content_len = resp.content_length().unwrap_or(0);
     let tmp_path = part_dir.join("video.mp4.part");
     let final_path = part_dir.join("video.mp4");
-    let mut file = File::create(&tmp_path).map_err(|e| format!("Failed creating MP4 file: {e}"))?;
-    let mut received: u64 = 0;
-    let mut tracker = SpeedTracker::new();
+    let existing_len = fs::metadata(&tmp_path)
+        .ok()
+        .filter(|m| m.is_file())
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let range_hdr = (existing_len > 0).then(|| format!("bytes={existing_len}-"));
 
-    while let Some(chunk) = resp
-        .chunk()
+    let mut resp = crate::net::get_stream(&clean_url, Duration::from_secs(30), range_hdr.as_deref(), Some(&referer)).await?;
+    let mut received: u64;
+    let content_len: u64;
+    let mut file: File;
+
+    if resp.status() == reqwest::StatusCode::PARTIAL_CONTENT && existing_len > 0 {
+        let range_total = parse_content_range_total(
+            resp.headers()
+                .get(reqwest::header::CONTENT_RANGE)
+                .and_then(|v| v.to_str().ok()),
+        );
+        received = existing_len;
+        content_len = range_total
+            .unwrap_or_else(|| existing_len.saturating_add(resp.content_length().unwrap_or(0)));
+        file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&tmp_path)
+            .map_err(|e| format!("Failed opening MP4 part file: {e}"))?;
+    } else {
+        if resp.status().as_u16() == 416 && existing_len > 0 {
+            drop(resp);
+            resp = crate::net::get_stream(&clean_url, Duration::from_secs(30), None, Some(&referer)).await?;
+        }
+        if !resp.status().is_success() {
+            return Err(format!("Failed to download stream: HTTP {}", resp.status()));
+        }
+        received = 0;
+        content_len = resp.content_length().unwrap_or(0);
+        file = File::create(&tmp_path).map_err(|e| format!("Failed creating MP4 file: {e}"))?;
+    }
+
+    let mut tracker = SpeedTracker::new();
+    while let Some(chunk) = tokio::time::timeout(Duration::from_secs(30), resp.chunk())
         .await
+        .map_err(|_| "Stream chunk timed out".to_string())?
         .map_err(|e| crate::net::err_text(&e))?
     {
         if !is_owner_active(&item.id, token, cancel) {
@@ -1191,21 +1493,24 @@ async fn download_direct_to_dir(
         .max(1);
         let pct = (((received as f64 / est_total as f64) * 100.0).round() as u8).clamp(1, 99);
         let (speed_bps, speed_fmt, eta_sec, eta_fmt) = tracker.sample(received, est_total);
-        update_item_progress(
-            &item.id,
+        update_item_progress(ProgressUpdate {
+            id: &item.id,
             token,
             pct,
-            received,
-            est_total,
+            downloaded: received,
+            total: est_total,
             speed_bps,
             speed_fmt,
             eta_sec,
             eta_fmt,
-            false,
-        );
+            force_emit: false,
+        });
     }
     let _ = file.sync_all();
     drop(file);
+    if !is_owner_active(&item.id, token, cancel) {
+        return Err("__cancelled__".to_string());
+    }
     if received == 0 {
         return Err("Empty download received (0 bytes)".into());
     }
@@ -1265,7 +1570,7 @@ fn decrypt_aes128_cbc(key: &[u8], iv: &[u8; 16], data: &[u8]) -> Result<Vec<u8>,
     let cipher = Aes128::new_from_slice(key).map_err(|_| "Invalid AES-128 key".to_string())?;
     let mut prev = *iv;
     let mut out = Vec::with_capacity(data.len());
-    for chunk in data.chunks_exact(16) {
+    for chunk in data.as_chunks::<16>().0 {
         let mut ct = [0u8; 16];
         ct.copy_from_slice(chunk);
         let mut block = ct;
@@ -1347,6 +1652,8 @@ fn assemble_export_from_dir(ep_dir: &Path, is_hls: bool, dest_path: &Path) -> Re
                 };
                 let plain = decrypt_aes128_cbc(&key, &iv, &seg_bytes)?;
                 out_file.write_all(&plain).map_err(|e| format!("Write failed: {e}"))?;
+            } else if !current_method.is_empty() && current_method != "NONE" {
+                return Err(format!("Unsupported HLS encryption method ({current_method}) for MP4 export"));
             } else {
                 out_file.write_all(&seg_bytes).map_err(|e| format!("Write failed: {e}"))?;
             }
@@ -1358,11 +1665,12 @@ fn assemble_export_from_dir(ep_dir: &Path, is_hls: bool, dest_path: &Path) -> Re
 }
 
 fn pause_all_internal() {
+    let mut paused_ids = Vec::new();
     {
         let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
         for item in &mut st.queue {
             if item.status == "downloading" || item.status == "queued" {
-                trigger_cancel_flag(&item.id);
+                paused_ids.push(item.id.clone());
                 item.status = "paused".to_string();
                 item.auto_resume = false;
                 item.speed_bytes_per_sec = 0.0;
@@ -1374,21 +1682,30 @@ fn pause_all_internal() {
         persist_all_locked(&st);
         emit_frontend_snapshot(&st);
     }
+    for id in paused_ids {
+        trigger_cancel_flag(&id);
+    }
+    ENGINE_NOTIFY.notify_one();
 }
 
 fn cancel_all_internal() {
     let root = offline_root();
+    let cancelled_ids: Vec<String>;
     {
         let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
-        for item in &st.queue {
-            trigger_cancel_flag(&item.id);
-            if let Some(ref r) = root {
-                let _ = fs::remove_dir_all(r.join(format!("{}.part", item.id)));
-            }
-        }
+        cancelled_ids = st.queue.iter().map(|i| i.id.clone()).collect();
         st.queue.clear();
         persist_all_locked(&st);
         emit_frontend_snapshot(&st);
+    }
+    for id in &cancelled_ids {
+        trigger_cancel_flag(id);
+    }
+    ENGINE_NOTIFY.notify_one();
+    if let Some(ref r) = root {
+        for id in cancelled_ids {
+            remove_part_dir_async(r, &id);
+        }
     }
 }
 
@@ -1396,17 +1713,12 @@ fn cancel_all_internal() {
 
 #[tauri::command]
 pub async fn native_download_enqueue(
-    state: tauri::State<'_, crate::api::Api>,
     items: Vec<EnqueueRequestItem>,
     cellular: Option<bool>,
 ) -> Result<Value, String> {
     if let Some(is_cell) = cellular {
         CELLULAR_MODE.store(is_cell, Ordering::Release);
     }
-    let origin = crate::net::base();
-    let token = state.session.token(&origin).filter(|_| {
-        !crate::network_policy::strict_security() || crate::net::trusted_auth_origin(&origin)
-    });
 
     let mut added = 0usize;
     {
@@ -1427,9 +1739,8 @@ pub async fn native_download_enqueue(
                     existing.speed_formatted = "Queued".to_string();
                     if req.stream_url.as_ref().is_some_and(|s| !s.is_empty()) {
                         existing.stream_url = req.stream_url;
-                    }
-                    if token.is_some() {
-                        existing.auth_token = token.clone();
+                    } else {
+                        existing.stream_url = None;
                     }
                     added += 1;
                 }
@@ -1454,7 +1765,6 @@ pub async fn native_download_enqueue(
                 quality: req.quality,
                 is_hevc: req.is_hevc,
                 auto_resume: true,
-                auth_token: token.clone(),
                 cues: req.cues,
                 run_token: 0,
             });
@@ -1474,19 +1784,22 @@ pub fn native_download_pause(id: String) -> Result<(), String> {
         return Err("Invalid download ID".into());
     }
     trigger_cancel_flag(&id);
-    let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(item) = st.queue.iter_mut().find(|q| q.id == id) {
-        if item.status == "downloading" || item.status == "queued" {
-            item.status = "paused".to_string();
-            item.auto_resume = false;
-            item.speed_bytes_per_sec = 0.0;
-            item.speed_formatted = "Paused".to_string();
-            item.eta_seconds = 0;
-            item.eta_formatted = "--".to_string();
+    {
+        let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(item) = st.queue.iter_mut().find(|q| q.id == id) {
+            if item.status == "downloading" || item.status == "queued" {
+                item.status = "paused".to_string();
+                item.auto_resume = false;
+                item.speed_bytes_per_sec = 0.0;
+                item.speed_formatted = "Paused".to_string();
+                item.eta_seconds = 0;
+                item.eta_formatted = "--".to_string();
+            }
         }
+        persist_all_locked(&st);
+        emit_frontend_snapshot(&st);
     }
-    persist_all_locked(&st);
-    emit_frontend_snapshot(&st);
+    ENGINE_NOTIFY.notify_one();
     Ok(())
 }
 
@@ -1512,6 +1825,8 @@ pub fn native_download_resume(id: String, cellular: Option<bool>) -> Result<(), 
                 item.error = None;
                 item.auto_resume = true;
                 item.speed_formatted = "Queued".to_string();
+                // Clear potentially expired signed CDN URL so episode re-resolves cleanly
+                item.stream_url = None;
             }
         }
         persist_all_locked(&st);
@@ -1535,6 +1850,7 @@ pub fn native_download_resume_all(only_auto_resumable: Option<bool>, cellular: O
                 item.error = None;
                 item.auto_resume = true;
                 item.speed_formatted = "Queued".to_string();
+                item.stream_url = None;
             }
         }
         persist_all_locked(&st);
@@ -1549,14 +1865,17 @@ pub fn native_download_cancel(id: String) -> Result<(), String> {
     if !is_safe_segment(&id) {
         return Err("Invalid download ID".into());
     }
-    trigger_cancel_flag(&id);
-    if let Some(root) = offline_root() {
-        let _ = fs::remove_dir_all(root.join(format!("{id}.part")));
+    {
+        let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        st.queue.retain(|q| q.id != id);
+        persist_all_locked(&st);
+        emit_frontend_snapshot(&st);
     }
-    let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
-    st.queue.retain(|q| q.id != id);
-    persist_all_locked(&st);
-    emit_frontend_snapshot(&st);
+    trigger_cancel_flag(&id);
+    ENGINE_NOTIFY.notify_one();
+    if let Some(root) = offline_root() {
+        remove_part_dir_async(&root, &id);
+    }
     Ok(())
 }
 
@@ -1728,5 +2047,28 @@ mod tests {
         assert!(!is_safe_segment("a/b"));
         assert!(!is_safe_segment("a\\b"));
         assert!(!is_safe_segment(""));
+    }
+
+    #[test]
+    fn local_proxy_urls_unwrap_and_parse_cleanly() {
+        assert_eq!(
+            unwrap_local_proxy_url("http://hg.localhost/img?u=https%3A%2F%2Fcdn.example%2Fcover.jpg%3Fv%3D1"),
+            "https://cdn.example/cover.jpg?v=1"
+        );
+        assert_eq!(
+            unwrap_local_proxy_url("hg://localhost/hls?u=https%3A%2F%2Fcdn.example%2Fmaster.m3u8"),
+            "https://cdn.example/master.m3u8"
+        );
+        assert_eq!(
+            unwrap_local_proxy_url("https://cdn.example/direct.mp4"),
+            "https://cdn.example/direct.mp4"
+        );
+        assert_eq!(
+            parse_offline_asset_ref("http://hg.localhost/offline/42_1/cover.img"),
+            Some(("42_1".to_string(), "cover.img".to_string()))
+        );
+        assert_eq!(parse_offline_asset_ref("http://hg.localhost/offline/../secret/cover.img"), None);
+        assert!(validate_extm3u("\u{feff}#EXTM3U\n#EXTINF:4,\nseg.ts").is_ok());
+        assert!(validate_extm3u("<html>403 Forbidden</html>").is_err());
     }
 }

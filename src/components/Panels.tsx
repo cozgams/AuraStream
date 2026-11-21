@@ -239,6 +239,11 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
   };
 
   const load = useCallback(async (p: number) => {
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      if (p === 1) setRemoteItems([]);
+      setLoading(false);
+      return;
+    }
     const seq = ++reqSeqRef.current;
     setLoading(true);
     try {

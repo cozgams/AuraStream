@@ -105,7 +105,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
     if (submitted) void run(submitted, 1, next);
   };
 
-  const submit = (keyword: string) => {
+  const submit = (keyword: string, forceTab?: "video" | "post") => {
     const k = keyword.trim();
     if (!k) return;
     setSubmitted(k);
@@ -114,7 +114,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
     setPosts([]);
     setPage(0);
     setPages(1);
-    run(k, 1);
+    void run(k, 1, forceTab ?? tab);
   };
 
   const querying = submitted.length > 0;
@@ -171,11 +171,31 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
                           {video.plays && (
                             <span className="ios-search-hot-plays">
                               <IPlayF size={10} />
-                              {video.plays
-                                .replace(/(\d+(\.\d+)?)\s*亿(\s*播放量)?/i, "$1B plays")
-                                .replace(/(\d+(\.\d+)?)\s*[w万](\s*播放量)?/i, "$1M plays")
-                                .replace(/(\d+)\s*播放量/i, "$1 plays")
-                                .replace(/播放量/g, " plays")}
+                              {(() => {
+                                const raw = video.plays;
+                                const yiMatch = raw.match(/(\d+(?:\.\d+)?)\s*亿(?:\s*播放量)?/i);
+                                if (yiMatch) {
+                                  const val = Number(yiMatch[1]) * 100_000_000;
+                                  return val >= 1_000_000_000
+                                    ? `${+(val / 1_000_000_000).toFixed(2)}B plays`
+                                    : `${+(val / 1_000_000).toFixed(1)}M plays`;
+                                }
+                                const wanMatch = raw.match(/(\d+(?:\.\d+)?)\s*[w万](?:\s*播放量)?/i);
+                                if (wanMatch) {
+                                  const val = Number(wanMatch[1]) * 10_000;
+                                  if (val >= 1_000_000) return `${+(val / 1_000_000).toFixed(1)}M plays`;
+                                  if (val >= 1_000) return `${Math.round(val / 1_000)}K plays`;
+                                  return `${Math.round(val)} plays`;
+                                }
+                                const plainMatch = raw.match(/(\d+(?:\.\d+)?)\s*播放量/i);
+                                if (plainMatch) {
+                                  const val = Number(plainMatch[1]);
+                                  if (val >= 1_000_000) return `${+(val / 1_000_000).toFixed(1)}M plays`;
+                                  if (val >= 1_000) return `${Math.round(val / 1_000)}K plays`;
+                                  return `${Math.round(val)} plays`;
+                                }
+                                return raw.replace(/播放量/g, " plays").trim();
+                              })()}
                             </span>
                           )}
                         </span>
@@ -201,7 +221,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
                     >
                       <button
                         type="button"
-                        onClick={() => { setTab("video"); setQ(h); submit(h); }}
+                        onClick={() => { setTab("video"); setQ(h); submit(h, "video"); }}
                         className="bg-transparent border-none p-0 text-inherit cursor-pointer select-none"
                       >
                         {h}
@@ -247,7 +267,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
             </div>
             <div className="flex flex-wrap gap-2 mt-2">
               {DISCOVERY_THEMES.map((theme) => (
-                <Button key={theme} onClick={() => { setTab("video"); setQ(theme); submit(theme); }}
+                <Button key={theme} onClick={() => { setTab("video"); setQ(theme); submit(theme, "video"); }}
                   className="px-3 h-7 rounded-(--r-ctl) bg-primary/10 hover:bg-primary/20 text-primary text-[12.5px] font-semibold pressable transition-colors">
                   {theme}
                 </Button>

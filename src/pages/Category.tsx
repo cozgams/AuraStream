@@ -232,7 +232,7 @@ export function ChannelPage({ cate, name, onBack, wide }: { cate: string; name: 
   const requestSeq = useRef(0);
 
   const loadMore = useCallback(async (reset = false) => {
-    if (busy.current) return;
+    if (!reset && busy.current) return;
     const next = reset ? 1 : page + 1;
     if (!reset && next > pages) return;
     const seq = ++requestSeq.current;

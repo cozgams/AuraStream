@@ -7,7 +7,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { api, cover as getRemoteCoverUrl, LOCAL, logLine } from "../api";
+import { api, cover as getRemoteCoverUrl, isLocalMedia, LOCAL, logLine } from "../api";
 import { readStorage, writeStorage, STORAGE_KEYS } from "../storage";
 import { getSubtitlesForEpisode } from "../subtitles/aiSubtitleService";
 import type { SubtitleCue } from "../subtitles/types";
@@ -93,6 +93,7 @@ export interface BatchProgressState {
   completed: number;
   currentEpisode: number;
   failedCount: number;
+  episodeIds?: string[];
 }
 
 let batchState: BatchProgressState = {
@@ -128,7 +129,15 @@ export function getOfflineCoverUrl(
   if (ep.storage === "native" && ep.hasLocalCover) {
     return `${LOCAL}/offline/${ep.id}/cover.img`;
   }
-  return getRemoteCoverUrl(ep.cover || "", width);
+  const raw = (ep.cover || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("blob:") || raw.startsWith("data:") || isLocalMedia(raw)) {
+    return raw;
+  }
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return "";
+  }
+  return getRemoteCoverUrl(raw, width);
 }
 
 let nativeListenerStarted = false;
@@ -207,8 +216,11 @@ function applyNativeDownloadSnapshot(payload: { queue?: unknown[]; completed?: u
 
   // Keep batchState synchronized for any active batch dialog
   if (batchState.active && batchState.videoId > 0) {
+    const trackedIds = batchState.episodeIds?.length ? new Set(batchState.episodeIds) : null;
     const seriesQueue = Array.from(activeProgress.values()).filter(
-      (q) => q.videoId === batchState.videoId && (q.status === "downloading" || q.status === "queued")
+      (q) =>
+        (trackedIds ? trackedIds.has(q.id) : q.videoId === batchState.videoId) &&
+        (q.status === "downloading" || q.status === "queued")
     );
     const downloadingItem = seriesQueue.find((q) => q.status === "downloading") || seriesQueue[0];
     if (downloadingItem) {
@@ -531,6 +543,8 @@ async function scanDbRecords(
               cues: rec.cues || [],
               quality: rec.quality,
               isHevc: rec.isHevc,
+              isHls: Boolean(rec.isHls),
+              storage: "idb",
             });
           }
           cursor.continue();
@@ -557,10 +571,12 @@ async function scanDbRecords(
 export async function syncOfflineEpisodesFromIndexedDB(): Promise<OfflineEpisode[]> {
   try {
     let nativeCompleted: OfflineEpisode[] = [];
+    let nativeOk = !isNativeRustDownloaderAvailable();
     if (isNativeRustDownloaderAvailable()) {
       try {
         const res = await invoke<OfflineEpisode[]>("native_offline_list");
         if (Array.isArray(res)) {
+          nativeOk = true;
           nativeCompleted = res
             .filter((c) => c && c.id)
             .map((c) => ({ ...c, storage: "native" as const }));
@@ -621,7 +637,7 @@ export async function syncOfflineEpisodesFromIndexedDB(): Promise<OfflineEpisode
         idbRecords.has(it.id) ||
         st === "downloading" ||
         st === "queued" ||
-        (it.storage === "native" && !isNativeRustDownloaderAvailable())
+        (it.storage === "native" && !nativeOk)
       ) {
         mergedMap.set(it.id, it);
       } else {
@@ -1301,7 +1317,7 @@ export async function resumeDownload(id: string, forceAllowCellular = false): Pr
   if (!forceAllowCellular && isWifiOnlyDownloadEnabled() && isCellularConnection()) {
     return;
   }
-  if (!forceAllowCellular && typeof navigator !== "undefined" && navigator.onLine === false) {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
     return;
   }
 
@@ -1389,7 +1405,11 @@ export async function resumeAllDownloads(forceAllowCellular = false, onlyAutoRes
   }
 
   const pausedIds = Array.from(activeProgress.entries())
-    .filter(([_, prog]) => prog.status === "paused" && (!onlyAutoResumable || prog.autoResume === true))
+    .filter(
+      ([_, prog]) =>
+        (prog.status === "paused" || (!onlyAutoResumable && prog.status === "error")) &&
+        (!onlyAutoResumable || prog.autoResume === true)
+    )
     .map(([id]) => id);
 
   for (const id of pausedIds) {
@@ -2453,6 +2473,7 @@ export async function checkSmartDownloadNextEpisode(
   meta: { title: string; cover: string }
 ): Promise<void> {
   if (!isSmartDownloadEnabled()) return;
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return;
   // Guard mobile data plan on Android
   if (isWifiOnlyDownloadEnabled() && isCellularConnection()) return;
 
@@ -2565,7 +2586,10 @@ export function cancelBatchDownload(videoId?: number): void {
   if (typeof videoId === "number") {
     pendingJsBatchQueue = pendingJsBatchQueue.filter((item) => item.videoId !== videoId);
     for (const [id, prog] of Array.from(activeProgress.entries())) {
-      if (prog.videoId === videoId && (prog.status === "downloading" || prog.status === "queued")) {
+      if (
+        prog.videoId === videoId &&
+        (prog.status === "downloading" || prog.status === "queued" || prog.status === "paused" || prog.status === "error")
+      ) {
         cancelDownload(id);
       }
     }
@@ -2579,15 +2603,16 @@ export function cancelBatchDownload(videoId?: number): void {
   }
 
   pendingJsBatchQueue = [];
-  const wasActive = batchState.active;
-  const prevVideoId = batchState.videoId;
-  const prevEpisode = batchState.currentEpisode;
   activeBatchToken = ++batchTokenSeq;
   batchState.active = false;
   if (isNativeRustDownloaderAvailable()) {
     void invoke("native_download_cancel_all").then(() => syncNativeDownloadState()).catch(() => {});
-  } else if (wasActive && prevVideoId && prevEpisode) {
-    cancelDownload(`${prevVideoId}_${prevEpisode}`);
+  } else {
+    for (const [id, prog] of Array.from(activeProgress.entries())) {
+      if (prog.status === "downloading" || prog.status === "queued") {
+        cancelDownload(id);
+      }
+    }
   }
   notifyBatchProgress();
   syncNativeDownloadCount();
@@ -2622,6 +2647,20 @@ export async function executeBatchDownload(
   // Native Rust Tokio background queue: enqueue ALL episodes at once so Ep 2..N run natively even when WebView sleeps
   if (isNativeRustDownloaderAvailable()) {
     const preferHevc = qualityPreference === "hevc" || qualityPreference === "auto";
+    const loadCachedCues = (vid: number, ep: number): SubtitleCue[] => {
+      try {
+        const raw = localStorage.getItem(`aurastream_sub_${vid}_${ep}`);
+        if (!raw || raw.includes('"procedural"') || raw.includes('"mock"')) return [];
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.source !== "procedural" && parsed.source !== "mock" && Array.isArray(parsed.cues)) {
+          return parsed.cues;
+        }
+      } catch {
+        // ignore
+      }
+      return [];
+    };
+    const episodeIds = unDownloaded.map((ep) => `${videoId}_${ep}`);
     await invoke("native_download_enqueue", {
       items: unDownloaded.map((ep) => ({
         videoId,
@@ -2631,7 +2670,7 @@ export async function executeBatchDownload(
         streamUrl: null,
         quality: qualityPreference,
         isHevc: preferHevc,
-        cues: [],
+        cues: loadCachedCues(videoId, ep),
       })),
       cellular: isCellularConnection(),
     });
@@ -2644,6 +2683,7 @@ export async function executeBatchDownload(
       completed: 0,
       currentEpisode: unDownloaded[0],
       failedCount: 0,
+      episodeIds,
     };
     notifyBatchProgress();
     syncNativeDownloadCount();
@@ -2688,6 +2728,7 @@ export async function executeBatchDownload(
       ...batchState,
       active: true,
       total: batchState.total + unDownloaded.length,
+      episodeIds: [...(batchState.episodeIds || []), ...unDownloaded.map((ep) => `${videoId}_${ep}`)],
     };
     notifyBatchProgress();
     return jsBatchDrainPromise;
@@ -2703,6 +2744,7 @@ export async function executeBatchDownload(
     completed: 0,
     currentEpisode: unDownloaded[0],
     failedCount: 0,
+    episodeIds: unDownloaded.map((ep) => `${videoId}_${ep}`),
   };
   notifyBatchProgress();
   syncNativeDownloadCount();
@@ -2880,9 +2922,14 @@ export async function getDetailedStorageStats(): Promise<DeviceStorageStats> {
       ? Math.max(0, quotaBytes - usageBytes)
       : null;
 
-  const percentUsed: number | null = quotaBytes != null && quotaBytes > 0
-    ? Math.min(100, Math.round((usageBytes / quotaBytes) * 100))
-    : null;
+  const percentUsed: number | null =
+    nativeFreeBytes > 0
+      ? offlineBytes + nativeFreeBytes > 0
+        ? Math.min(100, Math.round((offlineBytes / (offlineBytes + nativeFreeBytes)) * 100))
+        : 0
+      : quotaBytes != null && quotaBytes > 0
+        ? Math.min(100, Math.round((usageBytes / quotaBytes) * 100))
+        : null;
 
   return {
     offlineCount: list.length,

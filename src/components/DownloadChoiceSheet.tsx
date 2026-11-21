@@ -84,7 +84,7 @@ export default function DownloadChoiceSheet({
   const isCellular = isCellularConnection();
   const wifiOnly = isWifiOnlyDownloadEnabled();
   const quality = getDownloadQualityPreference();
-  const totalEps = Math.max(1, totalEpisodes || 10);
+  const totalEps = Math.max(1, totalEpisodes || Math.max(10, currentEpisode));
   const allEpisodes = Array.from({ length: totalEps }, (_, i) => i + 1);
 
   useEffect(() => {
@@ -159,15 +159,16 @@ export default function DownloadChoiceSheet({
 
   return (
     <Sheet open={isOpen} onClose={onClose} label="Offline Downloads">
-      <div className="flex flex-col bg-canvas text-on p-4 sm:p-5 pb-4 gap-3.5 max-h-[82dvh] overflow-y-auto">
+      <div className="flex flex-col bg-s1 text-on p-4 sm:p-5 pb-4 gap-3.5 max-h-[82dvh] overflow-y-auto">
         {/* Hero Header with Artwork & Metadata */}
         <div className="flex items-center justify-between pb-3.5 border-b border-border/80">
           <div className="flex items-center gap-3.5 min-w-0">
-            {coverUrl ? (
+            {coverUrl && (typeof navigator === "undefined" || navigator.onLine !== false || coverUrl.startsWith("blob:") || coverUrl.startsWith("data:") || coverUrl.includes("/offline/")) ? (
               <img
-                src={cover(coverUrl, 160)}
+                src={coverUrl.startsWith("blob:") || coverUrl.startsWith("data:") || coverUrl.includes("/offline/") ? coverUrl : cover(coverUrl, 160)}
                 alt={title}
                 className="w-13 h-17 object-cover rounded-2xl shadow-md border border-border shrink-0"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
               />
             ) : (
               <div className="w-13 h-17 rounded-2xl bg-amber-500/15 text-amber-600 flex items-center justify-center shrink-0 border border-amber-500/20">

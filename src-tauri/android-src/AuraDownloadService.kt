@@ -11,7 +11,9 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -22,6 +24,7 @@ import java.util.Collections
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Android Foreground Service for AuraStream background media downloads.
@@ -32,7 +35,12 @@ class AuraDownloadService : Service() {
   private var wakeLock: PowerManager.WakeLock? = null
   private var wifiLock: WifiManager.WifiLock? = null
   private var poller: ScheduledExecutorService? = null
-  private var idleTicks: Int = 0
+  private val idleTicks = AtomicInteger(0)
+  private val mainHandler = Handler(Looper.getMainLooper())
+  @Volatile
+  private var lastStartId: Int = -1
+  @Volatile
+  private var isInForeground: Boolean = false
   @Volatile
   private var nativeOwnsQueue: Boolean = false
   @Volatile
@@ -154,6 +162,15 @@ class AuraDownloadService : Service() {
       } catch (_: Exception) {
         false
       }
+    }
+
+    fun computeNotifItemId(videoId: Int, episode: Int): Int {
+      val key = "${videoId}_$episode"
+      var h = key.hashCode() and 0x7fffffff
+      if (h == NOTIFICATION_ID || h == 0) {
+        h = (h + 1) and 0x7fffffff
+      }
+      return h
     }
   }
 
@@ -300,7 +317,7 @@ class AuraDownloadService : Service() {
       val obj = itemsArr.optJSONObject(i) ?: continue
       val vid = obj.optInt("videoId", 0)
       val ep = obj.optInt("episode", 1)
-      val notifItemId = ((kotlin.math.abs(vid) % 10000) * 100 + (ep % 100)) and 0x7fffffff
+      val notifItemId = computeNotifItemId(vid, ep)
       parsedItems.add(
         DownloadItem(
           id = notifItemId,
@@ -348,7 +365,7 @@ class AuraDownloadService : Service() {
     if (activeCount > 0 || queuedCount > 0) {
       nativeOwnsQueue = true
       lastNativeUpdatedAt = updatedAt
-      idleTicks = 0
+      idleTicks.set(0)
       replaceAllFromNative(parsedItems, queuedCount)
       refreshNotification(maxOf(activeCount, parsedItems.size))
     } else {
@@ -358,9 +375,9 @@ class AuraDownloadService : Service() {
         clearDownloads()
       }
       if (snapshotDownloads().isEmpty()) {
-        idleTicks++
-        if (idleTicks >= 3) {
-          stopServiceCleanly()
+        if (idleTicks.incrementAndGet() >= 3) {
+          val targetStartId = lastStartId
+          mainHandler.post { stopServiceCleanly(targetStartId) }
         }
       }
     }
@@ -372,7 +389,7 @@ class AuraDownloadService : Service() {
         checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
         return
       }
-      val notifId = (((kotlin.math.abs(vid) % 10000) * 100 + (ep % 100)) and 0x7fffffff) + 1_000_000
+      val notifId = computeNotifItemId(vid, ep) + 1_000_000
       val launchIntent = Intent(this, MainActivity::class.java).apply {
         flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
       }
@@ -395,29 +412,64 @@ class AuraDownloadService : Service() {
     } catch (_: Exception) {}
   }
 
+  private fun ensureForegroundStarted(notification: Notification) {
+    try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+      } else {
+        startForeground(NOTIFICATION_ID, notification)
+      }
+      isInForeground = true
+    } catch (e: Exception) {
+      e.printStackTrace()
+      try {
+        startForeground(NOTIFICATION_ID, notification)
+        isInForeground = true
+      } catch (e2: Exception) {
+        e2.printStackTrace()
+      }
+    }
+  }
+
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    lastStartId = startId
     if (intent == null) {
-      // Service restarted by Android; resume polling native disk state if still active
-      pollNativeStatusFromDisk()
-      return START_REDELIVER_INTENT
+      if (!isInForeground) {
+        ensureForegroundStarted(buildForegroundNotification("AuraStream", "Checking downloads...", 0, "", "", 0))
+      }
+      if (hasActiveDiskDownloads(this)) {
+        pollNativeStatusFromDisk()
+      } else {
+        stopServiceCleanly(startId)
+      }
+      return START_NOT_STICKY
     }
     when (intent.action) {
       ACTION_STOP -> {
-        stopServiceCleanly()
+        if (!isInForeground) {
+          ensureForegroundStarted(buildForegroundNotification("AuraStream", "Stopping downloads...", 0, "", "", 0))
+        }
+        stopServiceCleanly(startId)
         return START_NOT_STICKY
       }
       ACTION_PAUSE_ALL -> {
+        if (!isInForeground) {
+          ensureForegroundStarted(buildForegroundNotification("AuraStream", "Pausing downloads...", 0, "", "", 0))
+        }
         writeControlAction("pause_all")
-        stopServiceCleanly()
+        mainHandler.postDelayed({ stopServiceCleanly(startId) }, 600L)
         return START_NOT_STICKY
       }
       ACTION_CANCEL_ALL -> {
+        if (!isInForeground) {
+          ensureForegroundStarted(buildForegroundNotification("AuraStream", "Cancelling downloads...", 0, "", "", 0))
+        }
         writeControlAction("cancel_all")
-        stopServiceCleanly()
+        mainHandler.postDelayed({ stopServiceCleanly(startId) }, 600L)
         return START_NOT_STICKY
       }
       ACTION_START, ACTION_UPDATE -> {
-        idleTicks = 0
+        idleTicks.set(0)
         val id = intent.getIntExtra(EXTRA_ID, -1)
         val title = intent.getStringExtra(EXTRA_TITLE) ?: "AuraStream"
         val subtitle = intent.getStringExtra(EXTRA_SUBTITLE) ?: "Downloading..."
@@ -431,30 +483,27 @@ class AuraDownloadService : Service() {
         }
 
         val notification = buildForegroundNotification(title, subtitle, progress, speed, size, count)
-        try {
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-          } else {
-            startForeground(NOTIFICATION_ID, notification)
-          }
-        } catch (e: Exception) {
-          e.printStackTrace()
-          try {
-            startForeground(NOTIFICATION_ID, notification)
-          } catch (e2: Exception) {
-            e2.printStackTrace()
-            stopServiceCleanly()
-            return START_NOT_STICKY
-          }
+        ensureForegroundStarted(notification)
+        if (!isInForeground) {
+          stopServiceCleanly(startId)
+          return START_NOT_STICKY
         }
       }
       else -> {
+        if (!isInForeground) {
+          ensureForegroundStarted(buildForegroundNotification("AuraStream", "AuraStream Downloads", 0, "", "", 0))
+        }
         if (!isRunning) {
-          stopServiceCleanly()
+          stopServiceCleanly(startId)
         }
       }
     }
-    return START_REDELIVER_INTENT
+    return START_NOT_STICKY
+  }
+
+  override fun onTimeout(startId: Int, fgsType: Int) {
+    writeControlAction("pause_all")
+    stopServiceCleanly(startId)
   }
 
   fun refreshNotification(reportedCount: Int) {
@@ -559,12 +608,21 @@ class AuraDownloadService : Service() {
       .build()
   }
 
-  private fun stopServiceCleanly() {
+  private fun stopServiceCleanly(expectedStartId: Int = -1) {
+    if (Looper.myLooper() != Looper.getMainLooper()) {
+      mainHandler.post { stopServiceCleanly(expectedStartId) }
+      return
+    }
+    if (expectedStartId != -1 && expectedStartId != lastStartId) {
+      return
+    }
     clearDownloads()
     nativeOwnsQueue = false
     isRunning = false
+    isInForeground = false
     instance = null
     MainActivity.serviceStartRequested = false
+    MainActivity.releaseGlobalWakeLock()
     stopDiskPoller()
     releaseLocks()
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -573,7 +631,11 @@ class AuraDownloadService : Service() {
       @Suppress("DEPRECATION")
       stopForeground(true)
     }
-    stopSelf()
+    if (lastStartId != -1) {
+      stopSelfResult(lastStartId)
+    } else {
+      stopSelf()
+    }
   }
 
   override fun onTaskRemoved(rootIntent: Intent?) {
@@ -581,7 +643,7 @@ class AuraDownloadService : Service() {
     // Keep Foreground Service alive if active or queued downloads are still running!
     val hasActiveDisk = hasActiveDiskDownloads(this)
     if (!hasActiveDisk && (nativeOwnsQueue || snapshotDownloads().isEmpty())) {
-      stopServiceCleanly()
+      stopServiceCleanly(lastStartId)
     }
   }
 
@@ -589,8 +651,10 @@ class AuraDownloadService : Service() {
     stopDiskPoller()
     releaseLocks()
     isRunning = false
+    isInForeground = false
     instance = null
     MainActivity.serviceStartRequested = false
+    MainActivity.releaseGlobalWakeLock()
     super.onDestroy()
   }
 }

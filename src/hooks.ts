@@ -6,26 +6,31 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const alive = useRef(true);
+  const seqRef = useRef(0);
   const fnRef = useRef(fn);
   fnRef.current = fn;
 
   const run = useCallback(async () => {
+    const seq = ++seqRef.current;
     setLoading(true);
     setError(null);
     try {
       const res = await fnRef.current();
-      if (alive.current) setData(res);
+      if (alive.current && seq === seqRef.current) setData(res);
     } catch (e) {
-      if (alive.current) setError((e as Error).message || "Failed to load");
+      if (alive.current && seq === seqRef.current) setError((e as Error).message || "Failed to load");
     } finally {
-      if (alive.current) setLoading(false);
+      if (alive.current && seq === seqRef.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     alive.current = true;
     run();
-    return () => { alive.current = false; };
+    return () => {
+      alive.current = false;
+      seqRef.current++;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 
@@ -39,17 +44,22 @@ export function usePaged<T>(fetcher: (page: number) => Promise<{ items: T[]; pag
   const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resetEpoch, setResetEpoch] = useState(0);
   const busy = useRef(false);
+  const seqRef = useRef(0);
+  const didMountRef = useRef(false);
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
 
   const loadMore = useCallback(async () => {
     if (busy.current || page >= pages) return;
+    const seq = ++seqRef.current;
     busy.current = true;
     setLoading(true);
     try {
       const next = page + 1;
       const res = await fetcherRef.current(next);
+      if (seq !== seqRef.current) return;
       setItems((prev) => {
         const seen = new Set(prev.map((x) => (x as { id: number }).id));
         return [...prev, ...(res.items || []).filter((x) => !seen.has((x as { id: number }).id))];
@@ -58,29 +68,48 @@ export function usePaged<T>(fetcher: (page: number) => Promise<{ items: T[]; pag
       setPages(res.pagination?.pages || next);
       setError(null);
     } catch (e) {
-      setError((e as Error).message || "Failed to load");
+      if (seq === seqRef.current) {
+        setError((e as Error).message || "Failed to load");
+      }
     } finally {
-      busy.current = false;
-      setLoading(false);
+      if (seq === seqRef.current) {
+        busy.current = false;
+        setLoading(false);
+      }
     }
   }, [page, pages]);
 
   const reset = useCallback(() => {
+    seqRef.current++;
+    busy.current = false;
+    setLoading(false);
     setItems([]);
     setPage(0);
     setPages(1);
     setError(null);
+    setResetEpoch((n) => n + 1);
   }, []);
 
   useEffect(() => {
+    return () => {
+      seqRef.current++;
+      busy.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
     reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 
   useEffect(() => {
-    if (page === 0) loadMore();
+    if (page === 0) void loadMore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page]);
+  }, [page, resetEpoch]);
 
   return { items, loading, error, loadMore, hasMore: page < pages, reset };
 }

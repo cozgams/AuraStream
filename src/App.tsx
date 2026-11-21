@@ -120,7 +120,7 @@ function AppBody() {
 
   const vis = (k: Tab) => (tab === k ? `absolute inset-0 ${k === "home" ? "" : "ios-tab-active"}` : "absolute inset-0 hidden pointer-events-none");
   const pageActive = stack.length === 0 && !loginOpen;
-  const bottomInset = isMobile ? (fs || clean ? 0 : (platform === "android" ? 112 : 74)) : 14;
+  const bottomInset = isMobile ? (fs || clean ? 0 : (platform === "android" ? 78 : 74)) : 14;
   /* Stack pages (feed from search/category/profile) render without bottom nav */
   const stackInset = isMobile ? 0 : 14;
 
@@ -131,7 +131,7 @@ function AppBody() {
         <div className={vis("home")} inert={!pageActive || tab !== "home"} aria-hidden={!pageActive || tab !== "home"}><Home active={pageActive && tab === "home"} bottomInset={bottomInset} /></div>
         <div className={vis("search")} inert={!pageActive || tab !== "search"} aria-hidden={!pageActive || tab !== "search"}><Search active={pageActive && tab === "search"} wide={wide} /></div>
         <div className={vis("category")} inert={!pageActive || tab !== "category"} aria-hidden={!pageActive || tab !== "category"}><Category wide={wide} active={pageActive && tab === "category"} /></div>
-        <div className={vis("profile")} inert={!pageActive || tab !== "profile"} aria-hidden={!pageActive || tab !== "profile"}><Profile wide={wide} /></div>
+        <div className={vis("profile")} inert={!pageActive || tab !== "profile"} aria-hidden={!pageActive || tab !== "profile"}><Profile wide={wide} active={pageActive && tab === "profile"} /></div>
 
         {stack.map((p, i) => (
           <div key={p.key} inert={i !== stack.length - 1 || loginOpen} aria-hidden={i !== stack.length - 1 || loginOpen} className="absolute inset-0 z-30 bg-bg a-page-in" style={{ boxShadow: "-18px 0 40px rgba(0,0,0,.5)" }}>
@@ -198,7 +198,7 @@ function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boole
     };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
-  }, [stack.length, pop, setTab, loginOpen, setLoginOpen]);
+  }, [stack.length, pop, setTab, loginOpen, setLoginOpen, tab]);
 
   const vis = (k: Tab) => (tab === k ? `absolute inset-0 ${k === "home" ? "" : "ios-tab-active"}` : "absolute inset-0 hidden pointer-events-none");
   const pageActive = stack.length === 0 && !loginOpen;
@@ -210,7 +210,7 @@ function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boole
         <div className={vis("home")} inert={!pageActive || tab !== "home"} aria-hidden={!pageActive || tab !== "home"}><Home active={pageActive && tab === "home"} bottomInset={14} /></div>
         <div className={vis("search")} inert={!pageActive || tab !== "search"} aria-hidden={!pageActive || tab !== "search"}><Search active={pageActive && tab === "search"} wide={wide} /></div>
         <div className={vis("category")} inert={!pageActive || tab !== "category"} aria-hidden={!pageActive || tab !== "category"}><Category wide={wide} active={pageActive && tab === "category"} /></div>
-        <div className={vis("profile")} inert={!pageActive || tab !== "profile"} aria-hidden={!pageActive || tab !== "profile"}><Profile wide={wide} /></div>
+        <div className={vis("profile")} inert={!pageActive || tab !== "profile"} aria-hidden={!pageActive || tab !== "profile"}><Profile wide={wide} active={pageActive && tab === "profile"} /></div>
         {stack.map((p, i) => (
           <div key={p.key} inert={i !== stack.length - 1 || loginOpen} aria-hidden={i !== stack.length - 1 || loginOpen} className="absolute inset-0 z-30 bg-bg win-page-in" style={{ boxShadow: "-18px 0 40px rgba(0,0,0,.5)" }}>
             <StackPage page={p} onBack={pop} wide={wide} top={i === stack.length - 1} bottomInset={14} />

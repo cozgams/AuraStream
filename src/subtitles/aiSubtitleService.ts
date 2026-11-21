@@ -2,6 +2,7 @@ import type { AICaptionConfig, SubtitleCue, SubtitleTrack, SubtitleStyleConfig }
 import { parseVtt } from "./vttParser";
 import { formatSubtitleText } from "./dramaTranslator";
 import { LOCAL, isLocalMedia } from "../api";
+import { parseExtXKey, parseHlsIv, sequenceToIv } from "../offline/exportService";
 
 const MEMORY_CACHE = new Map<string, SubtitleTrack>();
 
@@ -444,28 +445,112 @@ async function collectEpisodeMediaForAI(streamUrl: string): Promise<{ blob: Blob
   if (!plRes.ok) throw new Error(`Failed to load HLS playlist (HTTP ${plRes.status})`);
   let playlistText = await plRes.text();
 
+  let variantUrl = "";
   if (playlistText.includes("#EXT-X-STREAM-INF")) {
     const lines = playlistText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const variant = lines.find((l) => !l.startsWith("#"));
     if (!variant) throw new Error("Master playlist has no media variants");
-    const vRes = await fetch(resolveMediaProxyUrl(variant), { signal: AbortSignal.timeout(15000) });
+    variantUrl = resolveMediaProxyUrl(variant);
+    const vRes = await fetch(variantUrl, { signal: AbortSignal.timeout(15000) });
     if (!vRes.ok) throw new Error(`Failed to load variant playlist (HTTP ${vRes.status})`);
     playlistText = await vRes.text();
   }
 
-  const segUrls = playlistText
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith("#"));
-  if (segUrls.length === 0) throw new Error("No downloadable media segments found");
+  const basePlaylistUrl = variantUrl || plUrl;
+  const resolvePlaylistRef = (rawRef: string): string => {
+    if (/^(https?:|blob:|hg:)/i.test(rawRef)) return resolveMediaProxyUrl(rawRef);
+    if (rawRef.startsWith("/")) return `${LOCAL}${rawRef}`;
+    try {
+      return resolveMediaProxyUrl(new URL(rawRef, basePlaylistUrl).toString());
+    } catch {
+      return resolveMediaProxyUrl(rawRef);
+    }
+  };
+
+  const rawLines = playlistText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  let mediaSequence = 0;
+  let currentMethod = "";
+  let currentIv: string | undefined;
+  let currentKeyUri: string | undefined;
+  let mapUri: string | undefined;
+  const segments: Array<{ url: string; method: string; iv?: string; keyUri?: string }> = [];
+
+  for (const line of rawLines) {
+    if (line.startsWith("#EXT-X-MEDIA-SEQUENCE:")) {
+      const seq = parseInt(line.slice("#EXT-X-MEDIA-SEQUENCE:".length).trim(), 10);
+      if (Number.isFinite(seq) && seq >= 0) mediaSequence = seq;
+    } else if (line.startsWith("#EXT-X-MAP:")) {
+      const parsedMap = parseExtXKey(line);
+      if (parsedMap.uri && !mapUri) mapUri = parsedMap.uri;
+    } else if (line.startsWith("#EXT-X-KEY:")) {
+      const parsedKey = parseExtXKey(line);
+      currentMethod = parsedKey.method || "";
+      currentIv = parsedKey.iv;
+      currentKeyUri = parsedKey.uri;
+    } else if (!line.startsWith("#")) {
+      segments.push({
+        url: line,
+        method: currentMethod,
+        iv: currentIv,
+        keyUri: currentKeyUri,
+      });
+    }
+  }
+  if (segments.length === 0) throw new Error("No downloadable media segments found");
+
+  const cryptoKeyCache = new Map<string, CryptoKey>();
+  const loadAesKey = async (keyUri?: string): Promise<CryptoKey> => {
+    if (!keyUri) throw new Error("Missing AES-128 key URI in HLS playlist");
+    const cached = cryptoKeyCache.get(keyUri);
+    if (cached) return cached;
+    if (typeof crypto === "undefined" || !crypto.subtle) {
+      throw new Error("WebCrypto AES-128 decryption is unavailable in this environment");
+    }
+    const kRes = await fetch(resolvePlaylistRef(keyUri), { signal: AbortSignal.timeout(15000) });
+    if (!kRes.ok) throw new Error(`Failed to fetch HLS decryption key (HTTP ${kRes.status})`);
+    const rawKey = await kRes.arrayBuffer();
+    if (rawKey.byteLength !== 16) {
+      throw new Error(`Invalid HLS AES-128 key length (${rawKey.byteLength} bytes)`);
+    }
+    const imported = await crypto.subtle.importKey("raw", rawKey, { name: "AES-CBC" }, false, ["decrypt"]);
+    cryptoKeyCache.set(keyUri, imported);
+    return imported;
+  };
 
   const parts: BlobPart[] = [];
   let totalBytes = 0;
-  for (const segUrl of segUrls) {
+
+  if (mapUri) {
+    try {
+      const mRes = await fetch(resolvePlaylistRef(mapUri), { signal: AbortSignal.timeout(15000) });
+      if (mRes.ok) {
+        const mapBuf = await mRes.arrayBuffer();
+        if (mapBuf.byteLength > 0) {
+          parts.push(mapBuf);
+          totalBytes += mapBuf.byteLength;
+        }
+      }
+    } catch {
+      // ignore optional init map failure
+    }
+  }
+
+  for (let i = 0; i < segments.length; i++) {
     if (totalBytes >= MAX_BYTES) break;
-    const segRes = await fetch(resolveMediaProxyUrl(segUrl), { signal: AbortSignal.timeout(20000) });
+    const seg = segments[i];
+    const method = seg.method || "NONE";
+    if (method !== "NONE" && method !== "" && method !== "AES-128") {
+      throw new Error(`Unsupported HLS encryption method "${method}" for AI transcription`);
+    }
+    const segRes = await fetch(resolvePlaylistRef(seg.url), { signal: AbortSignal.timeout(20000) });
     if (!segRes.ok) continue;
-    const ab = await segRes.arrayBuffer();
+    let ab = await segRes.arrayBuffer();
+    if (ab.byteLength === 0) continue;
+    if (method === "AES-128") {
+      const cryptoKey = await loadAesKey(seg.keyUri);
+      const iv = seg.iv ? parseHlsIv(seg.iv) : sequenceToIv(mediaSequence + i);
+      ab = await crypto.subtle.decrypt({ name: "AES-CBC", iv: iv as BufferSource }, cryptoKey, ab);
+    }
     if (ab.byteLength > 0) {
       parts.push(ab);
       totalBytes += ab.byteLength;
@@ -614,7 +699,10 @@ export async function getSubtitlesForEpisode(
   }
 
   // 3. Try explicit upstream WebVTT/SRT URL if provided
-  if (remoteVttUrl) {
+  const isLocalRemoteVtt = Boolean(
+    remoteVttUrl && (isLocalMedia(remoteVttUrl) || remoteVttUrl.startsWith("blob:"))
+  );
+  if (remoteVttUrl && (isLocalRemoteVtt || typeof navigator === "undefined" || navigator.onLine !== false)) {
     try {
       const cues = await fetchHlsSubtitleCues(remoteVttUrl);
       if (cues.length > 0) {
@@ -635,8 +723,9 @@ export async function getSubtitlesForEpisode(
 
   // 4. Inspect HLS master manifest for embedded #EXT-X-MEDIA:TYPE=SUBTITLES track
   if (hlsPlaylistUrl && (/\.m3u8(\?|$|#)/i.test(hlsPlaylistUrl) || hlsPlaylistUrl.includes("/hls?u="))) {
+    const isOfflinePl = hlsPlaylistUrl.includes("/offline/") || hlsPlaylistUrl.startsWith("blob:");
     const isLocalPl = isLocalMedia(hlsPlaylistUrl) || hlsPlaylistUrl.startsWith("blob:");
-    if (!isLocalPl && typeof navigator !== "undefined" && navigator.onLine === false) {
+    if (!isOfflinePl && typeof navigator !== "undefined" && navigator.onLine === false) {
       // Strict zero-internet offline mode: never inspect remote HLS playlists while offline
     } else {
       try {
@@ -728,14 +817,35 @@ export function exportToSrt(track: SubtitleTrack, _lang: "en" = "en"): string {
  * Clears cached AI subtitles
  */
 export function clearSubtitleCache(): void {
-  MEMORY_CACHE.clear();
   try {
     const keys = Object.keys(localStorage);
     for (const key of keys) {
-      if (key.startsWith(STORAGE_KEYS.PREFIX)) {
-        localStorage.removeItem(key);
+      if (!key.startsWith(STORAGE_KEYS.PREFIX)) continue;
+      const suffix = key.slice(STORAGE_KEYS.PREFIX.length);
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as Partial<SubtitleTrack>;
+          if (parsed?.source === "local_import") {
+            continue;
+          }
+        } catch {
+          // remove corrupt entry
+        }
       }
+      localStorage.removeItem(key);
+      MEMORY_CACHE.delete(suffix);
     }
+  } catch {
+    // ignore
+  }
+  for (const [k, track] of Array.from(MEMORY_CACHE.entries())) {
+    if (track.source !== "local_import") {
+      MEMORY_CACHE.delete(k);
+    }
+  }
+  try {
+    window.dispatchEvent(new CustomEvent("aurastream:subtitle-cache-cleared"));
   } catch {
     // ignore
   }

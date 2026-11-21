@@ -35,6 +35,8 @@ export default function Home({ active, bottomInset }: { active: boolean; bottomI
   lineEpochRef.current = lineEpoch;
   const itemsRef = useRef(items);
   itemsRef.current = items;
+  const offlineFallbackRef = useRef(offlineFallbackMode);
+  offlineFallbackRef.current = offlineFallbackMode;
 
   const tryLoadOfflineHome = async (): Promise<boolean> => {
     await ensureOfflineSyncReady().catch(() => {});
@@ -80,14 +82,16 @@ export default function Home({ active, bottomInset }: { active: boolean; bottomI
     setLoading(true);
     setError("");
     try {
-      if (p === 1 && !itemsRef.current.length && typeof navigator !== "undefined" && navigator.onLine === false) {
+      if (p === 1 && (!itemsRef.current.length || offlineFallbackRef.current) && typeof navigator !== "undefined" && navigator.onLine === false) {
         if (await tryLoadOfflineHome()) return;
       }
       const res = await api.feed(p, 30);
       const list = res?.items || [];
       const ordered = p === 1 ? shuffle(list) : list;
+      const recoveringOffline = p === 1 && offlineFallbackRef.current;
       setOfflineFallbackMode(false);
       setItems((prev) => {
+        if (recoveringOffline) return ordered;
         const seen = new Set(prev.map((x) => x.id));
         return [...prev, ...ordered.filter((x) => !seen.has(x.id))];
       });
@@ -95,6 +99,7 @@ export default function Home({ active, bottomInset }: { active: boolean; bottomI
       failStreak.current = 0;
       retryAt.current = 0;
       if (!list.length || (res?.pagination && p >= res.pagination.pages)) setDone(true);
+      else if (p === 1) setDone(false);
     } catch (e) {
       const message = localizeError(e);
       const stale = requestEpoch !== lineEpochRef.current;
@@ -122,14 +127,28 @@ export default function Home({ active, bottomInset }: { active: boolean; bottomI
 
   useEffect(() => { if (!items.length) load(1); /* eslint-disable-next-line */ }, []);
 
-  /* Re-fetch on new line if home feed is empty or failed */
+  /* Re-fetch on new line or network recovery if home feed is empty or in offline fallback */
   useEffect(() => {
-    if (!lineEpoch || items.length || loadingRef.current) return;
+    if (!lineEpoch || loadingRef.current) return;
+    if (itemsRef.current.length && !offlineFallbackRef.current) return;
     setDone(false);
     setError("");
     void load(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lineEpoch]);
+
+  useEffect(() => {
+    const onOnline = () => {
+      if (loadingRef.current) return;
+      if (offlineFallbackRef.current || !itemsRef.current.length || error) {
+        setDone(false);
+        setError("");
+        void load(1);
+      }
+    };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [error, load]);
 
   const ids = useMemo(() => items.map((v) => v.id), [items]);
 

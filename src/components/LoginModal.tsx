@@ -91,9 +91,14 @@ export default function LoginModal() {
     }
     try {
       // Allow either strict JSON or JS object snippet pasted from Firebase console
-      const jsonReady = trimmed
-        .replace(/^[^{]*(\{[\s\S]*\})[^}]*$/, "$1")
-        .replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":');
+      const rawBlock = trimmed.replace(/^[^{]*(\{[\s\S]*\})[^}]*$/, "$1");
+      const jsonReady = rawBlock
+        .replace(/^\s*\/\/.*$/gm, "")
+        .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_, inner: string) =>
+          JSON.stringify(inner.replace(/\\'/g, "'"))
+        )
+        .replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":')
+        .replace(/,\s*([}\]])/g, "$1");
       const parsed = JSON.parse(jsonReady) as Partial<FirebaseConfig>;
       if (!parsed.apiKey || !parsed.projectId) {
         setErr("Config must include at least apiKey and projectId.");
@@ -172,7 +177,11 @@ export default function LoginModal() {
 
       if (fbUser) {
         const resolvedNick =
-          nickname.trim() || fbUser.displayName || fbUser.email?.split("@")[0] || cleanEmail.split("@")[0] || "User";
+          (mode === "register" ? nickname.trim() : "") ||
+          fbUser.displayName ||
+          fbUser.email?.split("@")[0] ||
+          cleanEmail.split("@")[0] ||
+          "User";
         const userObj: User = {
           id: hashUid(fbUser.uid || cleanEmail),
           username: fbUser.email?.split("@")[0] || cleanEmail.split("@")[0] || "User",
@@ -210,7 +219,7 @@ export default function LoginModal() {
   const content = (
     <div className="ios-auth flex flex-col max-h-[84dvh] overflow-hidden">
       {/* Fixed Header & Tabs so top input is never clipped under sheet drag bar */}
-      <div className="shrink-0 px-5 pt-5 pb-3 sm:px-7 sm:pt-6 border-b border-edge/30 bg-canvas/95 backdrop-blur-md z-10">
+      <div className="shrink-0 px-5 pt-5 pb-3 sm:px-7 sm:pt-6 border-b border-edge/30 bg-s1/95 backdrop-blur-md z-10">
         <div className="ios-dialog-heading">
           <span className="ios-heading-icon">
             <ILogin size={21} />

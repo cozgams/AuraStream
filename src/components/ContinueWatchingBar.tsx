@@ -5,7 +5,7 @@ import type { Detail } from "../types";
 import { Button } from "./ios/controls";
 import { IClose, IPlayF } from "../icons";
 import { formatDramaTitle } from "../subtitles/dramaTranslator";
-import { getOfflineEpisodes } from "../offline/downloadService";
+import { getOfflineCoverUrl, getOfflineEpisodes } from "../offline/downloadService";
 
 function fmtTime(sec?: number): string {
   if (!sec || !Number.isFinite(sec) || sec <= 0) return "0:00";
@@ -59,30 +59,41 @@ export default function ContinueWatchingBar() {
     ((recent.t > 3 && recent.dur && recent.dur > 0 && !isFinishedEp) || (isFinishedEp && hasNextEp)));
 
   useEffect(() => {
+    setDrama(null);
+    if (!shouldShow || !recent?.id) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
     let alive = true;
-    if (recent?.id) {
-      api
-        .video(recent.id)
-        .then((res) => {
-          if (alive && res) setDrama(res);
-        })
-        .catch(() => {});
-    } else {
-      setDrama(null);
-    }
+    api
+      .video(recent.id)
+      .then((res) => {
+        if (alive && res) setDrama(res);
+      })
+      .catch(() => {});
     return () => {
       alive = false;
     };
-  }, [recent?.id]);
+  }, [recent?.id, shouldShow]);
 
   const offlineItem = useMemo(
     () => (!drama && recent ? getOfflineEpisodes().find((it) => it.videoId === recent.id) ?? null : null),
-    [drama, recent?.id]
+    [drama, recent]
   );
   const rawTitle = drama?.title || recent?.title || offlineItem?.title;
   const title = rawTitle ? formatDramaTitle(rawTitle) : (recent ? `Drama #${recent.id}` : "");
   const rawCover = drama?.cover || recent?.cover || offlineItem?.cover;
-  const coverUrl = useMemo(() => (rawCover ? getCoverUrl(rawCover, 240) : ""), [rawCover]);
+  const coverUrl = useMemo(() => {
+    if (offlineItem?.hasLocalCover && offlineItem?.storage === "native") {
+      return getOfflineCoverUrl(offlineItem, 240);
+    }
+    if (!rawCover) return "";
+    if (isLocalMedia(rawCover) || rawCover.startsWith("blob:") || rawCover.startsWith("data:")) {
+      return rawCover;
+    }
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      return "";
+    }
+    return getCoverUrl(rawCover, 240);
+  }, [offlineItem, rawCover]);
 
   useEffect(() => {
     setImgError(false);

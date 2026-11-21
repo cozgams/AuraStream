@@ -75,7 +75,13 @@ fn serve(mut stream: TcpStream) -> std::io::Result<()> {
     } else {
         None
     };
-    let response = tauri::async_runtime::block_on(crate::media::handle(path, query, ORIGIN, range));
+    let response = tauri::async_runtime::block_on(crate::media::handle_with_method(
+        path,
+        query,
+        ORIGIN,
+        range,
+        method == "HEAD",
+    ));
     let (parts, body) = response.into_parts();
 
     write_response(&mut stream, method, parts, &body)
@@ -93,7 +99,17 @@ fn write_response(
         parts.status.as_u16(),
         parts.status.canonical_reason().unwrap_or("OK")
     ));
-    head.push_str(&format!("Content-Length: {}\r\n", body.len()));
+    let content_len = if method == "HEAD" && body.is_empty() {
+        parts
+            .headers
+            .get("content-length")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0)
+    } else {
+        body.len()
+    };
+    head.push_str(&format!("Content-Length: {content_len}\r\n"));
     for (name, value) in parts.headers.iter() {
         // This server sends a complete body and closes the connection. Do not
         // duplicate media::handle's length/CORS headers or forward framing for

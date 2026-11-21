@@ -463,6 +463,43 @@ pub async fn get(
     get_with_dns(raw, timeout, accept, referer, false).await
 }
 
+/// Execute HTTP GET request for long streaming downloads (connect/header timeout only, no full-body timeout).
+pub async fn get_stream(
+    raw: &str,
+    connect_timeout: Duration,
+    range: Option<&str>,
+    referer: Option<&str>,
+) -> Result<reqwest::Response, String> {
+    let mut next = network_policy::parse_target(raw)?;
+    for hop in 0..=5 {
+        let (target, http) = client_for(next.as_str()).await?;
+        let mut request = http.get(target.clone()).timeout(Duration::from_secs(6 * 3600));
+        if let Some(value) = range {
+            request = request.header(reqwest::header::RANGE, value);
+        }
+        if let Some(value) = referer {
+            request = request.header("Referer", value);
+        }
+        let response = tokio::time::timeout(connect_timeout, request.send())
+            .await
+            .map_err(|_| "Request timed out".to_string())?
+            .map_err(|e| err_text(&e))?;
+        if !matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
+            return Ok(response);
+        }
+        if hop == 5 {
+            return Err("Too many redirects".into());
+        }
+        let location = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|h| h.to_str().ok())
+            .ok_or("Redirect missing valid Location")?;
+        next = network_policy::redirect_target(&target, location)?;
+    }
+    Err("Too many redirects".into())
+}
+
 /// Execute HTTP GET request with DNS validation, proxy routing, and custom User-Agent.
 pub async fn get_with_ua(
     raw: &str,
@@ -1148,7 +1185,7 @@ pub async fn diagnose() -> Value {
     })
 }
 
-fn retryable_error(error: &str) -> bool {
+pub fn retryable_error(error: &str) -> bool {
     if error == "401" {
         return false;
     }
@@ -1409,18 +1446,33 @@ pub async fn fetch_bytes(url: &str) -> Result<(Option<String>, Vec<u8>), String>
             let mut status = None;
             let mut headers_ms = None;
             let result = async {
-                let resp = get_with_dns(&url, Duration::from_secs(60), None, Some(&referer), using_public_dns).await?;
+                let mut resp = get_with_dns(&url, Duration::from_secs(60), None, Some(&referer), using_public_dns).await?;
                 status = Some(resp.status().as_u16());
                 headers_ms = Some(started.elapsed().as_millis() as u64);
                 if !resp.status().is_success() {
                     return Err(format!("HTTP {}", resp.status()));
+                }
+                const MAX_FETCH_BYTES: usize = 32 * 1024 * 1024;
+                if resp.content_length().is_some_and(|len| len > MAX_FETCH_BYTES as u64) {
+                    return Err("Response exceeds 32 MB size limit".to_string());
                 }
                 let ctype = resp
                     .headers()
                     .get(reqwest::header::CONTENT_TYPE)
                     .and_then(|v| v.to_str().ok())
                     .map(|s| s.to_string());
-                let bytes = resp.bytes().await.map_err(|e| err_text(&e))?.to_vec();
+                let mut bytes = Vec::with_capacity(
+                    resp.content_length()
+                        .and_then(|l| usize::try_from(l).ok())
+                        .map(|l| l.min(4 * 1024 * 1024))
+                        .unwrap_or(0),
+                );
+                while let Some(chunk) = resp.chunk().await.map_err(|e| err_text(&e))? {
+                    if bytes.len().saturating_add(chunk.len()) > MAX_FETCH_BYTES {
+                        return Err("Response exceeds 32 MB size limit".to_string());
+                    }
+                    bytes.extend_from_slice(&chunk);
+                }
                 Ok((ctype, bytes))
             }.await;
             if using_public_dns {

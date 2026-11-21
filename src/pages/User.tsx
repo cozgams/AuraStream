@@ -48,10 +48,16 @@ export function FollowingPage({ onBack, wide }: { onBack: () => void; wide: bool
   }, [page, pages, toast]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setItems([]);
+      setPage(0);
+      setPages(1);
+      setErr("");
+      return;
+    }
     loadMore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     const el = sentinel.current;

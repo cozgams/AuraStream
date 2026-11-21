@@ -9,6 +9,7 @@ use aes::Aes128;
 use once_cell::sync::Lazy;
 use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
 use std::collections::HashMap;
+use std::io::{Read, Seek, SeekFrom};
 use std::sync::{atomic::{AtomicU64, Ordering}, Arc, Mutex, Weak};
 use tauri::http::{Response, StatusCode};
 
@@ -26,40 +27,114 @@ pub const LOCAL_ORIGIN: &str = "hg://localhost";
 const IMG_KEY: &[u8] = b"f5d965df75336270";
 const IMG_IV: &[u8] = b"97b60394abc2fbe1";
 
-static IMG_CACHE: Lazy<Mutex<HashMap<String, Arc<Vec<u8>>>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+struct CacheEntry<V> {
+    val: V,
+    bytes: usize,
+    seq: u64,
+}
+
+struct BoundedCache<V> {
+    map: HashMap<String, CacheEntry<V>>,
+    total_bytes: usize,
+    next_seq: u64,
+}
+
+impl<V: Clone> BoundedCache<V> {
+    fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+            total_bytes: 0,
+            next_seq: 1,
+        }
+    }
+
+    fn get(&mut self, key: &str) -> Option<V> {
+        let next = self.next_seq;
+        self.next_seq = self.next_seq.wrapping_add(1);
+        let entry = self.map.get_mut(key)?;
+        entry.seq = next;
+        Some(entry.val.clone())
+    }
+
+    fn put(&mut self, key: String, val: V, bytes: usize, max_count: usize, max_total_bytes: usize) {
+        if let Some(prev) = self.map.remove(&key) {
+            self.total_bytes = self.total_bytes.saturating_sub(prev.bytes);
+        }
+        while !self.map.is_empty()
+            && (self.map.len() >= max_count
+                || (max_total_bytes > 0 && self.total_bytes.saturating_add(bytes) > max_total_bytes))
+        {
+            let oldest_key = self
+                .map
+                .iter()
+                .min_by_key(|(_, entry)| entry.seq)
+                .map(|(k, _)| k.clone());
+            match oldest_key {
+                Some(k) => {
+                    if let Some(old) = self.map.remove(&k) {
+                        self.total_bytes = self.total_bytes.saturating_sub(old.bytes);
+                    }
+                }
+                None => break,
+            }
+        }
+        let seq = self.next_seq;
+        self.next_seq = self.next_seq.wrapping_add(1);
+        self.total_bytes = self.total_bytes.saturating_add(bytes);
+        self.map.insert(key, CacheEntry { val, bytes, seq });
+    }
+
+    fn clear(&mut self) {
+        self.map.clear();
+        self.total_bytes = 0;
+    }
+}
+
+static IMG_CACHE: Lazy<Mutex<BoundedCache<Arc<Vec<u8>>>>> =
+    Lazy::new(|| Mutex::new(BoundedCache::new()));
 type ImageResult = Result<(String, Arc<Vec<u8>>), String>;
 type ImageLoad = tokio::sync::OnceCell<ImageResult>;
 type CachedMediaPayload = (String, Arc<Vec<u8>>);
-type MediaCacheMap = HashMap<String, CachedMediaPayload>;
 type ImageLoadingMap = HashMap<(u64, String), Weak<ImageLoad>>;
 
 // Deduplicate concurrent image requests; share download and decryption.
 static IMG_LOADING: Lazy<Mutex<ImageLoadingMap>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 static IMG_GENERATION: AtomicU64 = AtomicU64::new(0);
-static PL_CACHE: Lazy<Mutex<HashMap<String, Arc<String>>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static PL_CACHE: Lazy<Mutex<BoundedCache<Arc<String>>>> =
+    Lazy::new(|| Mutex::new(BoundedCache::new()));
 /// In-memory cache for AES Keys and segments to avoid duplicate downloads during seeking.
-static KEY_CACHE: Lazy<Mutex<MediaCacheMap>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
-static SEG_CACHE: Lazy<Mutex<MediaCacheMap>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static KEY_CACHE: Lazy<Mutex<BoundedCache<CachedMediaPayload>>> =
+    Lazy::new(|| Mutex::new(BoundedCache::new()));
+static SEG_CACHE: Lazy<Mutex<BoundedCache<CachedMediaPayload>>> =
+    Lazy::new(|| Mutex::new(BoundedCache::new()));
 
 const IMG_CACHE_MAX: usize = 360;
 const PL_CACHE_MAX: usize = 120;
 const KEY_CACHE_MAX: usize = 200;
 const SEG_CACHE_MAX: usize = 64;
 const SEG_CACHE_MAX_BYTES: usize = 6 * 1024 * 1024;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+const IMG_CACHE_TOTAL_MAX_BYTES: usize = 24 * 1024 * 1024;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+const IMG_CACHE_TOTAL_MAX_BYTES: usize = 64 * 1024 * 1024;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+const SEG_CACHE_TOTAL_MAX_BYTES: usize = 36 * 1024 * 1024;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+const SEG_CACHE_TOTAL_MAX_BYTES: usize = 96 * 1024 * 1024;
+const PL_CACHE_TOTAL_MAX_BYTES: usize = 8 * 1024 * 1024;
+const KEY_CACHE_TOTAL_MAX_BYTES: usize = 2 * 1024 * 1024;
 
-fn cache_put<V: Clone>(map: &Mutex<HashMap<String, V>>, key: String, val: V, max: usize) {
-    if let Ok(mut m) = map.lock() {
-        if m.len() >= max {
-            if let Some(k) = m.keys().next().cloned() {
-                m.remove(&k);
-            }
-        }
-        m.insert(key, val);
+fn cache_put<V: Clone>(
+    cache: &Mutex<BoundedCache<V>>,
+    key: String,
+    val: V,
+    bytes: usize,
+    max: usize,
+    max_total_bytes: usize,
+) {
+    if let Ok(mut c) = cache.lock() {
+        c.put(key, val, bytes, max, max_total_bytes);
     }
 }
 
@@ -117,8 +192,8 @@ fn image_kind(buf: &[u8]) -> Option<&'static str> {
 /// Fetch cover image: Return cached if present; share in-flight download and decryption.
 pub async fn load_image(url: &str) -> ImageResult {
     let generation = {
-        if let Ok(cache) = IMG_CACHE.lock() {
-            if let Some(hit) = cache.get(url).cloned() {
+        if let Ok(mut cache) = IMG_CACHE.lock() {
+            if let Some(hit) = cache.get(url) {
                 let kind = image_kind(&hit).unwrap_or("image/jpeg");
                 return Ok((kind.to_string(), hit));
             }
@@ -145,8 +220,8 @@ pub async fn load_image(url: &str) -> ImageResult {
 
 async fn download_image(url: &str, generation: u64) -> ImageResult {
     // Check if another request finished between cache check and task acquisition
-    if let Ok(cache) = IMG_CACHE.lock() {
-        if let Some(hit) = cache.get(url).cloned() {
+    if let Ok(mut cache) = IMG_CACHE.lock() {
+        if let Some(hit) = cache.get(url) {
             let kind = image_kind(&hit).unwrap_or("image/jpeg");
             return Ok((kind.to_string(), hit));
         }
@@ -159,16 +234,18 @@ async fn download_image(url: &str, generation: u64) -> ImageResult {
         strip_padding(dec)
     };
     let kind = image_kind(&plain).unwrap_or("image/jpeg").to_string();
+    let img_bytes = plain.len();
     let arc = Arc::new(plain);
     if let Ok(mut cache) = IMG_CACHE.lock() {
         // After clearing cache, in-flight downloads will not pollute the new cache generation
         if IMG_GENERATION.load(Ordering::Acquire) == generation {
-            if cache.len() >= IMG_CACHE_MAX {
-                if let Some(key) = cache.keys().next().cloned() {
-                    cache.remove(&key);
-                }
-            }
-            cache.insert(url.to_string(), arc.clone());
+            cache.put(
+                url.to_string(),
+                arc.clone(),
+                img_bytes,
+                IMG_CACHE_MAX,
+                IMG_CACHE_TOTAL_MAX_BYTES,
+            );
         }
     }
     Ok((kind, arc))
@@ -223,7 +300,7 @@ fn map_uri_attributes(line: &str, mut rewrite: impl FnMut(&str) -> String) -> St
         .into_iter()
         .map(|attribute| {
             if let Some((key, value)) = attribute.split_once('=') {
-                if key.trim() == "URI" {
+                if key.trim().eq_ignore_ascii_case("URI") {
                     if let Some(uri) = value
                         .trim()
                         .strip_prefix('"')
@@ -247,8 +324,8 @@ fn rewrite_uri_attr(line: &str, prefix: &str) -> String {
 pub async fn load_playlist(url: &str, prefix: &str) -> Result<Arc<String>, String> {
     // Cache key includes prefix as rewritten URLs vary by scheme
     let cache_key = format!("{prefix}|{url}");
-    if let Ok(cache) = PL_CACHE.lock() {
-        if let Some(hit) = cache.get(&cache_key).cloned() {
+    if let Ok(mut cache) = PL_CACHE.lock() {
+        if let Some(hit) = cache.get(&cache_key) {
             return Ok(hit);
         }
     }
@@ -257,8 +334,10 @@ pub async fn load_playlist(url: &str, prefix: &str) -> Result<Arc<String>, Strin
     if !text.trim_start_matches('\u{feff}').starts_with("#EXTM3U") {
         return Err("Response is not a valid HLS playlist".into());
     }
-    let arc = Arc::new(rewrite_playlist(url, text, prefix));
-    cache_put(&PL_CACHE, cache_key, arc.clone(), PL_CACHE_MAX);
+    let rewritten = rewrite_playlist(url, text, prefix);
+    let len = rewritten.len();
+    let arc = Arc::new(rewritten);
+    cache_put(&PL_CACHE, cache_key, arc.clone(), len, PL_CACHE_MAX, PL_CACHE_TOTAL_MAX_BYTES);
     Ok(arc)
 }
 
@@ -316,13 +395,13 @@ fn absolutize_uri_in_attr(base: &str, line: &str) -> String {
 
 /// In-memory caching for segments and AES keys during playback and seeking.
 pub async fn load_segment(url: &str) -> Result<(Option<String>, Arc<Vec<u8>>), String> {
-    if let Ok(cache) = KEY_CACHE.lock() {
-        if let Some((ctype, hit)) = cache.get(url).cloned() {
+    if let Ok(mut cache) = KEY_CACHE.lock() {
+        if let Some((ctype, hit)) = cache.get(url) {
             return Ok((Some(ctype), hit));
         }
     }
-    if let Ok(cache) = SEG_CACHE.lock() {
-        if let Some((ctype, hit)) = cache.get(url).cloned() {
+    if let Ok(mut cache) = SEG_CACHE.lock() {
+        if let Some((ctype, hit)) = cache.get(url) {
             return Ok((Some(ctype), hit));
         }
     }
@@ -340,9 +419,9 @@ pub async fn load_segment(url: &str) -> Result<(Option<String>, Arc<Vec<u8>>), S
     let len = bytes.len();
     let arc = Arc::new(bytes);
     if len <= 65536 {
-        cache_put(&KEY_CACHE, url.to_string(), (mime.clone(), arc.clone()), KEY_CACHE_MAX);
+        cache_put(&KEY_CACHE, url.to_string(), (mime.clone(), arc.clone()), len, KEY_CACHE_MAX, KEY_CACHE_TOTAL_MAX_BYTES);
     } else if len <= SEG_CACHE_MAX_BYTES {
-        cache_put(&SEG_CACHE, url.to_string(), (mime.clone(), arc.clone()), SEG_CACHE_MAX);
+        cache_put(&SEG_CACHE, url.to_string(), (mime.clone(), arc.clone()), len, SEG_CACHE_MAX, SEG_CACHE_TOTAL_MAX_BYTES);
     }
     Ok((Some(mime), arc))
 }
@@ -487,7 +566,7 @@ fn rewrite_offline_playlist(id: &str, text: &str, origin: &str) -> String {
             continue;
         }
         if line.starts_with('#') {
-            if line.contains("URI=\"") || line.contains("uri=\"") {
+            if line.to_ascii_lowercase().contains("uri=\"") {
                 let mut valid = true;
                 let rewritten = map_uri_attributes(line, |uri| {
                     let clean = uri.trim_start_matches("./");
@@ -502,14 +581,16 @@ fn rewrite_offline_playlist(id: &str, text: &str, origin: &str) -> String {
                     format!("{prefix}/{clean}")
                 });
                 if valid {
-                    let lower_rewritten = rewritten.to_ascii_lowercase();
-                    if !lower_rewritten.contains("http://") || rewritten.contains(&prefix) {
-                        // Drop any tag that still contains external non-local URLs (e.g. X-ASSET-LIST)
-                        let has_external = lower_rewritten.contains("x-asset-list");
-                        if !has_external {
-                            out.push_str(&rewritten);
-                            out.push('\n');
-                        }
+                    let stripped = rewritten.replace(&prefix, "");
+                    let lower_stripped = stripped.to_ascii_lowercase();
+                    let has_external = lower_stripped.contains("http://")
+                        || lower_stripped.contains("https://")
+                        || lower_stripped.contains("://")
+                        || lower_stripped.contains("\"//")
+                        || lower_stripped.contains("x-asset-list");
+                    if !has_external {
+                        out.push_str(&rewritten);
+                        out.push('\n');
                     }
                 }
                 continue;
@@ -517,6 +598,7 @@ fn rewrite_offline_playlist(id: &str, text: &str, origin: &str) -> String {
             let lower_line = line.to_ascii_lowercase();
             if lower_line.contains("http://")
                 || lower_line.contains("https://")
+                || lower_line.contains("://")
                 || lower_line.contains("x-asset-list")
             {
                 continue;
@@ -538,7 +620,170 @@ fn rewrite_offline_playlist(id: &str, text: &str, origin: &str) -> String {
     out
 }
 
-fn handle_offline_asset(path: &str, origin: &str, range: Option<&str>) -> Response<Vec<u8>> {
+enum ParsedRange {
+    None,
+    Unsatisfiable,
+    Bounds(u64, u64),
+}
+
+fn parse_range_header(range: Option<&str>, len: u64) -> ParsedRange {
+    let Some((first, last)) = range
+        .and_then(|v| v.trim().strip_prefix("bytes="))
+        .and_then(|v| v.split_once('-'))
+    else {
+        return ParsedRange::None;
+    };
+    let number = |s: &str| -> Option<u64> {
+        if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+            None
+        } else {
+            s.parse().ok()
+        }
+    };
+    if first.is_empty() {
+        let Some(suffix) = number(last) else {
+            return ParsedRange::None;
+        };
+        if suffix > 0 && len > 0 {
+            ParsedRange::Bounds(len.saturating_sub(suffix), len - 1)
+        } else {
+            ParsedRange::Unsatisfiable
+        }
+    } else {
+        let Some(start) = number(first) else {
+            return ParsedRange::None;
+        };
+        let end = if last.is_empty() {
+            len.saturating_sub(1)
+        } else {
+            let Some(end) = number(last) else {
+                return ParsedRange::None;
+            };
+            if end < start {
+                return ParsedRange::None;
+            }
+            end
+        };
+        if start < len {
+            ParsedRange::Bounds(start, end.min(len - 1))
+        } else {
+            ParsedRange::Unsatisfiable
+        }
+    }
+}
+
+fn serve_offline_binary_file(
+    file_path: &std::path::Path,
+    ctype: &str,
+    range: Option<&str>,
+    head_only: bool,
+) -> Response<Vec<u8>> {
+    const OFFLINE_CHUNK_CAP: u64 = 4 * 1024 * 1024;
+    const UNRANGED_FULL_CAP: u64 = 64 * 1024 * 1024;
+
+    let Ok(mut file) = std::fs::File::open(file_path) else {
+        return respond(404, "text/plain", b"offline file not found".to_vec(), "no-store");
+    };
+    let Ok(meta) = file.metadata() else {
+        return respond(404, "text/plain", b"offline file not found".to_vec(), "no-store");
+    };
+    if !meta.is_file() {
+        return respond(404, "text/plain", b"offline file not found".to_vec(), "no-store");
+    }
+    let len = meta.len();
+
+    if head_only {
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", ctype)
+            .header("Content-Length", len.to_string())
+            .header("Accept-Ranges", "bytes")
+            .header("Access-Control-Expose-Headers", "Content-Length, Content-Type, Accept-Ranges, Content-Range")
+            .header("X-Content-Type-Options", "nosniff")
+            .header("Cache-Control", "private, max-age=86400")
+            .body(Vec::new())
+            .unwrap_or_else(|_| Response::new(Vec::new()));
+    }
+
+    match parse_range_header(range, len) {
+        ParsedRange::Unsatisfiable => Response::builder()
+            .status(StatusCode::RANGE_NOT_SATISFIABLE)
+            .header("Content-Type", ctype)
+            .header("Content-Length", "0")
+            .header("Accept-Ranges", "bytes")
+            .header("Content-Range", format!("bytes */{len}"))
+            .header("Access-Control-Expose-Headers", "Content-Length, Content-Type, Accept-Ranges, Content-Range")
+            .header("X-Content-Type-Options", "nosniff")
+            .header("Cache-Control", "no-store")
+            .body(Vec::new())
+            .unwrap_or_else(|_| Response::new(Vec::new())),
+        ParsedRange::Bounds(start, end) => {
+            let capped_end = end.min(start.saturating_add(OFFLINE_CHUNK_CAP - 1));
+            let to_read = capped_end - start + 1;
+            if file.seek(SeekFrom::Start(start)).is_err() {
+                return respond(500, "text/plain", b"failed seeking offline file".to_vec(), "no-store");
+            }
+            let mut buf = Vec::with_capacity(to_read as usize);
+            if file.take(to_read).read_to_end(&mut buf).is_err() {
+                return respond(500, "text/plain", b"failed reading offline file".to_vec(), "no-store");
+            }
+            if buf.is_empty() {
+                return Response::builder()
+                    .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                    .header("Content-Type", ctype)
+                    .header("Content-Length", "0")
+                    .header("Accept-Ranges", "bytes")
+                    .header("Content-Range", format!("bytes */{len}"))
+                    .header("Cache-Control", "no-store")
+                    .body(Vec::new())
+                    .unwrap_or_else(|_| Response::new(Vec::new()));
+            }
+            let actual_end = start + (buf.len() as u64) - 1;
+            Response::builder()
+                .status(StatusCode::PARTIAL_CONTENT)
+                .header("Content-Type", ctype)
+                .header("Content-Length", buf.len().to_string())
+                .header("Accept-Ranges", "bytes")
+                .header("Content-Range", format!("bytes {start}-{actual_end}/{len}"))
+                .header("Access-Control-Expose-Headers", "Content-Length, Content-Type, Accept-Ranges, Content-Range")
+                .header("X-Content-Type-Options", "nosniff")
+                .header("Cache-Control", "private, max-age=86400")
+                .body(buf)
+                .unwrap_or_else(|_| Response::new(Vec::new()))
+        }
+        ParsedRange::None => {
+            if len > UNRANGED_FULL_CAP {
+                let to_read = OFFLINE_CHUNK_CAP.min(len);
+                let mut buf = Vec::with_capacity(to_read as usize);
+                if file.take(to_read).read_to_end(&mut buf).is_err() || buf.is_empty() {
+                    return respond(500, "text/plain", b"failed reading offline file".to_vec(), "no-store");
+                }
+                let actual_end = (buf.len() as u64) - 1;
+                return Response::builder()
+                    .status(StatusCode::PARTIAL_CONTENT)
+                    .header("Content-Type", ctype)
+                    .header("Content-Length", buf.len().to_string())
+                    .header("Accept-Ranges", "bytes")
+                    .header("Content-Range", format!("bytes 0-{actual_end}/{len}"))
+                    .header("Access-Control-Expose-Headers", "Content-Length, Content-Type, Accept-Ranges, Content-Range")
+                    .header("X-Content-Type-Options", "nosniff")
+                    .header("Cache-Control", "private, max-age=86400")
+                    .body(buf)
+                    .unwrap_or_else(|_| Response::new(Vec::new()));
+            }
+            let mut buf = Vec::with_capacity(len as usize);
+            if file.take(UNRANGED_FULL_CAP).read_to_end(&mut buf).is_err() {
+                return respond(500, "text/plain", b"failed reading offline file".to_vec(), "no-store");
+            }
+            let mut resp = respond(200, ctype, buf, "private, max-age=86400");
+            resp.headers_mut()
+                .insert("Accept-Ranges", tauri::http::HeaderValue::from_static("bytes"));
+            resp
+        }
+    }
+}
+
+async fn handle_offline_asset(path: &str, origin: &str, range: Option<&str>, head_only: bool) -> Response<Vec<u8>> {
     let Some(rest) = path.strip_prefix("/offline/") else {
         return respond(404, "text/plain", b"not found".to_vec(), "no-store");
     };
@@ -548,44 +793,75 @@ fn handle_offline_asset(path: &str, origin: &str, range: Option<&str>) -> Respon
     let Some(file_path) = crate::downloader::offline_file_path(id, file_name) else {
         return respond(403, "text/plain", b"forbidden".to_vec(), "no-store");
     };
-    let Ok(bytes) = std::fs::read(&file_path) else {
-        return respond(404, "text/plain", b"offline file not found".to_vec(), "no-store");
-    };
-    let lower = file_name.to_ascii_lowercase();
-    let resp = if lower.ends_with(".m3u8") {
-        match std::str::from_utf8(&bytes) {
-            Ok(text) => respond(
-                200,
-                "application/vnd.apple.mpegurl",
-                rewrite_offline_playlist(id, text, origin).into_bytes(),
-                "no-store",
-            ),
-            Err(_) => respond(500, "text/plain", b"invalid offline playlist".to_vec(), "no-store"),
+    let id = id.to_string();
+    let file_name = file_name.to_string();
+    let origin = origin.to_string();
+    let range = range.map(str::to_string);
+
+    tokio::task::spawn_blocking(move || {
+        let lower = file_name.to_ascii_lowercase();
+        let is_playlist = lower.ends_with(".m3u8");
+        let is_image = lower == "cover.img"
+            || lower.ends_with(".jpg")
+            || lower.ends_with(".jpeg")
+            || lower.ends_with(".png")
+            || lower.ends_with(".webp");
+
+        if is_playlist || is_image {
+            let Ok(bytes) = std::fs::read(&file_path) else {
+                return respond(404, "text/plain", b"offline file not found".to_vec(), "no-store");
+            };
+            let resp = if is_playlist {
+                match std::str::from_utf8(&bytes) {
+                    Ok(text) => respond(
+                        200,
+                        "application/vnd.apple.mpegurl",
+                        rewrite_offline_playlist(&id, text, &origin).into_bytes(),
+                        "no-store",
+                    ),
+                    Err(_) => respond(500, "text/plain", b"invalid offline playlist".to_vec(), "no-store"),
+                }
+            } else {
+                let kind = image_kind(&bytes).unwrap_or("image/jpeg");
+                respond(200, kind, bytes, "private, max-age=86400")
+            };
+            let mut ranged = apply_byte_range(resp, range.as_deref());
+            if head_only {
+                ranged.body_mut().clear();
+            }
+            return ranged;
         }
-    } else if lower.ends_with(".ts") {
-        respond(200, "video/mp2t", bytes, "private, max-age=86400")
-    } else if lower.ends_with(".mp4") || lower.ends_with(".m4s") {
-        respond(200, "video/mp4", bytes, "private, max-age=86400")
-    } else if lower == "cover.img"
-        || lower.ends_with(".jpg")
-        || lower.ends_with(".jpeg")
-        || lower.ends_with(".png")
-        || lower.ends_with(".webp")
-    {
-        let kind = image_kind(&bytes).unwrap_or("image/jpeg");
-        respond(200, kind, bytes, "private, max-age=86400")
-    } else {
-        respond(200, "application/octet-stream", bytes, "private, max-age=86400")
-    };
-    apply_byte_range(resp, range)
+
+        let ctype = if lower.ends_with(".ts") {
+            "video/mp2t"
+        } else if lower.ends_with(".mp4") || lower.ends_with(".m4s") {
+            "video/mp4"
+        } else {
+            "application/octet-stream"
+        };
+        serve_offline_binary_file(&file_path, ctype, range.as_deref(), head_only)
+    })
+    .await
+    .unwrap_or_else(|_| respond(500, "text/plain", b"offline worker failed".to_vec(), "no-store"))
 }
 
 /// Unified protocol handler entry: `<LOCAL_ORIGIN>/img?u=`, `/hls?u=`, `/seg?u=`, `/offline/{id}/{file}`
 ///
 /// `origin` is the base custom protocol URI used to rewrite m3u8 segment and key URLs.
+#[cfg(test)]
 pub async fn handle(path: &str, query: &str, origin: &str, range: Option<&str>) -> Response<Vec<u8>> {
+    handle_with_method(path, query, origin, range, false).await
+}
+
+pub async fn handle_with_method(
+    path: &str,
+    query: &str,
+    origin: &str,
+    range: Option<&str>,
+    head_only: bool,
+) -> Response<Vec<u8>> {
     if path.starts_with("/offline/") {
-        return handle_offline_asset(path, origin, range);
+        return handle_offline_asset(path, origin, range, head_only).await;
     }
     let target = query
         .split('&')
@@ -630,7 +906,10 @@ pub async fn handle(path: &str, query: &str, origin: &str, range: Option<&str>) 
         },
         _ => respond(404, "text/plain", b"not found".to_vec(), "no-store"),
     };
-    let response = apply_byte_range(response, range);
+    let mut response = apply_byte_range(response, range);
+    if head_only {
+        response.body_mut().clear();
+    }
     crate::playback_log::record(
         "proxy.end",
         serde_json::json!({"route": route, "resource": crate::playback_log::resource_id(&target), "status": response.status().as_u16(), "bytes": response.body().len(), "content_type": response.headers().get("Content-Type").and_then(|v| v.to_str().ok()), "content_range": response.headers().get("Content-Range").and_then(|v| v.to_str().ok()), "elapsed_ms": started.elapsed().as_millis() as u64}),
@@ -812,6 +1091,8 @@ mod tests {
     fn offline_playlist_rewrite_is_strictly_local() {
         let text = "#EXTM3U\n\
             #EXT-X-KEY:METHOD=AES-128,URI=\"key_0.key\",IV=0x01\n\
+            #EXT-X-MEDIA:TYPE=AUDIO,uri=\"https://evil.invalid/audio.m3u8\"\n\
+            #EXT-X-MIXED:URI=\"key_0.key\",SERVER-URI=\"https://evil.invalid/steer\"\n\
             #EXT-X-DATERANGE:ID=\"ad\",X-ASSET-LIST=\"https://evil.invalid/ad\"\n\
             #EXT-X-PRELOAD-HINT:TYPE=PART,URI=\"https://evil.invalid/part.m4s\"\n\
             #EXTINF:4.0,\n\
@@ -821,6 +1102,31 @@ mod tests {
         assert!(out.contains(&format!("URI=\"{LOCAL_ORIGIN}/offline/101_1/key_0.key\"")));
         assert!(out.contains(&format!("{LOCAL_ORIGIN}/offline/101_1/seg_00000.ts")));
         assert!(!out.contains("evil.invalid"), "external URL leaked into offline playlist: {out}");
+    }
+
+    #[test]
+    fn offline_binary_range_reads_slice_and_head_returns_empty_body() {
+        let dir = std::env::temp_dir().join(format!("aurastream-media-range-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("video.mp4");
+        std::fs::write(&file, b"0123456789abcdef").unwrap();
+
+        let partial = serve_offline_binary_file(&file, "video/mp4", Some("bytes=4-9"), false);
+        assert_eq!(partial.status(), 206);
+        assert_eq!(partial.body().as_slice(), b"456789");
+        assert_eq!(partial.headers()["Content-Range"], "bytes 4-9/16");
+        assert_eq!(partial.headers()["Content-Length"], "6");
+
+        let oob = serve_offline_binary_file(&file, "video/mp4", Some("bytes=99-120"), false);
+        assert_eq!(oob.status(), 416);
+        assert_eq!(oob.headers()["Content-Range"], "bytes */16");
+
+        let head = serve_offline_binary_file(&file, "video/mp4", None, true);
+        assert_eq!(head.status(), 200);
+        assert!(head.body().is_empty());
+        assert_eq!(head.headers()["Content-Length"], "16");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Offline regression test with known plaintext.

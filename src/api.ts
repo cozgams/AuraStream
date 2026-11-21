@@ -459,7 +459,7 @@ export const dur = (s?: number | string) => {
   const n = Number(s) || 0;
   if (n <= 0) return "";
   const m = Math.floor(n / 60);
-  const ss = n % 60;
+  const ss = Math.floor(n % 60);
   return `${m}:${String(ss).padStart(2, "0")}`;
 };
 

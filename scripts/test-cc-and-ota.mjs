@@ -9,10 +9,28 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 let vite, browser;
 const errors = [];
 
-const EMOJI_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;
+const EMOJI_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F000}-\u{1F2FF}]/u;
+
+function walkSourceFiles(dir, extRe, out = []) {
+  if (!fs.existsSync(dir)) return out;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walkSourceFiles(full, extRe, out);
+    else if (extRe.test(entry.name)) out.push(full);
+  }
+  return out;
+}
 
 try {
-  // 1. Static source checks (zero voice dubbing, zero emojis in updated UI components)
+  // 1. Static source checks (zero voice dubbing, repo-wide zero-emoji scan)
+  for (const absPath of [
+    ...walkSourceFiles(path.join(root, "src"), /\.(ts|tsx|css)$/),
+    ...walkSourceFiles(path.join(root, "src-tauri/android-src"), /\.(kt|xml)$/),
+  ]) {
+    const content = fs.readFileSync(absPath, "utf8");
+    const rel = path.relative(root, absPath);
+    assert.equal(EMOJI_RE.test(content), false, `Emoji found in ${rel}`);
+  }
   const uiFilesToCheck = [
     "src/components/UpdateModal.tsx",
     "src/components/LoginModal.tsx",
@@ -26,7 +44,6 @@ try {
   ];
   for (const rel of uiFilesToCheck) {
     const content = fs.readFileSync(path.join(root, rel), "utf8");
-    assert.equal(EMOJI_RE.test(content), false, `Emoji found in ${rel}`);
     assert.equal(/voiceDub/i.test(content), false, `Leftover voiceDub found in ${rel}`);
   }
   assert.equal(
@@ -38,7 +55,7 @@ try {
   assert.ok(/import\s*\{[^}]*\bisLocalMedia\b[^}]*\}\s*from\s*["']\.\.\/api["']/.test(aiSubSrc), "aiSubtitleService.ts must import isLocalMedia");
   assert.ok((aiSubSrc.match(/isLocalMedia\(/g) || []).length >= 2, "aiSubtitleService.ts must guard both collectEpisodeMediaForAI and getSubtitlesForEpisode with isLocalMedia");
   assert.ok(aiSubSrc.includes("navigator.onLine === false"), "aiSubtitleService.ts must skip remote HLS inspection when offline");
-  console.log("✔ Static zero-emoji and zero-voiceDub checks passed");
+  console.log("PASS: Static zero-emoji and zero-voiceDub checks passed");
 
   // 2. Runtime browser tests against Vite modules
   vite = await createServer({
@@ -86,6 +103,8 @@ try {
     const tmpMod = await import("/src/playback/tempCacheService.ts");
     const stMod = await import("/src/storage.ts");
     const fbMod = await import("/src/firebase.ts");
+    const apiMod = await import("/src/api.ts");
+    const pfMod = await import("/src/playbackFeatures.ts");
 
     // A. parseVtt: 2-line English cue preservation & ASS tag stripping
     const srt = "1\n00:00:01,000 --> 00:00:03,500\n{\\an8}First line of dialogue\nSecond line of dialogue\n";
@@ -108,11 +127,11 @@ try {
 
     // E. OTA ABI asset resolution + fallback release URLs
     const rateLimitedInfo = {
-      current: "0.1.28",
-      latest: "0.1.29",
-      tag: "v0.1.29",
+      current: "0.1.29",
+      latest: "0.1.30",
+      tag: "v0.1.30",
       has_update: true,
-      url: "https://github.com/cozgams/AuraStream/releases/tag/v0.1.29",
+      url: "https://github.com/cozgams/AuraStream/releases/tag/v0.1.30",
       asset: null,
     };
     const arm64Asset = otaMod.resolveBestUpdateAsset(rateLimitedInfo, "arm64");
@@ -154,6 +173,42 @@ try {
     const signedInAfterReset = await fbMod.signInWithEmail("aaa@gmail.com", "newpass123");
     await fbMod.logOutFirebase();
 
+    let duplicateSignupBlocked = false;
+    try {
+      await fbMod.signUpWithEmail("aaa@gmail.com", "123456", "Dup");
+    } catch (e) {
+      duplicateSignupBlocked = e?.code === "auth/email-already-in-use";
+    }
+
+    // H. Fractional duration formatting & sleep timer 0s expiration notification
+    const formattedDur = apiMod.dur(125.4);
+    let sleepRemAtExpire = -1;
+    let sleepTriggeredCount = 0;
+    let scheduledTimerCb = null;
+    const origSetTimeout = window.setTimeout.bind(window);
+    const timerEvents = [];
+    const unsubSleep = pfMod.subscribeSleepTimer((rem) => {
+      timerEvents.push(rem);
+    });
+    try {
+      window.setTimeout = ((cb, ms, ...args) => {
+        if (typeof cb === "function" && Number(ms) === 15 * 60 * 1000) {
+          scheduledTimerCb = () => cb(...args);
+          return 999991;
+        }
+        return origSetTimeout(cb, ms, ...args);
+      });
+      pfMod.setSleepTimer("15", () => {
+        sleepTriggeredCount++;
+      });
+      if (scheduledTimerCb) scheduledTimerCb();
+      sleepRemAtExpire = timerEvents[timerEvents.length - 1] ?? -1;
+    } finally {
+      window.setTimeout = origSetTimeout;
+      unsubSleep();
+      pfMod.setSleepTimer("off");
+    }
+
     return {
       parsedCount: parsedCues.length,
       parsedEn: parsedCues[0]?.en,
@@ -176,6 +231,10 @@ try {
       signedInName: signedInUser?.displayName,
       wrongPassBlocked,
       resetOk: Boolean(signedInAfterReset?.uid),
+      duplicateSignupBlocked,
+      formattedDur,
+      sleepRemAtExpire,
+      sleepTriggeredCount,
     };
   });
 
@@ -192,15 +251,15 @@ try {
   assert.equal(results.fetchedRemovedSource, "none");
   assert.equal(
     results.arm64Url,
-    "https://github.com/cozgams/AuraStream/releases/download/v0.1.29/AuraStream_0.1.29_arm64.apk"
+    "https://github.com/cozgams/AuraStream/releases/download/v0.1.30/AuraStream_0.1.30_arm64.apk"
   );
   assert.equal(
     results.armUrl,
-    "https://github.com/cozgams/AuraStream/releases/download/v0.1.29/AuraStream_0.1.29_arm.apk"
+    "https://github.com/cozgams/AuraStream/releases/download/v0.1.30/AuraStream_0.1.30_arm.apk"
   );
   assert.equal(
     results.x86Url,
-    "https://github.com/cozgams/AuraStream/releases/download/v0.1.29/AuraStream_0.1.29_x86_64.apk"
+    "https://github.com/cozgams/AuraStream/releases/download/v0.1.30/AuraStream_0.1.30_x86_64.apk"
   );
   assert.equal(results.smartDefault, false, "Smart Auto-Download must default OFF to save data");
   assert.equal(results.preloadedDownloaded, false, "preloadEpisode must skip already-downloaded episodes");
@@ -211,9 +270,13 @@ try {
   assert.equal(results.signedInName, "A");
   assert.equal(results.wrongPassBlocked, true);
   assert.equal(results.resetOk, true);
+  assert.equal(results.duplicateSignupBlocked, true, "Duplicate Account Vault signup must throw auth/email-already-in-use");
+  assert.equal(results.formattedDur, "2:05", "dur(125.4) must floor seconds cleanly");
+  assert.equal(results.sleepRemAtExpire, 0, "Sleep timer expiration must notify 0 remaining seconds");
+  assert.equal(results.sleepTriggeredCount, 1, "Sleep timer callback must trigger once on expiration");
   assert.equal(errors.length, 0, `Unexpected page errors: ${errors.join("; ")}`);
 
-  console.log("✔ CC parsing, honest empty CC, OTA ABI routing, Firebase Account Vault & zero-internet preload tests PASSED");
+  console.log("PASS: CC parsing, honest empty CC, OTA ABI routing, Firebase Account Vault, sleep timer, dur(), zero-emoji & zero-internet preload tests PASSED");
 } finally {
   if (browser) await browser.close();
   if (vite) await vite.close();

@@ -29,8 +29,11 @@ import androidx.core.content.FileProvider
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.lang.ref.WeakReference
 import java.net.HttpURLConnection
+import java.net.URI
 import java.net.URL
+import java.util.concurrent.atomic.AtomicLong
 
 class MainActivity : TauriActivity() {
   private val exportLock = Any()
@@ -133,14 +136,15 @@ class MainActivity : TauriActivity() {
     }
   }
 
-  private fun cleanupExportsDir(olderThanMs: Long) {
+  private fun cleanupExportsDir(olderThanMs: Long, excludeCanonicalPath: String? = null) {
     try {
       val exportsDir = File(cacheDir, "exports")
       if (!exportsDir.exists() || !exportsDir.isDirectory) return
       val now = System.currentTimeMillis()
       val activePath = synchronized(exportLock) { currentExportFile?.absolutePath }
       exportsDir.listFiles()?.forEach { f ->
-        if (f.isFile && f.absolutePath != activePath) {
+        val canon = try { f.canonicalPath } catch (_: Exception) { f.absolutePath }
+        if (f.isFile && f.absolutePath != activePath && canon != excludeCanonicalPath) {
           if (olderThanMs <= 0L || (now - f.lastModified()) > olderThanMs) {
             try { f.delete() } catch (_: Exception) {}
           }
@@ -242,12 +246,20 @@ class MainActivity : TauriActivity() {
     var isForegroundGlobal: Boolean = true
     @Volatile
     var serviceStartRequested: Boolean = false
+    @Volatile
+    private var activeActivityRef: WeakReference<MainActivity>? = null
+
+    @JvmStatic
+    fun releaseGlobalWakeLock() {
+      activeActivityRef?.get()?.releaseWakeLock()
+    }
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     android.util.Log.i("AuraStream", "MainActivity.onCreate called")
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    activeActivityRef = WeakReference(this)
     isForegroundGlobal = true
     cleanupExportsDir(0L)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -321,6 +333,9 @@ class MainActivity : TauriActivity() {
   override fun onDestroy() {
     super.onDestroy()
     releaseWakeLock()
+    if (activeActivityRef?.get() === this) {
+      activeActivityRef = null
+    }
     closeCurrentExportStream()
     flushAppStateSync()
     quitStateHandlerThread()
@@ -331,24 +346,26 @@ class MainActivity : TauriActivity() {
 
   private fun createDownloadNotificationChannel() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      val channel = android.app.NotificationChannel(
-        DOWNLOAD_CHANNEL_ID,
-        "Offline Downloads",
-        android.app.NotificationManager.IMPORTANCE_MIN
+      val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager ?: return
+      val completeChannel = android.app.NotificationChannel(
+        AuraDownloadService.COMPLETE_CHANNEL_ID,
+        "Completed Downloads",
+        android.app.NotificationManager.IMPORTANCE_DEFAULT
       ).apply {
-        description = "Background progress for offline episodes"
-        setShowBadge(false)
-        enableVibration(false)
-        setSound(null, null)
+        description = "Alerts when offline episodes finish downloading"
+        setShowBadge(true)
       }
-      val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
-      manager?.createNotificationChannel(channel)
+      manager.createNotificationChannel(completeChannel)
     }
   }
 
   private fun requestNotificationPermission() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+        getSharedPreferences("aurastream_perms", Context.MODE_PRIVATE)
+          .edit()
+          .putBoolean("asked_notif", true)
+          .apply()
         requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
       }
     }
@@ -508,7 +525,7 @@ class MainActivity : TauriActivity() {
           )
           val sizeStr = if (fileSizeFormatted.isNotEmpty()) " ($fileSizeFormatted)" else ""
           val summary = "$subtitle$sizeStr saved for offline viewing · Ready to watch"
-          val builder = androidx.core.app.NotificationCompat.Builder(activity, DOWNLOAD_CHANNEL_ID)
+          val builder = androidx.core.app.NotificationCompat.Builder(activity, AuraDownloadService.COMPLETE_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("Download Complete: $title")
             .setContentText("$subtitle$sizeStr saved for offline viewing")
@@ -750,7 +767,9 @@ class MainActivity : TauriActivity() {
                 sdFile
               )
             } catch (_: Exception) {
-              activity.lastExportedUri = Uri.fromFile(sdFile)
+              if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+                activity.lastExportedUri = Uri.fromFile(sdFile)
+              }
             }
             try { file.delete() } catch (_: Exception) {}
             "SUCCESS:SDCard/AuraStream/$safeName"
@@ -828,6 +847,7 @@ class MainActivity : TauriActivity() {
           if (!file.path.startsWith(exportsDir.path + File.separator) || !file.exists() || !file.isFile) {
             return@synchronized "ERROR:Prepared export file not found"
           }
+          activity.cleanupExportsDir(30 * 60 * 1000L, file.path)
           handleExportedFile(file, fileName, dramaTitle, action)
         } catch (e: Exception) {
           e.printStackTrace()
@@ -844,14 +864,21 @@ class MainActivity : TauriActivity() {
     @JavascriptInterface
     fun openInGallery(pathOrUri: String?): Boolean {
       return try {
+        val exportsDir = File(activity.cacheDir, "exports").canonicalFile
         val targetUri: Uri? = when {
-          !pathOrUri.isNullOrEmpty() && (pathOrUri.startsWith("content://") || pathOrUri.startsWith("file://")) -> Uri.parse(pathOrUri)
-          !pathOrUri.isNullOrEmpty() && File(pathOrUri).exists() -> {
-            FileProvider.getUriForFile(
-              activity,
-              "${activity.packageName}.fileprovider",
-              File(pathOrUri)
-            )
+          !pathOrUri.isNullOrEmpty() && pathOrUri.startsWith("content://") -> Uri.parse(pathOrUri)
+          !pathOrUri.isNullOrEmpty() && pathOrUri.startsWith("file://") && Build.VERSION.SDK_INT < Build.VERSION_CODES.N -> Uri.parse(pathOrUri)
+          !pathOrUri.isNullOrEmpty() && !pathOrUri.startsWith("file://") -> {
+            val candidate = File(pathOrUri).canonicalFile
+            if (candidate.path.startsWith(exportsDir.path + File.separator) && candidate.exists() && candidate.isFile) {
+              FileProvider.getUriForFile(
+                activity,
+                "${activity.packageName}.fileprovider",
+                candidate
+              )
+            } else {
+              activity.lastExportedUri
+            }
           }
           activity.lastExportedUri != null -> activity.lastExportedUri
           else -> null
@@ -923,13 +950,22 @@ class MainActivity : TauriActivity() {
     private fun saveToMediaStore(sourceFile: File, displayName: String, subDir: String = "Movies/AuraStream"): Uri? {
       val resolver = activity.contentResolver
       val isDownloads = subDir.startsWith("Download")
-      val isSubtitle = displayName.endsWith(".srt", ignoreCase = true) || displayName.endsWith(".vtt", ignoreCase = true)
+      val isSubtitle = displayName.endsWith(".srt", ignoreCase = true) ||
+        displayName.endsWith(".vtt", ignoreCase = true) ||
+        displayName.endsWith(".ass", ignoreCase = true) ||
+        displayName.endsWith(".ssa", ignoreCase = true) ||
+        displayName.endsWith(".txt", ignoreCase = true)
+      val resolvedSubDir = if (isDownloads || isSubtitle) {
+        if (subDir.startsWith("Download")) subDir else "Download/AuraStream"
+      } else {
+        subDir
+      }
       val mimeType = mimeTypeForFileName(displayName)
       val contentValues = ContentValues().apply {
         put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
         put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-          put(MediaStore.MediaColumns.RELATIVE_PATH, subDir)
+          put(MediaStore.MediaColumns.RELATIVE_PATH, resolvedSubDir)
           put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
       }
@@ -948,7 +984,9 @@ class MainActivity : TauriActivity() {
           if (!auraDir.exists()) auraDir.mkdirs()
           val dest = File(auraDir, displayName)
           sourceFile.copyTo(dest, overwrite = true)
-          MediaScannerConnection.scanFile(activity, arrayOf(dest.absolutePath), arrayOf(mimeType), null)
+          MediaScannerConnection.scanFile(activity, arrayOf(dest.absolutePath), arrayOf(mimeType)) { _, uri ->
+            if (uri != null) activity.lastExportedUri = uri
+          }
           return Uri.fromFile(dest)
         } else {
           MediaStore.Video.Media.EXTERNAL_CONTENT_URI
@@ -994,7 +1032,9 @@ class MainActivity : TauriActivity() {
           if (!auraDir.exists()) auraDir.mkdirs()
           val dest = File(auraDir, displayName)
           sourceFile.copyTo(dest, overwrite = true)
-          MediaScannerConnection.scanFile(activity, arrayOf(dest.absolutePath), arrayOf(mimeType), null)
+          MediaScannerConnection.scanFile(activity, arrayOf(dest.absolutePath), arrayOf(mimeType)) { _, scannedUri ->
+            if (scannedUri != null) activity.lastExportedUri = scannedUri
+          }
           return dest
         }
       }
@@ -1049,8 +1089,7 @@ class MainActivity : TauriActivity() {
     @Volatile
     private var otaActiveConnection: HttpURLConnection? = null
 
-    @Volatile
-    private var otaDownloadToken: Long = 0L
+    private val otaDownloadToken = AtomicLong(0L)
 
     private fun dispatchOtaEvent(payload: JSONObject) {
       val jsPayload = payload.toString()
@@ -1062,13 +1101,19 @@ class MainActivity : TauriActivity() {
       }
     }
 
-    private fun isAllowedOtaUrl(rawUrl: String): Boolean {
-      val uri = try { Uri.parse(rawUrl) } catch (_: Exception) { return false }
-      if (!uri.scheme.equals("https", ignoreCase = true)) return false
+    private fun isAllowedOtaUrl(rawUrl: String, isRedirectHop: Boolean): Boolean {
+      if (rawUrl.contains("..") || rawUrl.contains("\\")) return false
+      val uri = try { URI(rawUrl).normalize() } catch (_: Exception) { return false }
+      if (!"https".equals(uri.scheme, ignoreCase = true)) return false
+      if (uri.userInfo != null) return false
+      if (uri.port != -1 && uri.port != 443) return false
       val host = (uri.host ?: "").lowercase()
+      val normPath = uri.path ?: ""
+      if (!isRedirectHop) {
+        return host == "github.com" && normPath.startsWith("/cozgams/AuraStream/releases/download/")
+      }
       if (host == "github.com") {
-        val path = uri.path ?: ""
-        return path.startsWith("/cozgams/AuraStream/")
+        return normPath.startsWith("/cozgams/AuraStream/")
       }
       return host == "objects.githubusercontent.com" ||
         host == "release-assets.githubusercontent.com" ||
@@ -1123,7 +1168,7 @@ class MainActivity : TauriActivity() {
     @JavascriptInterface
     fun cancelOtaDownload(): Boolean {
       otaCancelled = true
-      otaDownloadToken++
+      otaDownloadToken.incrementAndGet()
       try {
         otaActiveConnection?.disconnect()
       } catch (_: Exception) {}
@@ -1133,7 +1178,7 @@ class MainActivity : TauriActivity() {
 
     @JavascriptInterface
     fun startOtaDownload(url: String, fileName: String): Boolean {
-      if (!isAllowedOtaUrl(url)) {
+      if (!isAllowedOtaUrl(url, isRedirectHop = false)) {
         dispatchOtaEvent(JSONObject().apply {
           put("status", "error")
           put("error", "Blocked untrusted update download URL")
@@ -1142,7 +1187,7 @@ class MainActivity : TauriActivity() {
       }
 
       cancelOtaDownload()
-      val myToken = ++otaDownloadToken
+      val myToken = otaDownloadToken.incrementAndGet()
       otaCancelled = false
 
       val cleanName = fileName.replace("[^a-zA-Z0-9._-]".toRegex(), "_").trim('_').let {
@@ -1155,17 +1200,18 @@ class MainActivity : TauriActivity() {
 
       Thread {
         var partFile: File? = null
+        var myConn: HttpURLConnection? = null
         try {
           val updatesDir = File(activity.cacheDir, "updates")
           if (!updatesDir.exists()) updatesDir.mkdirs()
           updatesDir.listFiles()?.forEach { oldFile ->
-            if (oldFile.isFile) {
+            if (oldFile.isFile && !oldFile.name.endsWith(".$myToken.part")) {
               try { oldFile.delete() } catch (_: Exception) {}
             }
           }
 
           val apkFile = File(updatesDir, cleanName)
-          partFile = File(updatesDir, "$cleanName.part")
+          partFile = File(updatesDir, "$cleanName.$myToken.part")
 
           dispatchOtaEvent(JSONObject().apply {
             put("status", "downloading")
@@ -1178,11 +1224,13 @@ class MainActivity : TauriActivity() {
           var currentUrl = url
           var conn: HttpURLConnection? = null
           for (hop in 0..6) {
-            if (otaCancelled || otaDownloadToken != myToken) {
-              dispatchOtaEvent(JSONObject().apply { put("status", "cancelled") })
+            if (otaCancelled || otaDownloadToken.get() != myToken) {
+              if (otaDownloadToken.get() == myToken && otaCancelled) {
+                dispatchOtaEvent(JSONObject().apply { put("status", "cancelled") })
+              }
               return@Thread
             }
-            if (!isAllowedOtaUrl(currentUrl)) {
+            if (!isAllowedOtaUrl(currentUrl, isRedirectHop = hop > 0)) {
               throw SecurityException("Redirected to untrusted update host")
             }
             val nextConn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
@@ -1192,6 +1240,7 @@ class MainActivity : TauriActivity() {
               setRequestProperty("User-Agent", "AuraStream-Android-OTA")
               setRequestProperty("Accept", "application/octet-stream, application/vnd.android.package-archive")
             }
+            myConn = nextConn
             otaActiveConnection = nextConn
             val code = nextConn.responseCode
             if (code in listOf(301, 302, 303, 307, 308)) {
@@ -1222,7 +1271,7 @@ class MainActivity : TauriActivity() {
             FileOutputStream(partFile).use { output ->
               val buffer = ByteArray(32 * 1024)
               while (true) {
-                if (otaCancelled || otaDownloadToken != myToken) {
+                if (otaCancelled || otaDownloadToken.get() != myToken) {
                   throw InterruptedException("cancelled")
                 }
                 val read = input.read(buffer)
@@ -1263,15 +1312,18 @@ class MainActivity : TauriActivity() {
               }
             }
           }
-          finalConn.disconnect()
-          otaActiveConnection = null
 
-          if (otaCancelled || otaDownloadToken != myToken) {
+          if (otaCancelled || otaDownloadToken.get() != myToken) {
             try { partFile.delete() } catch (_: Exception) {}
-            dispatchOtaEvent(JSONObject().apply { put("status", "cancelled") })
+            if (otaDownloadToken.get() == myToken && otaCancelled) {
+              dispatchOtaEvent(JSONObject().apply { put("status", "cancelled") })
+            }
             return@Thread
           }
 
+          if (totalBytes > 0L && downloadedBytes != totalBytes) {
+            throw IllegalStateException("Incomplete update download ($downloadedBytes / $totalBytes bytes)")
+          }
           if (!partFile.exists() || partFile.length() < 1_000_000L) {
             throw IllegalStateException("Downloaded APK appears incomplete (${partFile.length()} bytes)")
           }
@@ -1302,13 +1354,17 @@ class MainActivity : TauriActivity() {
             put("speedBytesPerSec", 0L)
             put("filePath", apkFile.absolutePath)
           })
-        } catch (ie: InterruptedException) {
+        } catch (_: InterruptedException) {
           try { partFile?.delete() } catch (_: Exception) {}
-          dispatchOtaEvent(JSONObject().apply { put("status", "cancelled") })
+          if (otaDownloadToken.get() == myToken && otaCancelled) {
+            dispatchOtaEvent(JSONObject().apply { put("status", "cancelled") })
+          }
         } catch (e: Exception) {
           try { partFile?.delete() } catch (_: Exception) {}
-          if (otaCancelled || otaDownloadToken != myToken) {
-            dispatchOtaEvent(JSONObject().apply { put("status", "cancelled") })
+          if (otaCancelled || otaDownloadToken.get() != myToken) {
+            if (otaDownloadToken.get() == myToken && otaCancelled) {
+              dispatchOtaEvent(JSONObject().apply { put("status", "cancelled") })
+            }
           } else {
             dispatchOtaEvent(JSONObject().apply {
               put("status", "error")
@@ -1316,7 +1372,10 @@ class MainActivity : TauriActivity() {
             })
           }
         } finally {
-          otaActiveConnection = null
+          try { myConn?.disconnect() } catch (_: Exception) {}
+          if (otaActiveConnection === myConn) {
+            otaActiveConnection = null
+          }
         }
       }.apply {
         name = "AuraOtaDownloader"
@@ -1411,7 +1470,9 @@ class MainActivity : TauriActivity() {
           val askedBefore = prefs.getBoolean("asked_notif", false)
           if (!granted && (!askedBefore || activity.shouldShowRequestPermissionRationale(android.Manifest.permission.POST_NOTIFICATIONS))) {
             prefs.edit().putBoolean("asked_notif", true).apply()
-            activity.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
+            activity.runOnUiThread {
+              activity.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
+            }
             return true
           }
         }
@@ -1472,13 +1533,17 @@ class MainActivity : TauriActivity() {
           Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> true
           Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
             if (activity.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-              activity.requestPermissions(arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE), 102)
+              activity.runOnUiThread {
+                activity.requestPermissions(arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE), 102)
+              }
             }
             true
           }
           else -> {
             if (activity.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-              activity.requestPermissions(arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE, android.Manifest.permission.READ_EXTERNAL_STORAGE), 102)
+              activity.runOnUiThread {
+                activity.requestPermissions(arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE, android.Manifest.permission.READ_EXTERNAL_STORAGE), 102)
+              }
             }
             true
           }

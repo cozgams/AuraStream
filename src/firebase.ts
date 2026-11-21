@@ -4,7 +4,8 @@
  * - Automatically provides a built-in encrypted/hashed on-device Account Vault + Local Cloud Store out of the box
  *   so Sign In, Create Account, Password Reset, and Account Data Sync work 100% reliably with zero configuration errors.
  */
-import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
+import { initializeApp, getApps, deleteApp, type FirebaseApp } from "firebase/app";
+import { readStorage, writeStorage, removeStorage, STORAGE_KEYS } from "./storage";
 import {
   getAuth,
   signInWithPopup,
@@ -62,10 +63,6 @@ interface VaultAccountRecord {
   updatedAt: number;
 }
 
-const STORAGE_KEY_FIREBASE_CONFIG = "aurastream_firebase_config";
-const SESSION_ACTIVE_KEY = "aurastream_has_firebase_auth";
-const VAULT_ACCOUNTS_KEY = "aurastream_accounts_vault_v1";
-const VAULT_ACTIVE_USER_KEY = "aurastream_active_vault_user_v1";
 const VAULT_CLOUD_DATA_PREFIX = "aurastream_cloud_data_v1_";
 
 const DEFAULT_FIREBASE_CONFIG: FirebaseConfig = {
@@ -102,7 +99,7 @@ function hashPassword(email: string, password: string): string {
 
 function readVaultAccounts(): Record<string, VaultAccountRecord> {
   try {
-    const raw = localStorage.getItem(VAULT_ACCOUNTS_KEY);
+    const raw = readStorage(STORAGE_KEYS.vaultAccounts);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" ? (parsed as Record<string, VaultAccountRecord>) : {};
@@ -113,7 +110,7 @@ function readVaultAccounts(): Record<string, VaultAccountRecord> {
 
 function writeVaultAccounts(accounts: Record<string, VaultAccountRecord>): void {
   try {
-    localStorage.setItem(VAULT_ACCOUNTS_KEY, JSON.stringify(accounts));
+    writeStorage(STORAGE_KEYS.vaultAccounts, JSON.stringify(accounts));
   } catch {
     // ignore quota errors
   }
@@ -132,7 +129,7 @@ function toFirebaseUserLike(rec: Pick<VaultAccountRecord, "uid" | "email" | "dis
 
 function getActiveVaultUser(): FirebaseUser | null {
   try {
-    const raw = localStorage.getItem(VAULT_ACTIVE_USER_KEY);
+    const raw = readStorage(STORAGE_KEYS.vaultActiveUser);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<VaultAccountRecord> | null;
     if (parsed && typeof parsed.uid === "string" && typeof parsed.email === "string") {
@@ -152,10 +149,10 @@ function getActiveVaultUser(): FirebaseUser | null {
 function setActiveVaultUser(rec: Pick<VaultAccountRecord, "uid" | "email" | "displayName" | "photoURL"> | null): void {
   try {
     if (rec) {
-      localStorage.setItem(VAULT_ACTIVE_USER_KEY, JSON.stringify(rec));
+      writeStorage(STORAGE_KEYS.vaultActiveUser, JSON.stringify(rec));
       setActiveFirebaseSession(true);
     } else {
-      localStorage.removeItem(VAULT_ACTIVE_USER_KEY);
+      removeStorage(STORAGE_KEYS.vaultActiveUser);
     }
   } catch {
     // ignore
@@ -199,7 +196,7 @@ function isValidNonPlaceholderConfig(cfg: FirebaseConfig | null | undefined): cf
 
 export function getStoredConfig(): FirebaseConfig | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_FIREBASE_CONFIG);
+    const raw = readStorage(STORAGE_KEYS.firebaseConfig);
     if (!raw) return DEFAULT_FIREBASE_CONFIG;
     const parsed = JSON.parse(raw);
     if (parsed?.apiKey && parsed?.projectId) return parsed;
@@ -233,10 +230,23 @@ export function initFirebase(config?: FirebaseConfig | null): {
   }
 
   try {
-    if (!getApps().length) {
-      app = initializeApp(activeConfig);
+    const existingApps = getApps();
+    const matched = existingApps.find(
+      (a) =>
+        a.options?.projectId === activeConfig.projectId &&
+        a.options?.apiKey === activeConfig.apiKey
+    );
+    if (matched) {
+      app = matched;
     } else {
-      app = getApps()[0];
+      for (const old of existingApps) {
+        void deleteApp(old).catch(() => {});
+      }
+      const appName =
+        existingApps.length === 0
+          ? undefined
+          : `aurastream_${hashString(`${activeConfig.projectId}:${activeConfig.apiKey}`)}`;
+      app = appName ? initializeApp(activeConfig, appName) : initializeApp(activeConfig);
     }
     auth = getAuth(app);
     db = getFirestore(app);
@@ -252,7 +262,7 @@ export function saveFirebaseConfig(config: FirebaseConfig) {
     if (!isValidNonPlaceholderConfig(config)) {
       return null;
     }
-    localStorage.setItem(STORAGE_KEY_FIREBASE_CONFIG, JSON.stringify(config));
+    writeStorage(STORAGE_KEYS.firebaseConfig, JSON.stringify(config));
     return initFirebase(config);
   } catch {}
   return null;
@@ -260,7 +270,10 @@ export function saveFirebaseConfig(config: FirebaseConfig) {
 
 export function clearFirebaseConfig(): void {
   try {
-    localStorage.removeItem(STORAGE_KEY_FIREBASE_CONFIG);
+    removeStorage(STORAGE_KEYS.firebaseConfig);
+    for (const existing of getApps()) {
+      void deleteApp(existing).catch(() => {});
+    }
     app = null;
     auth = null;
     db = null;
@@ -274,8 +287,8 @@ export function isFirebaseConfigured(): boolean {
 export function hasActiveFirebaseSession(): boolean {
   try {
     return (
-      localStorage.getItem(SESSION_ACTIVE_KEY) === "true" ||
-      Boolean(localStorage.getItem(VAULT_ACTIVE_USER_KEY))
+      readStorage(STORAGE_KEYS.firebaseSession) === "true" ||
+      Boolean(readStorage(STORAGE_KEYS.vaultActiveUser))
     );
   } catch {
     return false;
@@ -285,10 +298,10 @@ export function hasActiveFirebaseSession(): boolean {
 export function setActiveFirebaseSession(active: boolean): void {
   try {
     if (active) {
-      localStorage.setItem(SESSION_ACTIVE_KEY, "true");
+      writeStorage(STORAGE_KEYS.firebaseSession, "true");
     } else {
-      localStorage.removeItem(SESSION_ACTIVE_KEY);
-      localStorage.removeItem(VAULT_ACTIVE_USER_KEY);
+      removeStorage(STORAGE_KEYS.firebaseSession);
+      removeStorage(STORAGE_KEYS.vaultActiveUser);
     }
   } catch {}
 }
@@ -404,7 +417,6 @@ export async function signInWithEmail(email: string, pass: string): Promise<Fire
       try {
         const res = await signInWithEmailAndPassword(auth, cleanEmail, pass);
         if (res.user) {
-          registerOrUpdateVaultAccount(cleanEmail, pass, res.user.displayName || undefined);
           setActiveFirebaseSession(true);
           return res.user;
         }
@@ -449,7 +461,6 @@ export async function signUpWithEmail(
           }
         }
         if (res.user) {
-          registerOrUpdateVaultAccount(cleanEmail, pass, displayName);
           setActiveFirebaseSession(true);
           return res.user;
         }
@@ -459,6 +470,13 @@ export async function signUpWithEmail(
         }
       }
     }
+  }
+
+  const accounts = readVaultAccounts();
+  if (accounts[cleanEmail.toLowerCase()]) {
+    const err = new Error("An account with this email already exists. Please sign in instead.") as Error & { code: string };
+    err.code = "auth/email-already-in-use";
+    throw err;
   }
 
   return registerOrUpdateVaultAccount(cleanEmail, pass, displayName);

@@ -102,13 +102,21 @@ export default function BatchDownloadSheet({
     prevOpenRef.current = isOpen;
     prevVideoIdRef.current = videoId;
 
+    const undownloaded = allEpisodes.filter((ep) => !isEpisodeDownloaded(videoId, ep));
+    const preset = () => new Set(preselectAll ? undownloaded : undownloaded.slice(0, 5));
     if (justOpened || videoChangedWhileOpen) {
-      const undownloaded = allEpisodes.filter((ep) => !isEpisodeDownloaded(videoId, ep));
-      setSelectedEps(new Set(preselectAll ? undownloaded : undownloaded.slice(0, 5)));
+      setSelectedEps(preset());
+    } else if (isOpen) {
+      // Episode list may resolve asynchronously: drop stale picks and refill if empty
+      const valid = new Set(allEpisodes);
+      setSelectedEps((prev) => {
+        const kept = Array.from(prev).filter((ep) => valid.has(ep));
+        if (kept.length === prev.size && kept.length > 0) return prev;
+        return kept.length > 0 ? new Set(kept) : preset();
+      });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, videoId, totalEpisodes, preselectAll, sortedExplicitEps.length]);
-
-  if (!isOpen) return null;
 
   const seriesQueueItems = Array.from(activeMap.values()).filter(
     (item) => item.videoId === videoId && (item.status === "downloading" || item.status === "queued")
@@ -116,10 +124,42 @@ export default function BatchDownloadSheet({
   const isCurrentBatchActive =
     seriesQueueItems.length > 0 || (batchProgress.active && batchProgress.videoId === videoId);
   const batchSessionKey = isCurrentBatchActive ? `${videoId}:${Math.max(batchProgress.total, seriesQueueItems.length)}` : "";
-  if (!isCurrentBatchActive || prevBatchKeyRef.current !== batchSessionKey) {
-    maxBatchPctRef.current = 0;
+
+  const activeDownloadingItem =
+    seriesQueueItems.find((item) => item.status === "downloading") ||
+    seriesQueueItems[0] ||
+    (batchProgress.videoId === videoId ? activeMap.get(`${videoId}_${batchProgress.currentEpisode}`) : undefined);
+  const activeEpProgress = activeDownloadingItem;
+  const activeEpNum = activeEpProgress?.episode || batchProgress.currentEpisode;
+  const activeEpPct = activeEpProgress?.progress || 0;
+  const activeFraction =
+    activeEpProgress?.status === "downloading" ? Math.min(99, Math.max(0, activeEpPct)) / 100 : 0;
+  const displayBatchTotal =
+    batchProgress.videoId === videoId && batchProgress.total > 0
+      ? Math.max(batchProgress.total, seriesQueueItems.length)
+      : Math.max(1, seriesQueueItems.length);
+  const processedCount =
+    batchProgress.videoId === videoId && batchProgress.total > 0
+      ? batchProgress.completed + batchProgress.failedCount
+      : Math.max(0, displayBatchTotal - seriesQueueItems.length);
+  const rawBatchPct = Math.min(
+    100,
+    Math.max(
+      activeEpPct > 0 || processedCount > 0 ? 2 : 0,
+      Math.round(((processedCount + activeFraction) / Math.max(1, displayBatchTotal)) * 100)
+    )
+  );
+  const sessionChanged = prevBatchKeyRef.current !== batchSessionKey;
+  const overallBatchPct = isCurrentBatchActive
+    ? Math.max(rawBatchPct, sessionChanged ? 0 : maxBatchPctRef.current)
+    : 0;
+
+  useEffect(() => {
     prevBatchKeyRef.current = batchSessionKey;
-  }
+    maxBatchPctRef.current = overallBatchPct;
+  }, [batchSessionKey, overallBatchPct]);
+
+  if (!isOpen) return null;
 
   const effectiveSelected = Array.from(selectedEps).filter((ep) => {
     if (downloadedSet.has(ep)) return false;
@@ -196,38 +236,9 @@ export default function BatchDownloadSheet({
     }
   };
 
-  const activeDownloadingItem =
-    seriesQueueItems.find((item) => item.status === "downloading") ||
-    seriesQueueItems[0] ||
-    (batchProgress.videoId === videoId ? activeMap.get(`${videoId}_${batchProgress.currentEpisode}`) : undefined);
-  const activeEpProgress = activeDownloadingItem;
-  const activeEpNum = activeEpProgress?.episode || batchProgress.currentEpisode;
-  const activeEpPct = activeEpProgress?.progress || 0;
-  const activeFraction =
-    activeEpProgress?.status === "downloading" ? Math.min(99, Math.max(0, activeEpPct)) / 100 : 0;
-  const displayBatchTotal =
-    batchProgress.videoId === videoId && batchProgress.total > 0
-      ? Math.max(batchProgress.total, seriesQueueItems.length)
-      : Math.max(1, seriesQueueItems.length);
-  const processedCount =
-    batchProgress.videoId === videoId && batchProgress.total > 0
-      ? batchProgress.completed + batchProgress.failedCount
-      : Math.max(0, displayBatchTotal - seriesQueueItems.length);
-  const rawBatchPct = Math.min(
-    100,
-    Math.max(
-      activeEpPct > 0 || processedCount > 0 ? 2 : 0,
-      Math.round(((processedCount + activeFraction) / Math.max(1, displayBatchTotal)) * 100)
-    )
-  );
-  if (isCurrentBatchActive && rawBatchPct > maxBatchPctRef.current) {
-    maxBatchPctRef.current = rawBatchPct;
-  }
-  const overallBatchPct = isCurrentBatchActive ? maxBatchPctRef.current : 0;
-
   return (
     <Sheet open={isOpen} onClose={onClose} label={t("batch.title")}>
-      <div className="flex flex-col max-h-[85vh] overflow-hidden bg-canvas text-on">
+      <div className="flex flex-col max-h-[85vh] overflow-hidden bg-s1 text-on">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-edge/30 shrink-0">
           <div className="flex items-center gap-2.5">
@@ -450,17 +461,17 @@ export default function BatchDownloadSheet({
           </div>
 
           <Button
-            disabled={effectiveSelected.length === 0 || batchProgress.active}
+            disabled={effectiveSelected.length === 0}
             onClick={startBatch}
             className={`px-5 h-10 rounded-xl text-[13px] font-bold flex items-center gap-2 pressable ${
-              effectiveSelected.length > 0 && !batchProgress.active
+              effectiveSelected.length > 0
                 ? "bg-primary text-on-primary shadow-lg shadow-primary/25"
                 : "bg-s3 text-mut cursor-not-allowed opacity-50"
             }`}
           >
             <IDownload size={15} />
             {batchProgress.active && !isCurrentBatchActive
-              ? "Batch in progress..."
+              ? `Add to queue (${effectiveSelected.length})`
               : t("batch.download_selected", { count: effectiveSelected.length })}
           </Button>
         </div>

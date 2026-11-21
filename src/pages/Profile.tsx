@@ -118,7 +118,7 @@ type DramaGroup = {
   totalBytes: number;
 };
 
-export default function Profile({ wide }: { wide: boolean }) {
+export default function Profile({ wide, active = true }: { wide: boolean; active?: boolean }) {
   const {
     theme,
     user,
@@ -229,6 +229,7 @@ export default function Profile({ wide }: { wide: boolean }) {
   };
 
   useEffect(() => {
+    if (!active || (typeof navigator !== "undefined" && navigator.onLine === false)) return;
     // Only fetch metadata for online history items; keep Downloads Hub 100% zero-internet unless user taps More Eps
     const histNeeded = history
       .slice(0, 15)
@@ -256,7 +257,7 @@ export default function Profile({ wide }: { wide: boolean }) {
     return () => {
       alive = false;
     };
-  }, [history]);
+  }, [history, active]);
 
   const [batchSheet, setBatchSheet] = useState<{
     isOpen: boolean;
@@ -342,7 +343,7 @@ export default function Profile({ wide }: { wide: boolean }) {
 
   // Handle hardware back on Android: return to overview seamlessly
   useEffect(() => {
-    if (view === "overview") return;
+    if (!active || view === "overview") return;
     return registerOverlayBack(() => {
       if (selectMode) {
         setSelectMode(false);
@@ -356,7 +357,7 @@ export default function Profile({ wide }: { wide: boolean }) {
       setView("overview");
       return true;
     });
-  }, [view, selectMode]);
+  }, [active, view, selectMode]);
 
   useEffect(() => {
     document.body.classList.toggle("has-selection-mode", selectMode);
@@ -479,7 +480,9 @@ export default function Profile({ wide }: { wide: boolean }) {
   }, [view, selectedSeriesGroup, dramaGroups]);
 
   const playSelected = () => {
-    const selectedEpisodes = downloads.filter((d) => selectedKeys.has(`${d.videoId}_${d.episode}`));
+    const selectedEpisodes = downloads
+      .filter((d) => selectedKeys.has(`${d.videoId}_${d.episode}`))
+      .sort((a, b) => (a.videoId === b.videoId ? a.episode - b.episode : a.videoId - b.videoId));
     if (!selectedEpisodes.length) return;
     const first = selectedEpisodes[0];
     push({
@@ -546,6 +549,45 @@ export default function Profile({ wide }: { wide: boolean }) {
       setCards([]);
       return;
     }
+    const buildCombined = (remoteMap = new Map<number, Detail>()) =>
+      subviewIds
+        .slice(0, 32)
+        .map((id) => {
+          if (remoteMap.has(id)) return remoteMap.get(id)!;
+          if (detailCache[id]) return detailCache[id];
+          const h = history.find((x) => x.id === id);
+          const dlEps = downloads.filter((x) => x.videoId === id);
+          const dlFirst = dlEps[0];
+          if (h && (h.title || h.cover)) {
+            return {
+              id: h.id,
+              title: h.title || dlFirst?.title || `Drama #${h.id}`,
+              cover: h.cover || dlFirst?.cover || "",
+              tags: h.tags || [],
+              episode_count: h.episode_count || Math.max(1, dlEps.length),
+              is_finished: !!h.is_finished,
+            } as unknown as Detail;
+          }
+          if (dlFirst) {
+            return {
+              id,
+              title: dlFirst.title || `Drama #${id}`,
+              cover: dlFirst.cover || "",
+              tags: [],
+              episode_count: Math.max(1, dlEps.length),
+              is_finished: false,
+            } as unknown as Detail;
+          }
+          return null;
+        })
+        .filter(Boolean) as Detail[];
+
+    if (!active || (typeof navigator !== "undefined" && navigator.onLine === false)) {
+      setCards(buildCombined());
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     Promise.allSettled(subviewIds.slice(0, 32).map((id) => api.video(id)))
       .then((rs) => {
@@ -554,38 +596,7 @@ export default function Profile({ wide }: { wide: boolean }) {
           .filter((r) => r.status === "fulfilled")
           .map((r) => (r as PromiseFulfilledResult<Detail>).value);
         const map = new Map(fetched.map((c) => [c.id, c]));
-        const combined = subviewIds
-          .slice(0, 32)
-          .map((id) => {
-            if (map.has(id)) return map.get(id)!;
-            if (detailCache[id]) return detailCache[id];
-            const h = history.find((x) => x.id === id);
-            const dlEps = downloads.filter((x) => x.videoId === id);
-            const dlFirst = dlEps[0];
-            if (h && (h.title || h.cover)) {
-              return {
-                id: h.id,
-                title: h.title || dlFirst?.title || `Drama #${h.id}`,
-                cover: h.cover || dlFirst?.cover || "",
-                tags: h.tags || [],
-                episode_count: h.episode_count || Math.max(1, dlEps.length),
-                is_finished: !!h.is_finished,
-              } as unknown as Detail;
-            }
-            if (dlFirst) {
-              return {
-                id,
-                title: dlFirst.title || `Drama #${id}`,
-                cover: dlFirst.cover || "",
-                tags: [],
-                episode_count: Math.max(1, dlEps.length),
-                is_finished: false,
-              } as unknown as Detail;
-            }
-            return null;
-          })
-          .filter(Boolean) as Detail[];
-        setCards(combined);
+        setCards(buildCombined(map));
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -593,7 +604,7 @@ export default function Profile({ wide }: { wide: boolean }) {
     return () => {
       alive = false;
     };
-  }, [subviewIds.join(","), view]);
+  }, [subviewIds.join(","), view, active]);
 
   return (
     <div
@@ -906,6 +917,16 @@ export default function Profile({ wide }: { wide: boolean }) {
 
                     const detail = detailCache[h.id];
                     const coverUrl = detail?.cover || h.cover;
+                    const offlineMatch = downloads.find((d) => d.videoId === h.id && d.storage === "native" && d.hasLocalCover);
+                    const coverSrc = getOfflineCoverUrl(
+                      {
+                        id: offlineMatch?.id || "",
+                        cover: coverUrl || "",
+                        storage: offlineMatch?.storage,
+                        hasLocalCover: offlineMatch?.hasLocalCover,
+                      },
+                      240
+                    );
                     const dramaTitle = formatDramaTitle(detail?.title || h.title || `Drama #${h.id}`);
                     const epCount = detail?.episode_count || h.episode_count || 1;
                     const isFinished = detail?.is_finished ?? h.is_finished;
@@ -928,9 +949,9 @@ export default function Profile({ wide }: { wide: boolean }) {
                         className="group w-28 shrink-0 flex flex-col cursor-pointer pressable active:scale-[0.98] transition-transform relative"
                       >
                         <div className="w-full h-[80px] rounded-xl overflow-hidden relative shadow-xs border border-slate-200/60 dark:border-white/10 bg-slate-900">
-                          {coverUrl ? (
+                          {coverSrc ? (
                             <img
-                              src={getCoverUrl(coverUrl, 240)}
+                              src={coverSrc}
                               alt={dramaTitle}
                               className="w-full h-full object-cover"
                               loading="lazy"
@@ -943,7 +964,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                           ) : null}
                           <div
                             className={`w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-800 to-slate-950 text-white/90 p-2 text-center ${
-                              coverUrl ? "hidden" : "flex"
+                              coverSrc ? "hidden" : "flex"
                             }`}
                           >
                             <IHist size={16} className="text-white/40 mb-0.5" />
@@ -1323,12 +1344,20 @@ export default function Profile({ wide }: { wide: boolean }) {
                     className="bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md rounded-2xl border border-blue-100 dark:border-blue-500/25 shadow-[0_4px_20px_-2px_rgba(37,99,235,0.08)] p-3 flex flex-col gap-2.5"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-12 aspect-[3/4] rounded-xl overflow-hidden shrink-0 shadow-xs border border-black/5 dark:border-white/10 bg-slate-100 dark:bg-neutral-800 relative">
-                        <img
-                          src={getCoverUrl(item.cover || "", 160)}
-                          alt=""
-                          className="w-full h-full object-cover"
-                        />
+                      <div className="w-12 aspect-[3/4] rounded-xl overflow-hidden shrink-0 shadow-xs border border-black/5 dark:border-white/10 bg-slate-100 dark:bg-neutral-800 relative flex items-center justify-center">
+                        {(() => {
+                          const coverSrc = getOfflineCoverUrl({ id: item.id, cover: item.cover || "" }, 160);
+                          return coverSrc ? (
+                            <img
+                              src={coverSrc}
+                              alt=""
+                              className="w-full h-full object-cover"
+                              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                            />
+                          ) : (
+                            <ILayers size={16} className="text-slate-400" />
+                          );
+                        })()}
                         <div className="absolute bottom-0.5 left-0.5 px-1 py-0.2 rounded bg-black/60 text-[8px] font-bold text-white">
                           Ep. {item.episode}
                         </div>
@@ -1388,7 +1417,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                         ) : item.status === "paused" ? (
                           <button
                             type="button"
-                            onClick={() => void resumeDownload(item.id, true)}
+                            onClick={() => void resumeDownload(item.id, false)}
                             className="w-8 h-8 rounded-full bg-blue-500 hover:bg-blue-600 text-white flex items-center justify-center pressable shadow-xs"
                             title="Resume"
                           >
@@ -1397,7 +1426,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                         ) : item.status === "error" ? (
                           <button
                             type="button"
-                            onClick={() => void resumeDownload(item.id, true)}
+                            onClick={() => void resumeDownload(item.id, false)}
                             className="px-2.5 py-1 rounded-full bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-400 text-[11px] font-bold hover:bg-red-100 pressable"
                           >
                             Retry
@@ -1601,12 +1630,20 @@ export default function Profile({ wide }: { wide: boolean }) {
                           }}
                           className="w-14 aspect-[3/4] rounded-xl overflow-hidden shrink-0 shadow-xs border border-black/5 dark:border-white/10 bg-slate-100 dark:bg-neutral-800 cursor-pointer pressable relative p-0 border-0 text-left block"
                         >
-                          <img
-                            src={getOfflineCoverUrl(group.episodes.find((e) => e.hasLocalCover) || group.episodes[0] || { id: "", cover: group.cover }, 200)}
-                            alt=""
-                            className="w-full h-full object-cover"
-                            loading="lazy"
-                          />
+                          {(() => {
+                            const coverSrc = getOfflineCoverUrl(group.episodes.find((e) => e.hasLocalCover) || group.episodes[0] || { id: "", cover: group.cover }, 200);
+                            return coverSrc ? (
+                              <img
+                                src={coverSrc}
+                                alt=""
+                                className="w-full h-full object-cover"
+                                loading="lazy"
+                                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-slate-400"><ILayers size={18} /></div>
+                            );
+                          })()}
                           <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded-md bg-black/60 backdrop-blur-xs text-[9px] font-bold text-white shadow-xs">
                             {group.episodes.length} {group.episodes.length === 1 ? "ep" : "eps"}
                           </div>
@@ -1675,7 +1712,8 @@ export default function Profile({ wide }: { wide: boolean }) {
                           <button
                             type="button"
                             onClick={() => {
-                              openSingleExport(group.videoId, group.episodes[0]?.episode || 1, group.title);
+                              setSelectedSeriesGroup(group);
+                              setSeriesMenuOpen(true);
                             }}
                             className="w-6 h-6 flex items-center justify-center text-slate-400 hover:text-slate-600 pressable"
                             aria-label="Series options"
@@ -1713,13 +1751,19 @@ export default function Profile({ wide }: { wide: boolean }) {
                                 }}
                                 className="w-28 shrink-0 flex flex-col gap-1 cursor-pointer pressable active:scale-95 transition-all"
                               >
-                                <div className="w-full aspect-[16/10] rounded-lg overflow-hidden relative border border-black/5 bg-slate-200">
-                                  <img
-                                    src={getOfflineCoverUrl(ep, 160)}
-                                    alt=""
-                                    className="w-full h-full object-cover"
-                                    loading="lazy"
-                                  />
+                                <div className="w-full aspect-[16/10] rounded-lg overflow-hidden relative border border-black/5 bg-slate-200 dark:bg-neutral-800">
+                                  {(() => {
+                                    const coverSrc = getOfflineCoverUrl(ep, 160);
+                                    return coverSrc ? (
+                                      <img
+                                        src={coverSrc}
+                                        alt=""
+                                        className="w-full h-full object-cover"
+                                        loading="lazy"
+                                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                                      />
+                                    ) : null;
+                                  })()}
                                   <div className="absolute bottom-1 right-1 w-4 h-4 rounded-full bg-[#10b981] text-white flex items-center justify-center shadow-xs">
                                     <ICheck size={9} strokeWidth={3.5} />
                                   </div>
@@ -1841,11 +1885,19 @@ export default function Profile({ wide }: { wide: boolean }) {
             {/* Top Showcase Hero */}
             <div className="flex items-center gap-3.5 px-0.5">
               <div className="w-16 h-16 rounded-2xl overflow-hidden shrink-0 shadow-md border border-black/5 dark:border-white/10 bg-slate-100 dark:bg-neutral-800">
-                <img
-                  src={getOfflineCoverUrl(selectedSeriesGroup.episodes.find((e) => e.hasLocalCover) || selectedSeriesGroup.episodes[0] || { id: "", cover: selectedSeriesGroup.cover }, 240)}
-                  alt=""
-                  className="w-full h-full object-cover"
-                />
+                {(() => {
+                  const coverSrc = getOfflineCoverUrl(selectedSeriesGroup.episodes.find((e) => e.hasLocalCover) || selectedSeriesGroup.episodes[0] || { id: "", cover: selectedSeriesGroup.cover }, 240);
+                  return coverSrc ? (
+                    <img
+                      src={coverSrc}
+                      alt=""
+                      className="w-full h-full object-cover"
+                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-slate-400"><ILayers size={22} /></div>
+                  );
+                })()}
               </div>
               <div className="flex-1 min-w-0">
                 <h2 className="text-[19px] font-black text-[#0f172a] dark:text-neutral-100 tracking-tight leading-tight truncate">
@@ -1913,7 +1965,26 @@ export default function Profile({ wide }: { wide: boolean }) {
             <div
               role="button"
               tabIndex={0}
-              onClick={() => openSingleExport(selectedSeriesGroup.videoId, selectedSeriesGroup.episodes[0]?.episode || 1, selectedSeriesGroup.title)}
+              onClick={() => {
+                if (selectedSeriesGroup.episodes.length > 1) {
+                  setExportSheetState({
+                    isOpen: true,
+                    videoId: selectedSeriesGroup.videoId,
+                    title: formatDramaTitle(selectedSeriesGroup.title),
+                    batchItems: selectedSeriesGroup.episodes.map((e) => ({
+                      videoId: e.videoId,
+                      episode: e.episode,
+                      title: e.title,
+                    })),
+                  });
+                } else {
+                  openSingleExport(
+                    selectedSeriesGroup.videoId,
+                    selectedSeriesGroup.episodes[0]?.episode || 1,
+                    selectedSeriesGroup.title
+                  );
+                }
+              }}
               className="p-3 rounded-2xl bg-white/90 dark:bg-neutral-900/90 border border-slate-200/80 dark:border-white/10 flex items-center justify-between text-[12px] text-[#64748b] dark:text-neutral-400 shadow-xs cursor-pointer pressable hover:bg-white dark:hover:bg-neutral-800 active:scale-[0.99] transition-all"
             >
               <div className="flex items-center gap-2.5 font-medium">
@@ -1965,12 +2036,18 @@ export default function Profile({ wide }: { wide: boolean }) {
                     }
                     className="p-3 rounded-2xl bg-white/90 dark:bg-neutral-900/90 backdrop-blur-md border border-white/70 dark:border-white/10 shadow-xs flex items-center gap-3 cursor-pointer pressable active:scale-[0.99] transition-all"
                   >
-                    <div className="w-20 aspect-[16/10] rounded-xl overflow-hidden relative border border-black/5 bg-slate-200 shrink-0">
-                      <img
-                        src={getOfflineCoverUrl(item, 160)}
-                        alt=""
-                        className="w-full h-full object-cover"
-                      />
+                    <div className="w-20 aspect-[16/10] rounded-xl overflow-hidden relative border border-black/5 bg-slate-200 dark:bg-neutral-800 shrink-0">
+                      {(() => {
+                        const coverSrc = getOfflineCoverUrl(item, 160);
+                        return coverSrc ? (
+                          <img
+                            src={coverSrc}
+                            alt=""
+                            className="w-full h-full object-cover"
+                            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                          />
+                        ) : null;
+                      })()}
                     </div>
 
                     <div className="flex-1 min-w-0">
@@ -2454,7 +2531,6 @@ export default function Profile({ wide }: { wide: boolean }) {
                 onClick={() => {
                   logout();
                   setLibraryInfoOpen(false);
-                  toast("Signed out successfully", "ok");
                 }}
                 className="w-full h-10 rounded-xl bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-400 border border-red-200/80 dark:border-red-500/30 text-[13px] font-bold pressable active:scale-95 transition-all"
               >

@@ -291,7 +291,9 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                   </div>
                 </div>
                 <span className="text-[12px] font-mono text-amber-500 font-semibold">
-                  {typeof subStyle.customOffsetPercent === "number"
+                  {subStyle.position === "custom" && typeof subStyle.customOffsetPercent === "number"
+                    ? `Custom ${subStyle.customOffsetPercent}%`
+                    : typeof subStyle.customOffsetPercent === "number"
                     ? `${subStyle.customOffsetPercent}%`
                     : subStyle.position === "top"
                     ? "85%"
@@ -932,7 +934,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
             >
               <ILink size={15} className="text-mut" />
               <span className="text-[13px] text-on/85">github.com/cozgams/AuraStream</span>
-              <span className="ml-auto text-[12px] text-primary">Copy</span>
+              <span className="ml-auto text-[12px] text-primary">Open</span>
             </Button>
             <div className="flex items-center gap-2 py-2.5">
               <IInfo size={15} className="text-mut" />

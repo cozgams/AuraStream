@@ -10,6 +10,10 @@ export const STORAGE_KEYS = {
   downloads: "aurastream_offline_episodes_v1",
   activeDownloads: "aurastream_active_downloads_v1",
   localUser: "aurastream_local_user_v1",
+  firebaseConfig: "aurastream_firebase_config",
+  firebaseSession: "aurastream_has_firebase_auth",
+  vaultAccounts: "aurastream_accounts_vault_v1",
+  vaultActiveUser: "aurastream_active_vault_user_v1",
 } as const;
 
 export type StorageKey = typeof STORAGE_KEYS[keyof typeof STORAGE_KEYS];
@@ -27,6 +31,10 @@ const LEGACY_KEYS: Record<StorageKey, string[]> = {
   aurastream_offline_episodes_v1: ["hghubx_offline_episodes_v1", "hghub_offline_episodes_v1"],
   aurastream_active_downloads_v1: ["hghubx_active_downloads_v1"],
   aurastream_local_user_v1: [],
+  aurastream_firebase_config: [],
+  aurastream_has_firebase_auth: [],
+  aurastream_accounts_vault_v1: [],
+  aurastream_active_vault_user_v1: [],
 };
 
 const NATIVE_SAVE_DEBOUNCE_MS = 800;

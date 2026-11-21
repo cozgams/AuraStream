@@ -257,10 +257,13 @@ export async function preloadEpisode(
             }
             const segRes = await fetch(fullSegUrl);
             if (segRes.ok) {
+              const buf = await segRes.arrayBuffer().catch(() => null);
               loadedCount++;
               const cl = segRes.headers.get("content-length");
-              const b = cl ? Number(cl) : 1024 * 1024; // default ~1MB
+              const b = cl ? Number(cl) : (buf?.byteLength || 1024 * 1024); // default ~1MB
               totalBytesEstimated += Number.isFinite(b) ? b : 1024 * 1024;
+            } else {
+              await segRes.body?.cancel?.().catch(() => {});
             }
           } catch {
             // ignore single segment failure

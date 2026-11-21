@@ -52,6 +52,8 @@ export default function SubtitleOverlay({
   const [styleConfig, setStyleConfig] = useState<SubtitleStyleConfig>(() => getSubtitleStyleConfig());
   const [videoFrameBottom, setVideoFrameBottom] = useState<number | null>(null);
   const prevEpisodeKeyRef = useRef<string>("");
+  const trackSourceRef = useRef<SubtitleTrack["source"]>(trackSource);
+  trackSourceRef.current = trackSource;
   const onTrackStatusRef = useRef(onTrackStatus);
   onTrackStatusRef.current = onTrackStatus;
 
@@ -236,7 +238,7 @@ export default function SubtitleOverlay({
     };
   }, [videoId, episode, title, streamUrl]);
 
-  // Listen for immediate imports / AI transcription / removals for this episode
+  // Listen for immediate imports / AI transcription / removals / cache clears for this episode
   useEffect(() => {
     const onTrackUpdated = (e: Event) => {
       const detail = (e as CustomEvent<{ videoId?: number; episode?: number; track?: SubtitleTrack }>).detail;
@@ -246,8 +248,18 @@ export default function SubtitleOverlay({
       setTrackSource(nextTrack.cues?.length ? nextTrack.source : "none");
       setTrackFileName(nextTrack.fileName);
     };
+    const onCacheCleared = () => {
+      if (trackSourceRef.current === "local_import" || trackSourceRef.current === "native_track") return;
+      setCues([]);
+      setTrackSource("none");
+      setTrackFileName(undefined);
+    };
     window.addEventListener("aurastream:subtitle-track-updated", onTrackUpdated);
-    return () => window.removeEventListener("aurastream:subtitle-track-updated", onTrackUpdated);
+    window.addEventListener("aurastream:subtitle-cache-cleared", onCacheCleared);
+    return () => {
+      window.removeEventListener("aurastream:subtitle-track-updated", onTrackUpdated);
+      window.removeEventListener("aurastream:subtitle-cache-cleared", onCacheCleared);
+    };
   }, [videoId, episode]);
 
   const effectiveCues = cues.length > 0 ? cues : nativeCues;

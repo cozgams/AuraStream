@@ -837,6 +837,10 @@ fn encode_query_component(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }
 
+fn encode_path_segment(value: &str) -> String {
+    percent_encoding::utf8_percent_encode(value, percent_encoding::NON_ALPHANUMERIC).to_string()
+}
+
 fn format_sort_param(sort: Option<&str>) -> String {
     match sort.map(str::trim).filter(|s| !s.is_empty()) {
         Some(s) => format!("&sort={}", encode_query_component(s)),
@@ -856,7 +860,7 @@ pub async fn api_original_videos(
     let path = if cate == "all" {
         format!("/api/videos?is_original=1&page={page}&size={size}{sort}")
     } else {
-        let encoded_cate = encode_query_component(&cate);
+        let encoded_cate = encode_path_segment(&cate);
         format!("/api/videos/category/{encoded_cate}?is_original=1&page={page}&size={size}{sort}")
     };
     state.get(&path).await
@@ -873,7 +877,7 @@ pub async fn api_topics(state: State<'_, Api>) -> Result<Value, String> {
 /// Topic details: `/api/topics/{slug}`.
 #[tauri::command]
 pub async fn api_topic(state: State<'_, Api>, slug: String) -> Result<Value, String> {
-    let encoded: String = url::form_urlencoded::byte_serialize(slug.as_bytes()).collect();
+    let encoded = encode_path_segment(&slug);
     state.get(&format!("/api/topics/{encoded}")).await
 }
 
@@ -891,7 +895,7 @@ pub async fn api_tag_videos(
     page: u32,
     size: u32,
 ) -> Result<Value, String> {
-    let encoded: String = url::form_urlencoded::byte_serialize(tag.as_bytes()).collect();
+    let encoded = encode_path_segment(&tag);
     state
         .get(&format!("/api/videos/tag/{encoded}?page={page}&size={size}"))
         .await
@@ -906,7 +910,7 @@ pub async fn api_category(
     sort: Option<String>,
 ) -> Result<Value, String> {
     let sort = format_sort_param(sort.as_deref());
-    let encoded_cate = encode_query_component(&cate);
+    let encoded_cate = encode_path_segment(&cate);
     state
         .get(&format!(
             "/api/videos/category/{encoded_cate}?page={page}&size={size}{sort}"
@@ -1178,7 +1182,7 @@ pub async fn api_post_category(
     size: u32,
     sort: Option<String>,
 ) -> Result<Value, String> {
-    let encoded: String = url::form_urlencoded::byte_serialize(route.as_bytes()).collect();
+    let encoded = encode_path_segment(&route);
     let sort = format_sort_param(sort.as_deref());
     state
         .get(&format!(

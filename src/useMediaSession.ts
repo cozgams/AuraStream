@@ -66,7 +66,6 @@ export function useMediaSession({
     return () => {
       try {
         navigator.mediaSession.metadata = null;
-        navigator.mediaSession.playbackState = "none";
       } catch {
         // ignore
       }
@@ -75,14 +74,23 @@ export function useMediaSession({
 
   useEffect(() => {
     if (typeof window === "undefined" || !("mediaSession" in navigator)) return;
-    if (!active) return;
-
     try {
-      navigator.mediaSession.playbackState = paused ? "paused" : "playing";
+      navigator.mediaSession.playbackState = active ? (paused ? "paused" : "playing") : "none";
     } catch {
       // ignore
     }
   }, [active, paused]);
+
+  useEffect(() => {
+    return () => {
+      if (typeof window === "undefined" || !("mediaSession" in navigator)) return;
+      try {
+        navigator.mediaSession.playbackState = "none";
+      } catch {
+        // ignore
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined" || !("mediaSession" in navigator)) return;
