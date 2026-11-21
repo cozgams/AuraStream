@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useRef, useSyncExternalStore, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore, type RefObject } from "react";
 import Hls from "hls.js";
 import type { FragBufferedData, FragLoadedData, FragLoadingData } from "hls.js";
 import { copyText } from "./clipboard";
@@ -122,17 +122,17 @@ export function usePlayerDiagnostics(videoRef: RefObject<HTMLVideoElement | null
   const id = useRef<string>("");
   if (!id.current) id.current = `player-${++nextPlayer}`;
   const current = useRef(context); current.current = context;
-  const snapshot = () => {
-    const v = videoRef.current;
-    return { player: id.current, ...current.current, ...(v ? mediaSnapshot(v, hlsRef.current) : {}) };
-  };
-  const trace = (event: string, data: Data = {}) => {
-    if (!playbackLogEnabled()) return;
-    try { tracePlayback(event, { ...snapshot(), seek: pending.current?.id, ...data }); } catch { /* diagnostics must never interrupt playback */ }
-  };
   const pending = useRef<{ id: number; target: number; start: number; seeks: number; seeked: boolean } | null>(null);
   const seekSeq = useRef(0);
-  const requestSeek = (target: number, source: string) => {
+  const trace = useCallback((event: string, data: Data = {}) => {
+    if (!playbackLogEnabled()) return;
+    try {
+      const v = videoRef.current;
+      const snap = { player: id.current, ...current.current, ...(v ? mediaSnapshot(v, hlsRef.current) : {}) };
+      tracePlayback(event, { ...snap, seek: pending.current?.id, ...data });
+    } catch { /* diagnostics must never interrupt playback */ }
+  }, [videoRef, hlsRef]);
+  const requestSeek = useCallback((target: number, source: string) => {
     if (!playbackLogEnabled()) return;
     const previous = pending.current;
     if (previous) trace("seek.superseded", { seek: previous.id, next_target: round(target), elapsed_ms: Math.round(performance.now() - previous.start) });
@@ -142,7 +142,7 @@ export function usePlayerDiagnostics(videoRef: RefObject<HTMLVideoElement | null
       trace("seek.noop", { seek: seekSeq.current });
       pending.current = null;
     }
-  };
+  }, [trace, videoRef]);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -200,7 +200,7 @@ export function usePlayerDiagnostics(videoRef: RefObject<HTMLVideoElement | null
       if (frame != null) v.cancelVideoFrameCallback?.(frame);
     };
   }, []);
-  useEffect(() => { trace("player.context"); }, [context.active, context.view, context.video_id, context.episode, context.resource]);
+  useEffect(() => { trace("player.context"); }, [context.active, context.view, context.video_id, context.episode, context.resource, trace]);
   return { trace, requestSeek };
 }
 

@@ -310,7 +310,7 @@ fn build_client(host: &str, addrs: &[SocketAddr], route: &ProxyRoute) -> Result<
         let proxy = reqwest::Proxy::all(proxy).map_err(|_| "Invalid proxy address")?;
         builder = builder.no_proxy().proxy(proxy);
     }
-    builder.build().map_err(|_| " HTTP ".to_string())
+    builder.build().map_err(|_| "Failed to build HTTP client".to_string())
 }
 
 /// One immutable selection is used for DNS, cache identity and client creation.
@@ -405,12 +405,12 @@ async fn client_for_dns(raw: &str, public_dns: bool) -> Result<(url::Url, Arc<re
     let strict = network_policy::strict_security();
     let target = network_policy::parse_target_with_mode(raw, strict)?;
     let host = target.host_str().ok_or("Target missing hostname")?;
-    let port = target.port_or_known_default().ok_or("")?;
+    let port = target.port_or_known_default().ok_or("Target port invalid")?;
     let route = ProxyRoute::for_config(&crate::proxy::snapshot(), &target);
     let proxy = route.active;
     let key = client_key(strict, host, port, public_dns, &route);
     {
-        let cache = CLIENTS.lock().map_err(|_| "HTTP ")?;
+        let cache = CLIENTS.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(http) = cached_client(&cache, &key, Instant::now()) {
             return Ok((target, http));
         }
@@ -430,7 +430,7 @@ async fn client_for_dns(raw: &str, public_dns: bool) -> Result<(url::Url, Arc<re
     };
     let http = Arc::new(build_client(host, &addrs, &route)?);
     let now = Instant::now();
-    let mut cache = CLIENTS.lock().map_err(|_| "HTTP ")?;
+    let mut cache = CLIENTS.lock().unwrap_or_else(|e| e.into_inner());
     // Preserve already cached client if another worker inserted it concurrently.
     let http = cached_client(&cache, &key, now).unwrap_or(http);
     if !cache.get(&key).is_some_and(|(expires, _)| now < *expires) {
@@ -446,12 +446,9 @@ async fn client_for_dns(raw: &str, public_dns: bool) -> Result<(url::Url, Arc<re
 pub fn refresh_client() {
     // Builders still resolving DNS must not repopulate the new generation.
     CLIENT_GENERATION.fetch_add(1, Ordering::AcqRel);
-    if let Ok(mut cache) = CLIENTS.lock() {
-        cache.clear();
-    }
-    if let Ok(mut routes) = MEDIA_DNS_ROUTES.lock() {
-        *routes = crate::media_dns::Routes::default();
-    }
+    CLIENTS.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    *MEDIA_DNS_ROUTES.lock().unwrap_or_else(|e| e.into_inner()) =
+        crate::media_dns::Routes::default();
 }
 
 /// Execute HTTP GET request with DNS validation and proxy routing.
@@ -464,15 +461,40 @@ pub async fn get(
     get_with_dns(raw, timeout, accept, referer, false).await
 }
 
-/// Execute HTTP GET request with DNS validation, proxy routing, and optional Authorization header.
-pub async fn get_with_auth(
+/// Execute HTTP GET request with DNS validation, proxy routing, and custom User-Agent.
+pub async fn get_with_ua(
     raw: &str,
     timeout: Duration,
     accept: Option<&str>,
-    referer: Option<&str>,
-    auth: Option<&str>,
+    user_agent: Option<&str>,
 ) -> Result<reqwest::Response, String> {
-    get_with_dns_auth(raw, timeout, accept, referer, auth, false).await
+    get_with_dns_ua(raw, timeout, accept, None, user_agent, false).await
+}
+
+/// Execute a single-hop non-redirecting HTTP GET request and return status, target URL, and Location header.
+pub async fn get_redirect_location(
+    raw: &str,
+    timeout: Duration,
+    user_agent: Option<&str>,
+) -> Result<(reqwest::StatusCode, url::Url, Option<String>), String> {
+    tokio::time::timeout(timeout, async {
+        let initial = network_policy::parse_target(raw)?;
+        let (target, http) = client_for(initial.as_str()).await?;
+        let mut request = http.get(target.clone()).timeout(timeout);
+        if let Some(ua) = user_agent {
+            request = request.header("User-Agent", ua);
+        }
+        let response = request.send().await.map_err(|e| err_text(&e))?;
+        let status = response.status();
+        let location = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|h| h.to_str().ok())
+            .map(str::to_string);
+        Ok((status, target, location))
+    })
+    .await
+    .map_err(|_| "Request timed out".to_string())?
 }
 
 async fn get_with_dns(
@@ -482,15 +504,15 @@ async fn get_with_dns(
     referer: Option<&str>,
     public_dns: bool,
 ) -> Result<reqwest::Response, String> {
-    get_with_dns_auth(raw, timeout, accept, referer, None, public_dns).await
+    get_with_dns_ua(raw, timeout, accept, referer, None, public_dns).await
 }
 
-async fn get_with_dns_auth(
+async fn get_with_dns_ua(
     raw: &str,
     timeout: Duration,
     accept: Option<&str>,
     referer: Option<&str>,
-    auth: Option<&str>,
+    user_agent: Option<&str>,
     public_dns: bool,
 ) -> Result<reqwest::Response, String> {
     tokio::time::timeout(timeout, async {
@@ -510,8 +532,8 @@ async fn get_with_dns_auth(
             if let Some(value) = referer {
                 request = request.header("Referer", value);
             }
-            if let Some(value) = auth {
-                request = request.header("Authorization", value);
+            if let Some(value) = user_agent {
+                request = request.header("User-Agent", value);
             }
             let response = request.send().await.map_err(|e| err_text(&e))?;
             if !matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
@@ -569,10 +591,7 @@ pub fn heal_client(reason: &str) {
     if !is_proxy_error(reason) && !connectish {
         return;
     }
-    let mut last = match LAST_HEAL.lock() {
-        Ok(l) => l,
-        Err(_) => return,
-    };
+    let mut last = LAST_HEAL.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(t) = *last {
         if t.elapsed() < Duration::from_secs(3) {
             return;
@@ -707,7 +726,7 @@ async fn tcp_probe(addr: Option<SocketAddr>, timeout: Duration) -> Value {
             "mode": "direct_socket",
             "proxy_bypassed": true,
             "skipped": true,
-            "reason": "",
+            "reason": "No DNS resolution",
         });
     };
     let started = Instant::now();

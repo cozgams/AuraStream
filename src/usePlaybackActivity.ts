@@ -21,7 +21,7 @@ export function usePlaybackActivity(
     }
     wanted.current = true;
     const hls = hlsRef.current;
-    if (hls?.levels.length && !hls.loadingEnabled) hls.startLoad(v.currentTime);
+    if (hls?.levels.length && !hls.loadingEnabled) hls.startLoad(v.currentTime > 0 ? v.currentTime : -1);
     latest.current.trace("play.request", { source });
     v.play().then(() => {
       // The page may have changed while play() was pending.
@@ -46,7 +46,7 @@ export function usePlaybackActivity(
       // Allow background buffering so video finishes loading while user is in another app or tab
       latest.current.trace("page.suspended", { play_wanted: wanted.current });
     } else if (!previous.current) {
-      if (hls?.levels.length && !hls.loadingEnabled) hls.startLoad(v.currentTime);
+      if (hls?.levels.length && !hls.loadingEnabled) hls.startLoad(v.currentTime > 0 ? v.currentTime : -1);
       if (wanted.current && (hls?.levels.length || v.readyState > 0)) play("page_active", true);
     }
     previous.current = active;
@@ -55,6 +55,7 @@ export function usePlaybackActivity(
   useLayoutEffect(() => {
     const v = videoRef.current;
     if (!v) return;
+    mounted.current = true;
     const guard = () => {
       if (latest.current.active) return;
       latest.current.trace("play.blocked", { source: "media_event", inactive: true });

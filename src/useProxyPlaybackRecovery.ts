@@ -22,7 +22,7 @@ export function useProxyPlaybackRecovery(
     const retry = () => {
       const video = videoRef.current;
       const { src, activity, trace } = latest.current;
-      if (!src || !video) return;
+      if (!src || !video || src.startsWith("blob:")) return;
       // A second save during reloading must not replace the saved position with 0.
       const previous = pending.current?.src === src ? pending.current : null;
       pending.current = previous ?? {

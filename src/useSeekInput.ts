@@ -14,20 +14,24 @@ export function useSeekInput({ time, duration, enabled = true, resetKey, onSeek,
   const seekable = enabled && Number.isFinite(duration) && duration > 0;
   const release = () => {
     const p = pointer.current; pointer.current = null;
-    if (p?.el.hasPointerCapture(p.id)) p.el.releasePointerCapture(p.id);
+    if (!p) return;
+    try {
+      if (p.el.hasPointerCapture(p.id)) p.el.releasePointerCapture(p.id);
+    } catch { /* ignore detached/synthetic pointer capture errors */ }
   };
   const cancel = () => {
     const p = pointer.current;
     if (p) latest.current.onInteraction?.("cancel", p.moved ? "drag" : "click", p.target);
     release(); setPreview(null);
   };
-  useEffect(() => { cancel(); }, [seekable, duration, resetKey]);
+  useEffect(() => { cancel(); }, [seekable, resetKey]);
   useEffect(() => () => { release(); }, []);
   const targetAt = (e: PointerEvent<HTMLInputElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     return rect.width ? Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) * duration : 0;
   };
-  const displayTime = preview ?? time;
+  const rawDisplayTime = preview ?? time;
+  const displayTime = Number.isFinite(rawDisplayTime) ? rawDisplayTime : 0;
   return {
     time: displayTime,
     inputProps: {
@@ -40,7 +44,7 @@ export function useSeekInput({ time, duration, enabled = true, resetKey, onSeek,
         e.currentTarget.focus({ preventScroll: true });
         const target = targetAt(e);
         pointer.current = { id: e.pointerId, x: e.clientX, moved: false, target, el: e.currentTarget };
-        e.currentTarget.setPointerCapture(e.pointerId);
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore synthetic events */ }
         setPreview(target);
         latest.current.onInteraction?.("down", "pointer", time, target);
         latest.current.onInteraction?.("change", "click", target);

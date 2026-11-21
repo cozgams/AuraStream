@@ -32,6 +32,7 @@ export default function SubtitleSheet({
 }: Props) {
   const { t, toast } = useStore();
   const [styleConfig, setStyleConfig] = useState<SubtitleStyleConfig>(() => getSubtitleStyleConfig());
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -67,10 +68,11 @@ export default function SubtitleSheet({
   };
 
   const onSliderChange = (newPct: number) => {
+    const clamped = Number.isFinite(newPct) ? Math.max(5, Math.min(90, Math.round(newPct))) : 12;
     const updated: SubtitleStyleConfig = {
       ...styleConfig,
       position: "custom",
-      customOffsetPercent: newPct,
+      customOffsetPercent: clamped,
     };
     setStyleConfig(updated);
     setSubtitleStyleConfig(updated);
@@ -136,8 +138,8 @@ export default function SubtitleSheet({
   }[size] || "text-[11.5px]";
 
   const currentPosition = styleConfig.position || "bottom";
-  const currentPercent =
-    typeof styleConfig.customOffsetPercent === "number"
+  const rawPercent =
+    typeof styleConfig.customOffsetPercent === "number" && Number.isFinite(styleConfig.customOffsetPercent)
       ? styleConfig.customOffsetPercent
       : currentPosition === "top"
       ? 85
@@ -146,6 +148,7 @@ export default function SubtitleSheet({
       : currentPosition === "above_title"
       ? 32
       : 12;
+  const currentPercent = Math.max(5, Math.min(90, Math.round(rawPercent)));
 
   return (
     <Sheet open={open} onClose={onClose} label={t("captions.title")}>

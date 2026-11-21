@@ -4,7 +4,7 @@
  * Features:
  * 1. Hero drama header with cover artwork, episode pill, quality badge, and close button.
  * 2. Interactive quick episode strip to switch the single download target.
- * 3. Elevated single episode download card with live progress and export action.
+ * 3. Elevated single episode download card with live progress, pause/resume/cancel/retry, and export action.
  * 4. High-contrast full season batch download card with total size estimation.
  * 5. Device storage meter with high-speed turbo engine status.
  */
@@ -13,7 +13,18 @@ import React, { useEffect, useState } from "react";
 import { Sheet } from "./ui";
 import { Button } from "./ios/controls";
 import { Loader } from "./ios/effects";
-import { IAlertTriangle, IBoltF, ICheck, IClose, IDownload, IExport, IHardDrive, IFilm } from "../icons";
+import {
+  IAlertTriangle,
+  IBoltF,
+  ICheck,
+  IClose,
+  IDownload,
+  IExport,
+  IFilm,
+  IHardDrive,
+  IPauseF,
+  IPlayF,
+} from "../icons";
 import { useStore } from "../store";
 import {
   isCellularConnection,
@@ -23,11 +34,15 @@ import {
   isEpisodeDownloaded,
   isEpisodeDownloading,
   getEpisodeDownloadProgress,
-  startEpisodeDownload,
+  subscribeDownloadProgress,
+  pauseDownload,
+  resumeDownload,
+  cancelDownload,
+  formatBytes,
+  type ActiveDownloadProgress,
 } from "../offline/downloadService";
 import { formatDramaTitle } from "../subtitles/dramaTranslator";
-import { cover, api } from "../api";
-import { resolveStreamUrlForQuality } from "../offline/downloadService";
+import { cover } from "../api";
 
 interface DownloadChoiceSheetProps {
   isOpen: boolean;
@@ -62,8 +77,9 @@ export default function DownloadChoiceSheet({
 }: DownloadChoiceSheetProps) {
   const { t, toast } = useStore();
   const [freeSpaceFormatted, setFreeSpaceFormatted] = useState<string>("");
-  const [usedPercent, setUsedPercent] = useState<number>(45);
+  const [usedPercent, setUsedPercent] = useState<number | null>(null);
   const [targetEpisode, setTargetEpisode] = useState<number>(currentEpisode);
+  const [activeMap, setActiveMap] = useState<Map<string, ActiveDownloadProgress>>(() => new Map());
 
   const isCellular = isCellularConnection();
   const wifiOnly = isWifiOnlyDownloadEnabled();
@@ -71,27 +87,51 @@ export default function DownloadChoiceSheet({
   const totalEps = Math.max(1, totalEpisodes || 10);
   const allEpisodes = Array.from({ length: totalEps }, (_, i) => i + 1);
 
-  // Sync targetEpisode when sheet opens with current episode
   useEffect(() => {
-    if (isOpen) {
-      setTargetEpisode(currentEpisode);
-      void getDetailedStorageStats().then((stats) => {
-        setFreeSpaceFormatted(stats.freeFormatted || "Available");
-        setUsedPercent(Math.min(98, Math.max(5, stats.percentUsed || 40)));
-      });
-    }
+    if (!isOpen) return;
+    return subscribeDownloadProgress((map) => setActiveMap(new Map(map)));
+  }, [isOpen]);
+
+  // Sync targetEpisode and honest storage metrics when sheet opens
+  useEffect(() => {
+    if (!isOpen) return;
+    let alive = true;
+    setTargetEpisode(currentEpisode);
+    void getDetailedStorageStats().then((stats) => {
+      if (!alive) return;
+      setFreeSpaceFormatted(stats.freeFormatted || "Available");
+      setUsedPercent(
+        stats.percentUsed != null && Number.isFinite(stats.percentUsed)
+          ? Math.min(98, Math.max(0, Math.round(stats.percentUsed)))
+          : null
+      );
+    });
+    return () => {
+      alive = false;
+    };
   }, [isOpen, currentEpisode]);
 
   if (!isOpen) return null;
 
+  const targetKey = `${videoId}_${targetEpisode}`;
+  const targetActiveProg = activeMap.get(targetKey);
   const isTargetDownloaded =
-    targetEpisode === currentEpisode ? propIsDownloaded : isEpisodeDownloaded(videoId, targetEpisode);
+    (targetEpisode === currentEpisode && propIsDownloaded) || isEpisodeDownloaded(videoId, targetEpisode);
   const isTargetDownloading =
-    targetEpisode === currentEpisode ? propIsDownloading : isEpisodeDownloading(videoId, targetEpisode);
+    Boolean(targetActiveProg && targetActiveProg.status === "downloading") ||
+    (!targetActiveProg && (targetEpisode === currentEpisode ? propIsDownloading : isEpisodeDownloading(videoId, targetEpisode)));
+  const isTargetPaused = !isTargetDownloaded && targetActiveProg?.status === "paused";
+  const isTargetError = !isTargetDownloaded && targetActiveProg?.status === "error";
   const targetProgress =
-    targetEpisode === currentEpisode ? propDownloadProgress : getEpisodeDownloadProgress(videoId, targetEpisode);
+    targetActiveProg?.progress ??
+    (targetEpisode === currentEpisode ? propDownloadProgress : getEpisodeDownloadProgress(videoId, targetEpisode));
 
-  const handleSingleAction = async () => {
+  const estEpMbNum = quality === "standard" ? 18.0 : 14.5;
+  const estEpMb = estEpMbNum.toFixed(1);
+  const qualityLabel = quality === "standard" ? "H.264 HD" : quality === "hevc" ? "HEVC HD" : "Auto HD";
+  const estimatedBatchFormatted = formatBytes(totalEps * estEpMbNum * 1024 * 1024);
+
+  const handleSingleAction = () => {
     if (isTargetDownloaded) {
       onClose();
       onOpenExport?.(targetEpisode);
@@ -101,12 +141,20 @@ export default function DownloadChoiceSheet({
       onClose();
       return;
     }
+    if (isTargetPaused && targetActiveProg?.streamUrl) {
+      if (isCellular && wifiOnly) {
+        toast("Cellular connection detected. 'Download on Wi-Fi Only' is enabled.", "info");
+        return;
+      }
+      void resumeDownload(targetActiveProg.id, false).catch((e) => {
+        toast((e as Error)?.message || "Failed to resume download", "info");
+      });
+      return;
+    }
 
     onClose();
     onStartSingleDownload(targetEpisode);
   };
-
-  const estimatedBatchGb = ((totalEps * 14.5) / 1024).toFixed(1);
 
   return (
     <Sheet open={isOpen} onClose={onClose} label="Offline Downloads">
@@ -141,9 +189,9 @@ export default function DownloadChoiceSheet({
                   Ep. {targetEpisode} of {totalEps}
                 </span>
                 <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 text-[11px] font-semibold">
-                  {quality.toUpperCase()} Full HD
+                  {qualityLabel}
                 </span>
-                <span className="text-[11.5px] text-mut">~14.5 MB</span>
+                <span className="text-[11.5px] text-mut">~{estEpMb} MB</span>
               </div>
             </div>
           </div>
@@ -163,7 +211,7 @@ export default function DownloadChoiceSheet({
             <span className="text-amber-600 dark:text-amber-400 font-semibold lowercase">tap to switch target</span>
           </div>
           <div className="flex gap-1.5 overflow-x-auto py-1 scrollbar-none snap-x">
-            {allEpisodes.slice(0, 40).map((ep) => {
+            {allEpisodes.map((ep) => {
               const active = ep === targetEpisode;
               const saved = isEpisodeDownloaded(videoId, ep);
               return (
@@ -191,12 +239,24 @@ export default function DownloadChoiceSheet({
         <div className="flex flex-col gap-3 pt-1">
           {/* CARD 1: Single Episode Download */}
           <div
+            role="button"
+            tabIndex={0}
             onClick={handleSingleAction}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                handleSingleAction();
+              }
+            }}
             className={`w-full p-4 rounded-[20px] border text-left pressable transition-all flex items-center justify-between gap-3.5 shadow-xs cursor-pointer active:scale-[0.985] ${
               isTargetDownloaded
                 ? "bg-emerald-500/10 border-emerald-500/40 text-on hover:bg-emerald-500/15"
                 : isTargetDownloading
                 ? "bg-amber-500/10 border-amber-500/40 text-on hover:bg-amber-500/15"
+                : isTargetError
+                ? "bg-red-500/10 border-red-500/35 text-on hover:bg-red-500/15"
+                : isTargetPaused
+                ? "bg-s2/90 border-amber-500/30 text-on hover:bg-s2"
                 : "bg-white dark:bg-neutral-800/90 border-amber-500/35 hover:border-amber-500/60 hover:bg-amber-500/5 text-on"
             }`}
           >
@@ -207,6 +267,10 @@ export default function DownloadChoiceSheet({
                     ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
                     : isTargetDownloading
                     ? "bg-amber-500/20 text-amber-600"
+                    : isTargetError
+                    ? "bg-red-500/20 text-red-500"
+                    : isTargetPaused
+                    ? "bg-amber-500/15 text-amber-600"
                     : "bg-gradient-to-br from-amber-500 to-amber-600 text-white shadow-amber-500/25"
                 }`}
               >
@@ -214,6 +278,10 @@ export default function DownloadChoiceSheet({
                   <ICheck size={24} strokeWidth={2.8} />
                 ) : isTargetDownloading ? (
                   <Loader className="w-6 h-6 spinner text-amber-600" />
+                ) : isTargetError ? (
+                  <IAlertTriangle size={22} />
+                ) : isTargetPaused ? (
+                  <IPauseF size={20} />
                 ) : (
                   <IDownload size={22} />
                 )}
@@ -225,6 +293,10 @@ export default function DownloadChoiceSheet({
                       ? `Episode ${targetEpisode} Saved`
                       : isTargetDownloading
                       ? `Downloading Ep. ${targetEpisode}`
+                      : isTargetPaused
+                      ? `Episode ${targetEpisode} Paused`
+                      : isTargetError
+                      ? `Episode ${targetEpisode} Failed`
                       : `Download Episode ${targetEpisode}`}
                   </span>
                   {isTargetDownloaded ? (
@@ -243,20 +315,87 @@ export default function DownloadChoiceSheet({
                   {isTargetDownloaded
                     ? "Saved permanently · Tap to export MP4 to gallery"
                     : isTargetDownloading
-                    ? `Downloading · ${targetProgress}% completed`
-                    : "Ultra-fast single episode download (~14.5 MB)"}
+                    ? targetActiveProg && targetActiveProg.downloadedBytes > 0
+                      ? `Downloading · ${targetProgress}% (${formatBytes(targetActiveProg.downloadedBytes)}${
+                          targetActiveProg.totalBytes > 0 ? ` / ${formatBytes(targetActiveProg.totalBytes)}` : ""
+                        } · ${targetActiveProg.speedFormatted}${
+                          targetActiveProg.etaFormatted && targetActiveProg.etaFormatted !== "--"
+                            ? ` · ${targetActiveProg.etaFormatted} left`
+                            : ""
+                        })`
+                      : "Connecting to stream..."
+                    : isTargetPaused
+                    ? `Paused · ${targetProgress}%${
+                        targetActiveProg?.downloadedBytes ? ` (${formatBytes(targetActiveProg.downloadedBytes)})` : ""
+                      } · Tap to resume`
+                    : isTargetError
+                    ? targetActiveProg?.error || "Download failed · Tap to retry"
+                    : `Ultra-fast single episode download (~${estEpMb} MB)`}
                 </div>
               </div>
             </div>
 
-            <div className="shrink-0 flex items-center ml-2">
+            <div className="shrink-0 flex items-center gap-1.5 ml-2">
               {isTargetDownloaded ? (
                 <div className="px-3.5 py-2 rounded-xl bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[12.5px] font-bold flex items-center gap-1.5 shadow-xs whitespace-nowrap">
                   <IExport size={14} /> Export
                 </div>
               ) : isTargetDownloading ? (
-                <div className="text-amber-600 text-[13px] font-bold tabular-nums whitespace-nowrap bg-amber-500/15 px-3 py-1.5 rounded-xl">
-                  {targetProgress}%
+                <>
+                  <div className="text-amber-600 text-[13px] font-bold tabular-nums whitespace-nowrap bg-amber-500/15 px-2.5 py-1.5 rounded-xl">
+                    {targetActiveProg && targetActiveProg.downloadedBytes > 0 ? `${targetProgress}%` : "..."}
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Pause download"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      pauseDownload(targetKey);
+                    }}
+                    className="w-8 h-8 rounded-xl bg-s3 hover:bg-s4/30 text-on flex items-center justify-center pressable"
+                  >
+                    <IPauseF size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Cancel download"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      cancelDownload(targetKey);
+                    }}
+                    className="w-8 h-8 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-red-500 flex items-center justify-center pressable"
+                  >
+                    <IClose size={13} />
+                  </button>
+                </>
+              ) : isTargetPaused ? (
+                <>
+                  <button
+                    type="button"
+                    aria-label="Resume download"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSingleAction();
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-amber-500 text-white text-[12px] font-bold flex items-center gap-1 pressable"
+                  >
+                    <IPlayF size={12} /> Resume
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Cancel download"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      cancelDownload(targetKey);
+                    }}
+                    className="w-8 h-8 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-red-500 flex items-center justify-center pressable"
+                  >
+                    <IClose size={13} />
+                  </button>
+                </>
+              ) : isTargetError ? (
+                <div className="px-3.5 py-2 rounded-xl bg-red-500 text-white text-[12.5px] font-bold flex items-center gap-1.5 shadow-sm whitespace-nowrap">
+                  Retry
                 </div>
               ) : (
                 <div className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-white text-[13px] font-bold flex items-center gap-1.5 shadow-sm whitespace-nowrap">
@@ -268,9 +407,18 @@ export default function DownloadChoiceSheet({
 
           {/* CARD 2: Batch Download (Full Season) */}
           <div
+            role="button"
+            tabIndex={0}
             onClick={() => {
               onClose();
               onOpenBatchDownload();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClose();
+                onOpenBatchDownload();
+              }
             }}
             className="w-full p-4 rounded-[20px] border border-border/90 bg-white dark:bg-neutral-800/90 hover:bg-s2 text-on text-left pressable transition-all flex items-center justify-between gap-3.5 shadow-xs cursor-pointer active:scale-[0.985]"
           >
@@ -286,7 +434,7 @@ export default function DownloadChoiceSheet({
                   </span>
                 </div>
                 <div className="text-[12px] text-mut mt-0.5 leading-snug">
-                  All {totalEps} episodes (~{estimatedBatchGb} GB) · Background sequential queue
+                  All {totalEps} episodes (~{estimatedBatchFormatted}) · Background sequential queue
                 </div>
               </div>
             </div>
@@ -323,7 +471,7 @@ export default function DownloadChoiceSheet({
           <div className="w-full h-2 rounded-full bg-s4/60 overflow-hidden">
             <div
               className="h-full bg-gradient-to-r from-amber-500 to-amber-600 rounded-full transition-all duration-300"
-              style={{ width: `${usedPercent}%` }}
+              style={{ width: `${usedPercent ?? 0}%` }}
             />
           </div>
           <div className="text-[10.5px] text-mut leading-tight flex items-center gap-1.5">

@@ -17,46 +17,57 @@ export function decodeHtmlEntities(text: string): string {
     .replace(/&nbsp;/g, " ")
     .replace(/&#(\d+);/g, (_, dec) => {
       try {
-        return String.fromCharCode(parseInt(dec, 10));
+        const code = parseInt(dec, 10);
+        return Number.isFinite(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : _;
       } catch {
         return _;
       }
     })
     .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
       try {
-        return String.fromCharCode(parseInt(hex, 16));
+        const code = parseInt(hex, 16);
+        return Number.isFinite(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : _;
       } catch {
         return _;
       }
     });
 }
 
+function tryParseTimestamp(ts: string): number | null {
+  if (!ts || typeof ts !== "string") return null;
+  const clean = ts.trim().replace(",", ".");
+  if (!clean) return null;
+  if (/^\d+(?:\.\d+)?$/.test(clean)) {
+    const val = parseFloat(clean);
+    return Number.isFinite(val) && val >= 0 ? val : null;
+  }
+  if (/^\d+:\d{1,2}(?:\.\d+)?$/.test(clean)) {
+    const [m, s] = clean.split(":");
+    const total = parseFloat(m) * 60 + parseFloat(s);
+    return Number.isFinite(total) && total >= 0 ? total : null;
+  }
+  if (/^\d+:\d{1,2}:\d{1,2}(?:\.\d+)?$/.test(clean)) {
+    const [h, m, s] = clean.split(":");
+    const total = parseFloat(h) * 3600 + parseFloat(m) * 60 + parseFloat(s);
+    return Number.isFinite(total) && total >= 0 ? total : null;
+  }
+  return null;
+}
+
 /**
  * Parses timestamp string (00:01:23.456 or 01:23.456 or 00:01:23,456) into seconds
  */
 export function parseTimestamp(ts: string): number {
-  const clean = ts.trim().replace(",", ".");
-  const parts = clean.split(":");
-  if (parts.length === 3) {
-    const hours = parseFloat(parts[0]);
-    const minutes = parseFloat(parts[1]);
-    const seconds = parseFloat(parts[2]);
-    return hours * 3600 + minutes * 60 + seconds;
-  }
-  if (parts.length === 2) {
-    const minutes = parseFloat(parts[0]);
-    const seconds = parseFloat(parts[1]);
-    return minutes * 60 + seconds;
-  }
-  return parseFloat(clean) || 0;
+  return tryParseTimestamp(ts) ?? 0;
 }
 
 /**
  * Parses standard WebVTT or SRT format text into SubtitleCue[]
  */
 export function parseVtt(content: string): SubtitleCue[] {
+  if (!content || typeof content !== "string") return [];
   const cues: SubtitleCue[] = [];
-  const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const normalized = content.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const blocks = normalized.split(/\n\s*\n/);
 
   let idCounter = 1;
@@ -65,8 +76,17 @@ export function parseVtt(content: string): SubtitleCue[] {
     const lines = block.trim().split("\n");
     if (!lines.length) continue;
 
-    // Skip "WEBVTT" header block
-    if (lines[0].toUpperCase().startsWith("WEBVTT") || lines[0].startsWith("NOTE")) {
+    // Skip "WEBVTT", "NOTE", "STYLE", "REGION" header/metadata blocks
+    const head = lines[0].trim().toUpperCase();
+    if (
+      head.startsWith("WEBVTT") ||
+      head === "NOTE" ||
+      head.startsWith("NOTE ") ||
+      head === "STYLE" ||
+      head.startsWith("STYLE ") ||
+      head === "REGION" ||
+      head.startsWith("REGION ")
+    ) {
       continue;
     }
 
@@ -80,9 +100,11 @@ export function parseVtt(content: string): SubtitleCue[] {
     }
 
     const timeParts = lines[timeLineIdx].split("-->");
-    const start = parseTimestamp(timeParts[0]);
-    const parsedEnd = parseTimestamp((timeParts[1] || "").trim().split(/\s+/)[0] || "");
-    const end = parsedEnd > start ? parsedEnd : start + 1.0;
+    const parsedStart = tryParseTimestamp(timeParts[0]);
+    if (parsedStart === null) continue;
+    const start = parsedStart;
+    const parsedEnd = tryParseTimestamp((timeParts[1] || "").trim().split(/\s+/)[0] || "");
+    const end = parsedEnd !== null && parsedEnd > start ? parsedEnd : start + 1.0;
 
     const textLines = lines
       .slice(timeLineIdx + 1)

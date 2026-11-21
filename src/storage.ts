@@ -9,6 +9,7 @@ export const STORAGE_KEYS = {
   subtitleSize: "aurastream_subtitle_size",
   downloads: "aurastream_offline_episodes_v1",
   activeDownloads: "aurastream_active_downloads_v1",
+  localUser: "aurastream_local_user_v1",
 } as const;
 
 export type StorageKey = typeof STORAGE_KEYS[keyof typeof STORAGE_KEYS];
@@ -25,7 +26,65 @@ const LEGACY_KEYS: Record<StorageKey, string[]> = {
   aurastream_subtitle_size: [],
   aurastream_offline_episodes_v1: ["hghubx_offline_episodes_v1", "hghub_offline_episodes_v1"],
   aurastream_active_downloads_v1: ["hghubx_active_downloads_v1"],
+  aurastream_local_user_v1: [],
 };
+
+const NATIVE_SAVE_DEBOUNCE_MS = 800;
+let nativeCache: Record<string, string> | null = null;
+let nativeDirty = false;
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function getNativeBridge(): { loadAppState?: () => string; saveAppState?: (data: string) => boolean } | null {
+  if (typeof window === "undefined") return null;
+  return (window as unknown as { AuraNativeExport?: { loadAppState?: () => string; saveAppState?: (data: string) => boolean } }).AuraNativeExport ?? null;
+}
+
+function ensureNativeCache(): Record<string, string> | null {
+  if (nativeCache !== null) return nativeCache;
+  const bridge = getNativeBridge();
+  if (typeof bridge?.loadAppState !== "function") return null;
+  const parsed: Record<string, string> = {};
+  try {
+    const raw = bridge.loadAppState();
+    if (raw) {
+      const stateObj = JSON.parse(raw);
+      if (stateObj && typeof stateObj === "object") {
+        for (const [k, v] of Object.entries(stateObj)) {
+          if (v === undefined || v === null) continue;
+          parsed[k] = typeof v === "string" ? v : JSON.stringify(v);
+        }
+      }
+    }
+  } catch {
+    // ignore corrupt native backup
+  }
+  nativeCache = parsed;
+  return nativeCache;
+}
+
+export function flushNativeStateSync(): void {
+  if (flushTimer !== null) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  if (!nativeDirty || !nativeCache) return;
+  const bridge = getNativeBridge();
+  if (typeof bridge?.saveAppState !== "function") return;
+  nativeDirty = false;
+  try {
+    bridge.saveAppState(JSON.stringify(nativeCache));
+  } catch {
+    nativeDirty = true;
+  }
+}
+
+function scheduleNativeFlush(): void {
+  if (flushTimer !== null) clearTimeout(flushTimer);
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    flushNativeStateSync();
+  }, NATIVE_SAVE_DEBOUNCE_MS);
+}
 
 /**
  * Proactively verifies and synchronizes all persisted keys from native disk backup
@@ -34,21 +93,15 @@ const LEGACY_KEYS: Record<StorageKey, string[]> = {
 export function initStorageBackupSync(): void {
   if (typeof window === "undefined") return;
   try {
-    const bridge = (window as any).AuraNativeExport;
-    if (typeof bridge?.loadAppState === "function") {
-      const raw = bridge.loadAppState();
-      if (!raw) return;
-      const stateObj = JSON.parse(raw);
-      if (!stateObj || typeof stateObj !== "object") return;
-      for (const [k, v] of Object.entries(stateObj)) {
-        if (!v) continue;
-        const strVal = typeof v === "string" ? v : JSON.stringify(v);
-        try {
-          if (localStorage.getItem(k) === null) {
-            localStorage.setItem(k, strVal);
-          }
-        } catch { /* ignore */ }
-      }
+    const cache = ensureNativeCache();
+    if (!cache) return;
+    for (const [k, v] of Object.entries(cache)) {
+      if (!v) continue;
+      try {
+        if (localStorage.getItem(k) === null) {
+          localStorage.setItem(k, v);
+        }
+      } catch { /* ignore */ }
     }
   } catch {
     // ignore
@@ -59,6 +112,13 @@ export function initStorageBackupSync(): void {
 if (typeof window !== "undefined") {
   initStorageBackupSync();
   window.addEventListener("focus", initStorageBackupSync);
+  window.addEventListener("visibilitychange", () => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      flushNativeStateSync();
+    }
+  });
+  window.addEventListener("pagehide", flushNativeStateSync);
+  window.addEventListener("beforeunload", flushNativeStateSync);
 }
 
 /** Reads with new key priority, smoothly migrating previous version storage and native disk backup. */
@@ -89,23 +149,13 @@ export function readStorage(key: StorageKey): string | null {
     }
 
     // Native internal disk backup fallback if localStorage was cleared
-    if (typeof window !== "undefined") {
-      const bridge = (window as any).AuraNativeExport;
-      if (typeof bridge?.loadAppState === "function") {
-        const raw = bridge.loadAppState();
-        if (raw) {
-          try {
-            const stateObj = JSON.parse(raw);
-            if (stateObj && stateObj[key] !== undefined) {
-              const val = typeof stateObj[key] === "string" ? stateObj[key] : JSON.stringify(stateObj[key]);
-              try {
-                localStorage.setItem(key, val);
-              } catch { /* ignore */ }
-              return val;
-            }
-          } catch { /* ignore */ }
-        }
-      }
+    const cache = ensureNativeCache();
+    if (cache && cache[key] !== undefined) {
+      const val = cache[key];
+      try {
+        localStorage.setItem(key, val);
+      } catch { /* ignore */ }
+      return val;
     }
 
     return null;
@@ -121,16 +171,32 @@ export function writeStorage(key: StorageKey, value: string): void {
   } catch { /* ignore */ }
 
   try {
-    if (typeof window !== "undefined") {
-      const bridge = (window as any).AuraNativeExport;
-      if (typeof bridge?.saveAppState === "function") {
-        let stateObj: Record<string, string> = {};
-        try {
-          const raw = bridge.loadAppState();
-          if (raw) stateObj = JSON.parse(raw);
-        } catch { /* ignore */ }
-        stateObj[key] = value;
-        bridge.saveAppState(JSON.stringify(stateObj));
+    const bridge = getNativeBridge();
+    if (typeof bridge?.saveAppState === "function") {
+      const cache = ensureNativeCache() ?? (nativeCache = {});
+      if (cache[key] !== value) {
+        cache[key] = value;
+        nativeDirty = true;
+        scheduleNativeFlush();
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+/** Removes key from localStorage and schedules removal from Android native disk backup. */
+export function removeStorage(key: StorageKey): void {
+  try {
+    localStorage.removeItem(key);
+  } catch { /* ignore */ }
+
+  try {
+    const bridge = getNativeBridge();
+    if (typeof bridge?.saveAppState === "function") {
+      const cache = ensureNativeCache();
+      if (cache && key in cache) {
+        delete cache[key];
+        nativeDirty = true;
+        scheduleNativeFlush();
       }
     }
   } catch { /* ignore */ }

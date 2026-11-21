@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.media.MediaScannerConnection
@@ -12,21 +13,24 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.MediaStore
 import android.util.Base64
-import android.util.Rational
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 import androidx.core.content.FileProvider
+import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 
 class MainActivity : TauriActivity() {
+  private val exportLock = Any()
   private var currentOutputStream: FileOutputStream? = null
   private var currentExportFile: File? = null
   var lastExportedUri: Uri? = null
@@ -34,7 +38,124 @@ class MainActivity : TauriActivity() {
   var autoPipEnabled: Boolean = false
   private var wakeLock: PowerManager.WakeLock? = null
   var activeDownloadCount: Int = 0
+  @Volatile
   var isAppInForeground: Boolean = true
+  @Volatile
+  var serviceStartRequested: Boolean = false
+
+  private val stateLock = Any()
+  private val stateDiskLock = Any()
+  private var pendingAppState: String? = null
+  private var stateVersion: Long = 0L
+  private var persistedStateVersion: Long = 0L
+  private var stateHandlerThread: HandlerThread? = null
+  private var stateHandler: Handler? = null
+  private val stateFlushRunnable = Runnable { writePendingAppStateToDisk() }
+
+  private fun ensureStateHandler(): Handler? {
+    synchronized(stateLock) {
+      if (stateHandler == null) {
+        val thread = HandlerThread("AuraStateBackup")
+        thread.start()
+        stateHandlerThread = thread
+        stateHandler = Handler(thread.looper)
+      }
+      return stateHandler
+    }
+  }
+
+  private fun scheduleAppStateFlush() {
+    val handler = ensureStateHandler() ?: return
+    handler.removeCallbacks(stateFlushRunnable)
+    handler.postDelayed(stateFlushRunnable, 600L)
+  }
+
+  private fun flushAppStateAsync() {
+    val handler = synchronized(stateLock) { stateHandler } ?: return
+    handler.removeCallbacks(stateFlushRunnable)
+    handler.post(stateFlushRunnable)
+  }
+
+  private fun flushAppStateSync() {
+    val handler = synchronized(stateLock) { stateHandler }
+    handler?.removeCallbacks(stateFlushRunnable)
+    writePendingAppStateToDisk()
+  }
+
+  private fun quitStateHandlerThread() {
+    val thread = synchronized(stateLock) {
+      stateHandler?.removeCallbacks(stateFlushRunnable)
+      stateHandler = null
+      val t = stateHandlerThread
+      stateHandlerThread = null
+      t
+    }
+    try {
+      thread?.quitSafely()
+    } catch (_: Exception) {}
+  }
+
+  private fun writePendingAppStateToDisk() {
+    val snapshot: Pair<String, Long>? = synchronized(stateLock) {
+      val data = pendingAppState
+      if (data != null && stateVersion > persistedStateVersion) {
+        data to stateVersion
+      } else {
+        null
+      }
+    }
+    if (snapshot == null) return
+    val (data, version) = snapshot
+    synchronized(stateDiskLock) {
+      try {
+        val file = File(filesDir, "app_state_backup.json")
+        val tmpFile = File(filesDir, "app_state_backup.json.tmp")
+        val bakFile = File(filesDir, "app_state_backup.json.bak")
+        tmpFile.writeText(data, Charsets.UTF_8)
+        if (tmpFile.exists() && tmpFile.length() > 0) {
+          if (file.exists()) {
+            try { file.copyTo(bakFile, overwrite = true) } catch (_: Exception) {}
+          }
+          if (!tmpFile.renameTo(file)) {
+            tmpFile.copyTo(file, overwrite = true)
+            tmpFile.delete()
+          }
+        }
+        synchronized(stateLock) {
+          if (version > persistedStateVersion) {
+            persistedStateVersion = version
+          }
+        }
+      } catch (e: Exception) {
+        e.printStackTrace()
+      }
+    }
+  }
+
+  private fun cleanupExportsDir(olderThanMs: Long) {
+    try {
+      val exportsDir = File(cacheDir, "exports")
+      if (!exportsDir.exists() || !exportsDir.isDirectory) return
+      val now = System.currentTimeMillis()
+      val activePath = synchronized(exportLock) { currentExportFile?.absolutePath }
+      exportsDir.listFiles()?.forEach { f ->
+        if (f.isFile && f.absolutePath != activePath) {
+          if (olderThanMs <= 0L || (now - f.lastModified()) > olderThanMs) {
+            try { f.delete() } catch (_: Exception) {}
+          }
+        }
+      }
+    } catch (_: Exception) {}
+  }
+
+  private fun closeCurrentExportStream() {
+    synchronized(exportLock) {
+      try {
+        currentOutputStream?.close()
+      } catch (_: Exception) {}
+      currentOutputStream = null
+    }
+  }
 
   @Synchronized
   fun acquireWakeLock() {
@@ -61,6 +182,7 @@ class MainActivity : TauriActivity() {
   }
 
   fun startDownloadService(title: String = "Episode", subtitle: String = "Downloading...", count: Int = 1) {
+    serviceStartRequested = true
     try {
       val intent = Intent(this, AuraDownloadService::class.java).apply {
         action = AuraDownloadService.ACTION_START
@@ -74,35 +196,42 @@ class MainActivity : TauriActivity() {
         startService(intent)
       }
     } catch (e: Exception) {
-      e.printStackTrace()
+      serviceStartRequested = false
+      android.util.Log.w("AuraStream", "startDownloadService rejected: ${e.message}")
     }
   }
 
-  fun updateDownloadService(progress: Int, speed: String, size: String, title: String, subtitle: String, count: Int = 1) {
-    try {
-      val intent = Intent(this, AuraDownloadService::class.java).apply {
-        action = AuraDownloadService.ACTION_UPDATE
-        putExtra(AuraDownloadService.EXTRA_TITLE, title)
-        putExtra(AuraDownloadService.EXTRA_SUBTITLE, subtitle)
-        putExtra(AuraDownloadService.EXTRA_PROGRESS, progress)
-        putExtra(AuraDownloadService.EXTRA_SPEED, speed)
-        putExtra(AuraDownloadService.EXTRA_SIZE, size)
-        putExtra(AuraDownloadService.EXTRA_COUNT, count)
-      }
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        startForegroundService(intent)
+  fun updateDownloadService(id: Int, progress: Int, speed: String, size: String, title: String, subtitle: String, count: Int = 1) {
+    val clamped = progress.coerceIn(0, 100)
+    AuraDownloadService.upsertDownload(id, title, subtitle, clamped, speed, size)
+    if (AuraDownloadService.isRunning) {
+      val svc = AuraDownloadService.instance
+      if (svc != null) {
+        svc.refreshNotification(count)
       } else {
-        startService(intent)
+        try {
+          val intent = Intent(this, AuraDownloadService::class.java).apply {
+            action = AuraDownloadService.ACTION_UPDATE
+            putExtra(AuraDownloadService.EXTRA_ID, id)
+            putExtra(AuraDownloadService.EXTRA_TITLE, title)
+            putExtra(AuraDownloadService.EXTRA_SUBTITLE, subtitle)
+            putExtra(AuraDownloadService.EXTRA_PROGRESS, clamped)
+            putExtra(AuraDownloadService.EXTRA_SPEED, speed)
+            putExtra(AuraDownloadService.EXTRA_SIZE, size)
+            putExtra(AuraDownloadService.EXTRA_COUNT, count)
+          }
+          startService(intent)
+        } catch (_: Exception) {}
       }
-    } catch (_: Exception) {}
+    } else if (isAppInForeground && !serviceStartRequested && count > 0) {
+      startDownloadService(title, subtitle, count)
+    }
   }
 
   fun stopDownloadService() {
+    serviceStartRequested = false
     try {
-      val intent = Intent(this, AuraDownloadService::class.java).apply {
-        action = AuraDownloadService.ACTION_STOP
-      }
-      startService(intent)
+      stopService(Intent(this, AuraDownloadService::class.java))
     } catch (_: Exception) {}
   }
 
@@ -114,6 +243,7 @@ class MainActivity : TauriActivity() {
     android.util.Log.i("AuraStream", "MainActivity.onCreate called")
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    cleanupExportsDir(0L)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       try {
         setPictureInPictureParams(PictureInPictureParams.Builder().setAutoEnterEnabled(false).build())
@@ -127,7 +257,7 @@ class MainActivity : TauriActivity() {
     super.onResume()
     isAppInForeground = true
     try {
-      // Clear any ongoing download notifications while actively inside the app
+      // Clear non-ongoing download notifications while actively inside the app
       val notificationManager = androidx.core.app.NotificationManagerCompat.from(this)
       notificationManager.cancelAll()
     } catch (_: Exception) {}
@@ -144,9 +274,10 @@ class MainActivity : TauriActivity() {
       // If downloads are in progress, keep WebView active and timers running in background
       if (activeDownloadCount > 0) {
         currentWebView?.onResume()
+        currentWebView?.resumeTimers()
       }
-      currentWebView?.resumeTimers()
     } catch (_: Exception) {}
+    flushAppStateAsync()
   }
 
   override fun onStop() {
@@ -160,12 +291,18 @@ class MainActivity : TauriActivity() {
       }
       android.webkit.CookieManager.getInstance().flush()
     } catch (_: Exception) {}
+    flushAppStateAsync()
   }
 
   override fun onDestroy() {
     super.onDestroy()
     releaseWakeLock()
-    stopDownloadService()
+    closeCurrentExportStream()
+    flushAppStateSync()
+    quitStateHandlerThread()
+    if (!isChangingConfigurations) {
+      stopDownloadService()
+    }
   }
 
   private fun createDownloadNotificationChannel() {
@@ -187,7 +324,7 @@ class MainActivity : TauriActivity() {
 
   private fun requestNotificationPermission() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-      if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+      if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
         requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
       }
     }
@@ -195,7 +332,7 @@ class MainActivity : TauriActivity() {
 
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
-    WebView.setWebContentsDebuggingEnabled(true)
+    WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
     currentWebView = webView
     webView.settings.domStorageEnabled = true
     webView.settings.databaseEnabled = true
@@ -234,7 +371,7 @@ class MainActivity : TauriActivity() {
         caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) &&
           !caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) &&
           !caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)
-      } catch (e: Exception) {
+      } catch (_: Exception) {
         false
       }
     }
@@ -260,18 +397,32 @@ class MainActivity : TauriActivity() {
     }
 
     @JavascriptInterface
+    fun setOrientation(landscape: Boolean) {
+      activity.runOnUiThread {
+        activity.requestedOrientation = if (landscape) {
+          ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        } else {
+          ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+      }
+    }
+
+    @JavascriptInterface
     fun setDownloadActiveCount(count: Int) {
       activity.runOnUiThread {
         val prev = activity.activeDownloadCount
         activity.activeDownloadCount = maxOf(0, count)
         if (activity.activeDownloadCount > 0) {
           activity.acquireWakeLock()
-          if (!AuraDownloadService.isRunning) {
+          if (!AuraDownloadService.isRunning && !activity.serviceStartRequested) {
             activity.startDownloadService("Episode", "Downloading offline...", activity.activeDownloadCount)
+          } else {
+            AuraDownloadService.instance?.refreshNotification(activity.activeDownloadCount)
           }
           activity.currentWebView?.onResume()
           activity.currentWebView?.resumeTimers()
-        } else if (prev > 0) {
+        } else if (prev > 0 || AuraDownloadService.isRunning || activity.serviceStartRequested) {
+          AuraDownloadService.clearDownloads()
           activity.stopDownloadService()
           activity.releaseWakeLock()
         }
@@ -290,70 +441,44 @@ class MainActivity : TauriActivity() {
     @JavascriptInterface
     fun updateDownloadNotification(id: Int, title: String, subtitle: String, progress: Int, speedFormatted: String, fileSizeFormatted: String = "") {
       activity.runOnUiThread {
+        val clampedProgress = progress.coerceIn(0, 100)
+        AuraDownloadService.upsertDownload(id, title, subtitle, clampedProgress, speedFormatted, fileSizeFormatted)
         if (activity.activeDownloadCount > 0) {
-          activity.updateDownloadService(progress, speedFormatted, fileSizeFormatted, title, subtitle, activity.activeDownloadCount)
+          activity.updateDownloadService(id, clampedProgress, speedFormatted, fileSizeFormatted, title, subtitle, activity.activeDownloadCount)
         }
       }
-      // Never show popups or heads-up notifications while inside the app
-      if (activity.isAppInForeground) {
-        return
-      }
-      activity.runOnUiThread {
-        try {
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-              activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            return@runOnUiThread
-          }
-          val notificationManager = androidx.core.app.NotificationManagerCompat.from(activity)
-          val intent = Intent(activity, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-          }
-          val pendingIntent = PendingIntent.getActivity(
-            activity,
-            id,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
-          )
-          val details = if (fileSizeFormatted.isNotEmpty() && speedFormatted.isNotEmpty()) "$fileSizeFormatted · $speedFormatted" else if (fileSizeFormatted.isNotEmpty()) fileSizeFormatted else speedFormatted
-          val text = if (details.isNotEmpty()) "$subtitle · $progress% ($details)" else "$subtitle · $progress%"
-          val builder = androidx.core.app.NotificationCompat.Builder(activity, DOWNLOAD_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle("Downloading: $title")
-            .setContentText(text)
-            .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(text))
-            .setProgress(100, progress, progress <= 0)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setSilent(true)
-            .setContentIntent(pendingIntent)
-            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_MIN)
-          notificationManager.notify(id, builder.build())
-        } catch (e: Exception) {
-          e.printStackTrace()
-        }
-      }
+    }
+
+    private fun safeNotifId(id: Int): Int {
+      return if (id == AuraDownloadService.NOTIFICATION_ID) id + 1_000_000 else id
     }
 
     @JvmOverloads
     @JavascriptInterface
     fun showDownloadCompleteNotification(id: Int, title: String, subtitle: String, fileSizeFormatted: String = "") {
-      // Never show popup or status notification while user is actively inside the app
-      if (activity.isAppInForeground) {
-        return
-      }
       activity.runOnUiThread {
         try {
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-              activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+          AuraDownloadService.removeDownload(id)
+          if (AuraDownloadService.isRunning && activity.activeDownloadCount > 0) {
+            AuraDownloadService.instance?.refreshNotification(activity.activeDownloadCount)
+          }
+          val notifId = safeNotifId(id)
+          val notificationManager = androidx.core.app.NotificationManagerCompat.from(activity)
+          notificationManager.cancel(notifId)
+          // Never show popup or status notification while user is actively inside the app
+          if (activity.isAppInForeground) {
             return@runOnUiThread
           }
-          val notificationManager = androidx.core.app.NotificationManagerCompat.from(activity)
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+              activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            return@runOnUiThread
+          }
           val intent = Intent(activity, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
           }
           val pendingIntent = PendingIntent.getActivity(
             activity,
-            id,
+            notifId,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
           )
@@ -368,7 +493,7 @@ class MainActivity : TauriActivity() {
             .setOngoing(false)
             .setAutoCancel(true)
             .setPriority(androidx.core.app.NotificationCompat.PRIORITY_DEFAULT)
-          notificationManager.notify(id, builder.build())
+          notificationManager.notify(notifId, builder.build())
         } catch (e: Exception) {
           e.printStackTrace()
         }
@@ -379,8 +504,12 @@ class MainActivity : TauriActivity() {
     fun cancelDownloadNotification(id: Int) {
       activity.runOnUiThread {
         try {
+          AuraDownloadService.removeDownload(id)
+          if (AuraDownloadService.isRunning && activity.activeDownloadCount > 0) {
+            AuraDownloadService.instance?.refreshNotification(activity.activeDownloadCount)
+          }
           val notificationManager = androidx.core.app.NotificationManagerCompat.from(activity)
-          notificationManager.cancel(id)
+          notificationManager.cancel(safeNotifId(id))
         } catch (e: Exception) {
           e.printStackTrace()
         }
@@ -405,25 +534,30 @@ class MainActivity : TauriActivity() {
         }
         val primaryDir = dirs.getOrNull(0) ?: activity.filesDir
         val primaryFree = primaryDir.freeSpace
-        """{"hasSdCard":$hasRemovableSd,"sdCardPath":"$sdCardPath","sdFreeBytes":$sdFreeBytes,"primaryFreeBytes":$primaryFree}"""
-      } catch (e: Exception) {
-        """{"hasSdCard":false,"sdCardPath":"","sdFreeBytes":0,"primaryFreeBytes":0}"""
+        JSONObject().apply {
+          put("hasSdCard", hasRemovableSd)
+          put("sdCardPath", sdCardPath)
+          put("sdFreeBytes", sdFreeBytes)
+          put("primaryFreeBytes", primaryFree)
+        }.toString()
+      } catch (_: Exception) {
+        JSONObject().apply {
+          put("hasSdCard", false)
+          put("sdCardPath", "")
+          put("sdFreeBytes", 0L)
+          put("primaryFreeBytes", 0L)
+        }.toString()
       }
     }
 
     @JavascriptInterface
     fun saveAppState(data: String): Boolean {
       return try {
-        val file = File(activity.filesDir, "app_state_backup.json")
-        val tmpFile = File(activity.filesDir, "app_state_backup.json.tmp")
-        val bakFile = File(activity.filesDir, "app_state_backup.json.bak")
-        tmpFile.writeText(data, Charsets.UTF_8)
-        if (tmpFile.exists() && tmpFile.length() > 0) {
-          if (file.exists()) {
-            try { file.copyTo(bakFile, overwrite = true) } catch (_: Exception) {}
-          }
-          tmpFile.renameTo(file)
+        synchronized(activity.stateLock) {
+          activity.pendingAppState = data
+          activity.stateVersion += 1L
         }
+        activity.scheduleAppStateFlush()
         true
       } catch (e: Exception) {
         e.printStackTrace()
@@ -433,19 +567,23 @@ class MainActivity : TauriActivity() {
 
     @JavascriptInterface
     fun loadAppState(): String {
-      return try {
-        val file = File(activity.filesDir, "app_state_backup.json")
-        val tmpFile = File(activity.filesDir, "app_state_backup.json.tmp")
-        val bakFile = File(activity.filesDir, "app_state_backup.json.bak")
-        when {
-          file.exists() && file.length() > 0 -> file.readText(Charsets.UTF_8)
-          tmpFile.exists() && tmpFile.length() > 0 -> tmpFile.readText(Charsets.UTF_8)
-          bakFile.exists() && bakFile.length() > 0 -> bakFile.readText(Charsets.UTF_8)
-          else -> ""
+      val cached = synchronized(activity.stateLock) { activity.pendingAppState }
+      if (cached != null) return cached
+      return synchronized(activity.stateDiskLock) {
+        try {
+          val file = File(activity.filesDir, "app_state_backup.json")
+          val tmpFile = File(activity.filesDir, "app_state_backup.json.tmp")
+          val bakFile = File(activity.filesDir, "app_state_backup.json.bak")
+          when {
+            file.exists() && file.length() > 0 -> file.readText(Charsets.UTF_8)
+            tmpFile.exists() && tmpFile.length() > 0 -> tmpFile.readText(Charsets.UTF_8)
+            bakFile.exists() && bakFile.length() > 0 -> bakFile.readText(Charsets.UTF_8)
+            else -> ""
+          }
+        } catch (e: Exception) {
+          e.printStackTrace()
+          ""
         }
-      } catch (e: Exception) {
-        e.printStackTrace()
-        ""
       }
     }
 
@@ -469,6 +607,7 @@ class MainActivity : TauriActivity() {
           val effect = when (type) {
             "heavy" -> VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK)
             "medium" -> VibrationEffect.createPredefined(VibrationEffect.EFFECT_DOUBLE_CLICK)
+            "light", "selection" -> VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK)
             else -> VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK)
           }
           vibrator.vibrate(effect)
@@ -476,115 +615,180 @@ class MainActivity : TauriActivity() {
           val duration = when (type) {
             "heavy" -> 35L
             "medium" -> 20L
-            else -> 10L
+            "light", "selection" -> 6L
+            else -> 12L
           }
-          @Suppress("DEPRECATION")
-          vibrator.vibrate(duration)
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createOneShot(duration, VibrationEffect.DEFAULT_AMPLITUDE))
+          } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(duration)
+          }
         }
       } catch (e: Exception) {
         e.printStackTrace()
+      }
+    }
+
+    private fun mimeTypeForFileName(displayName: String): String {
+      return when {
+        displayName.endsWith(".srt", ignoreCase = true) -> "application/x-subrip"
+        displayName.endsWith(".vtt", ignoreCase = true) -> "text/vtt"
+        displayName.endsWith(".ass", ignoreCase = true) ||
+          displayName.endsWith(".ssa", ignoreCase = true) ||
+          displayName.endsWith(".txt", ignoreCase = true) -> "text/plain"
+        displayName.endsWith(".ts", ignoreCase = true) -> "video/mp2t"
+        else -> "video/mp4"
       }
     }
 
     @JavascriptInterface
     fun beginExport(fileName: String): Boolean {
-      return try {
-        val exportsDir = File(activity.cacheDir, "exports")
-        if (!exportsDir.exists()) {
-          exportsDir.mkdirs()
+      return synchronized(activity.exportLock) {
+        try {
+          try {
+            activity.currentOutputStream?.close()
+          } catch (_: Exception) {}
+          activity.currentOutputStream = null
+          activity.currentExportFile = null
+
+          activity.cleanupExportsDir(30 * 60 * 1000L)
+
+          val exportsDir = File(activity.cacheDir, "exports")
+          if (!exportsDir.exists()) {
+            exportsDir.mkdirs()
+          }
+          val sanitized = fileName.replace("[^a-zA-Z0-9._-]".toRegex(), "_").trim('_')
+          val safeFileName = if (sanitized.isEmpty()) "export_${System.currentTimeMillis()}.mp4" else sanitized
+          val file = File(exportsDir, safeFileName)
+          if (file.exists()) {
+            file.delete()
+          }
+          activity.currentExportFile = file
+          activity.currentOutputStream = FileOutputStream(file)
+          true
+        } catch (e: Exception) {
+          e.printStackTrace()
+          activity.currentOutputStream = null
+          activity.currentExportFile = null
+          false
         }
-        val safeFileName = fileName.replace("[^a-zA-Z0-9._-]".toRegex(), "_")
-        val file = File(exportsDir, safeFileName)
-        if (file.exists()) {
-          file.delete()
-        }
-        activity.currentExportFile = file
-        activity.currentOutputStream = FileOutputStream(file)
-        true
-      } catch (e: Exception) {
-        e.printStackTrace()
-        false
       }
     }
 
     @JavascriptInterface
     fun writeChunk(base64Chunk: String): Boolean {
-      return try {
-        val bytes = Base64.decode(base64Chunk, Base64.DEFAULT)
-        activity.currentOutputStream?.write(bytes)
-        true
-      } catch (e: Exception) {
-        e.printStackTrace()
-        false
+      return synchronized(activity.exportLock) {
+        try {
+          val stream = activity.currentOutputStream ?: return@synchronized false
+          val bytes = Base64.decode(base64Chunk, Base64.DEFAULT)
+          stream.write(bytes)
+          true
+        } catch (e: Exception) {
+          e.printStackTrace()
+          false
+        }
       }
     }
 
     @JavascriptInterface
     fun finishExport(fileName: String, dramaTitle: String, action: String): String {
-      return try {
-        activity.currentOutputStream?.flush()
-        activity.currentOutputStream?.close()
-        activity.currentOutputStream = null
-
-        val file = activity.currentExportFile ?: return "ERROR: No active file"
-
-        when (action) {
-          "save", "save_movies" -> {
-            val safeName = if (fileName.contains(".")) fileName else "$fileName.mp4"
-            val savedUri = saveToMediaStore(file, safeName, "Movies/AuraStream")
-            if (savedUri != null) {
-              activity.lastExportedUri = savedUri
-              try { file.delete() } catch (_: Exception) {}
-              "SUCCESS:Movies/AuraStream/$safeName"
-            } else {
-              "SAVED_LOCAL:${file.absolutePath}"
-            }
+      return synchronized(activity.exportLock) {
+        try {
+          val stream = activity.currentOutputStream
+          try {
+            stream?.flush()
+          } finally {
+            try {
+              stream?.close()
+            } catch (_: Exception) {}
+            activity.currentOutputStream = null
           }
-          "save_downloads" -> {
-            val safeName = if (fileName.contains(".")) fileName else "$fileName.mp4"
-            val savedUri = saveToDownloads(file, safeName)
-            if (savedUri != null) {
-              activity.lastExportedUri = savedUri
-              try { file.delete() } catch (_: Exception) {}
-              "SUCCESS:Download/AuraStream/$safeName"
-            } else {
-              "SAVED_LOCAL:${file.absolutePath}"
+
+          val file = activity.currentExportFile ?: return@synchronized "ERROR: No active file"
+          activity.currentExportFile = null
+
+          when (action) {
+            "save", "save_movies" -> {
+              val safeName = if (fileName.contains(".")) fileName else "$fileName.mp4"
+              val savedUri = saveToMediaStore(file, safeName, "Movies/AuraStream")
+              if (savedUri != null) {
+                activity.lastExportedUri = savedUri
+                try { file.delete() } catch (_: Exception) {}
+                "SUCCESS:Movies/AuraStream/$safeName"
+              } else {
+                "SAVED_LOCAL:${file.absolutePath}"
+              }
             }
-          }
-          "save_sdcard" -> {
-            val safeName = if (fileName.contains(".")) fileName else "$fileName.mp4"
-            val sdPath = saveToSdCard(file, safeName)
-            if (sdPath != null) {
-              try { file.delete() } catch (_: Exception) {}
-              "SUCCESS:SDCard/AuraStream/$safeName"
-            } else {
-              val fallbackUri = saveToDownloads(file, safeName)
-              if (fallbackUri != null) {
-                activity.lastExportedUri = fallbackUri
+            "save_downloads" -> {
+              val safeName = if (fileName.contains(".")) fileName else "$fileName.mp4"
+              val savedUri = saveToDownloads(file, safeName)
+              if (savedUri != null) {
+                activity.lastExportedUri = savedUri
                 try { file.delete() } catch (_: Exception) {}
                 "SUCCESS:Download/AuraStream/$safeName"
               } else {
                 "SAVED_LOCAL:${file.absolutePath}"
               }
             }
-          }
-          "share" -> {
-            activity.runOnUiThread {
-              shareVideoFile(file, dramaTitle)
+            "save_sdcard" -> {
+              val safeName = if (fileName.contains(".")) fileName else "$fileName.mp4"
+              val sdFile = saveToSdCard(file, safeName)
+              if (sdFile != null) {
+                try {
+                  activity.lastExportedUri = FileProvider.getUriForFile(
+                    activity,
+                    "${activity.packageName}.fileprovider",
+                    sdFile
+                  )
+                } catch (_: Exception) {
+                  activity.lastExportedUri = Uri.fromFile(sdFile)
+                }
+                try { file.delete() } catch (_: Exception) {}
+                "SUCCESS:SDCard/AuraStream/$safeName"
+              } else {
+                val fallbackUri = saveToDownloads(file, safeName)
+                if (fallbackUri != null) {
+                  activity.lastExportedUri = fallbackUri
+                  try { file.delete() } catch (_: Exception) {}
+                  "SUCCESS:Download/AuraStream/$safeName"
+                } else {
+                  "SAVED_LOCAL:${file.absolutePath}"
+                }
+              }
             }
-            "SHARED:${file.name}"
-          }
-          "open" -> {
-            activity.runOnUiThread {
-              openInExternalPlayer(file)
+            "share" -> {
+              try {
+                activity.lastExportedUri = FileProvider.getUriForFile(
+                  activity,
+                  "${activity.packageName}.fileprovider",
+                  file
+                )
+              } catch (_: Exception) {}
+              activity.runOnUiThread {
+                shareVideoFile(file, dramaTitle)
+              }
+              "SHARED:${file.name}"
             }
-            "OPENED:${file.name}"
+            "open" -> {
+              try {
+                activity.lastExportedUri = FileProvider.getUriForFile(
+                  activity,
+                  "${activity.packageName}.fileprovider",
+                  file
+                )
+              } catch (_: Exception) {}
+              activity.runOnUiThread {
+                openInExternalPlayer(file)
+              }
+              "OPENED:${file.name}"
+            }
+            else -> "UNKNOWN_ACTION"
           }
-          else -> "UNKNOWN_ACTION"
+        } catch (e: Exception) {
+          e.printStackTrace()
+          "ERROR:${e.message}"
         }
-      } catch (e: Exception) {
-        e.printStackTrace()
-        "ERROR:${e.message}"
       }
     }
 
@@ -596,15 +800,29 @@ class MainActivity : TauriActivity() {
     @JavascriptInterface
     fun openInGallery(pathOrUri: String?): Boolean {
       return try {
-        val targetUri = when {
+        val targetUri: Uri? = when {
           !pathOrUri.isNullOrEmpty() && (pathOrUri.startsWith("content://") || pathOrUri.startsWith("file://")) -> Uri.parse(pathOrUri)
+          !pathOrUri.isNullOrEmpty() && File(pathOrUri).exists() -> {
+            FileProvider.getUriForFile(
+              activity,
+              "${activity.packageName}.fileprovider",
+              File(pathOrUri)
+            )
+          }
           activity.lastExportedUri != null -> activity.lastExportedUri
           else -> null
         }
 
+        val resolvedMime = if (targetUri != null) {
+          activity.contentResolver.getType(targetUri)
+            ?: mimeTypeForFileName(pathOrUri ?: targetUri.lastPathSegment ?: "video.mp4")
+        } else {
+          "video/*"
+        }
+
         val intent = Intent(Intent.ACTION_VIEW).apply {
           if (targetUri != null) {
-            setDataAndType(targetUri, "video/mp4")
+            setDataAndType(targetUri, resolvedMime)
           } else {
             setDataAndType(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, "video/*")
           }
@@ -615,7 +833,7 @@ class MainActivity : TauriActivity() {
         chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         activity.startActivity(chooser)
         true
-      } catch (e: Exception) {
+      } catch (_: Exception) {
         try {
           val fallback = Intent(Intent.ACTION_VIEW).apply {
             type = "video/*"
@@ -635,16 +853,19 @@ class MainActivity : TauriActivity() {
     @JavascriptInterface
     fun exportSubtitleText(fileName: String, content: String, action: String): String {
       return try {
+        activity.cleanupExportsDir(30 * 60 * 1000L)
         val exportsDir = File(activity.cacheDir, "exports")
         if (!exportsDir.exists()) exportsDir.mkdirs()
-        val safeFileName = fileName.replace("[^a-zA-Z0-9._-]".toRegex(), "_")
+        val sanitized = fileName.replace("[^a-zA-Z0-9._-]".toRegex(), "_").trim('_')
+        val safeFileName = if (sanitized.isEmpty()) "subtitle_${System.currentTimeMillis()}.srt" else sanitized
         val file = File(exportsDir, safeFileName)
         file.writeText(content, Charsets.UTF_8)
 
         val subDir = if (action == "save_downloads") "Download/AuraStream" else "Movies/AuraStream"
         val savedUri = saveToMediaStore(file, safeFileName, subDir)
-        try { file.delete() } catch (_: Exception) {}
         if (savedUri != null) {
+          activity.lastExportedUri = savedUri
+          try { file.delete() } catch (_: Exception) {}
           "SUCCESS:$subDir/$safeFileName"
         } else {
           "SAVED_LOCAL:${file.absolutePath}"
@@ -659,11 +880,7 @@ class MainActivity : TauriActivity() {
       val resolver = activity.contentResolver
       val isDownloads = subDir.startsWith("Download")
       val isSubtitle = displayName.endsWith(".srt", ignoreCase = true) || displayName.endsWith(".vtt", ignoreCase = true)
-      val mimeType = when {
-        displayName.endsWith(".srt", ignoreCase = true) -> "application/x-subrip"
-        displayName.endsWith(".vtt", ignoreCase = true) -> "text/vtt"
-        else -> "video/mp4"
-      }
+      val mimeType = mimeTypeForFileName(displayName)
       val contentValues = ContentValues().apply {
         put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
         put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
@@ -702,8 +919,8 @@ class MainActivity : TauriActivity() {
           sourceFile.inputStream().use { inStream ->
             inStream.copyTo(outStream)
           }
+          streamSuccess = true
         }
-        streamSuccess = true
       } finally {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
           if (streamSuccess) {
@@ -723,8 +940,9 @@ class MainActivity : TauriActivity() {
       return saveToMediaStore(sourceFile, displayName, "Download/AuraStream")
     }
 
-    private fun saveToSdCard(sourceFile: File, displayName: String): String? {
+    private fun saveToSdCard(sourceFile: File, displayName: String): File? {
       val externalDirs = activity.getExternalFilesDirs(null)
+      val mimeType = mimeTypeForFileName(displayName)
       for (i in 1 until externalDirs.size) {
         val d = externalDirs[i]
         if (d != null && Environment.isExternalStorageRemovable(d)) {
@@ -732,8 +950,8 @@ class MainActivity : TauriActivity() {
           if (!auraDir.exists()) auraDir.mkdirs()
           val dest = File(auraDir, displayName)
           sourceFile.copyTo(dest, overwrite = true)
-          MediaScannerConnection.scanFile(activity, arrayOf(dest.absolutePath), arrayOf("video/mp4"), null)
-          return dest.absolutePath
+          MediaScannerConnection.scanFile(activity, arrayOf(dest.absolutePath), arrayOf(mimeType), null)
+          return dest
         }
       }
       return null
@@ -747,7 +965,7 @@ class MainActivity : TauriActivity() {
           file
         )
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
-          type = "video/mp4"
+          type = mimeTypeForFileName(file.name)
           putExtra(Intent.EXTRA_STREAM, uri)
           putExtra(Intent.EXTRA_SUBJECT, title)
           putExtra(Intent.EXTRA_TEXT, "Watch $title on AuraStream")
@@ -769,7 +987,7 @@ class MainActivity : TauriActivity() {
           file
         )
         val viewIntent = Intent(Intent.ACTION_VIEW).apply {
-          setDataAndType(uri, "video/mp4")
+          setDataAndType(uri, mimeTypeForFileName(file.name))
           addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
           addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }

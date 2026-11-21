@@ -325,79 +325,119 @@ fn version_in(text: &str) -> String {
 pub async fn line_health() -> Result<Value, String> {
     Ok(crate::lines::health().await)
 }
-const GITHUB_READ_TOKEN: &str = "REDACTED_GITHUB_TOKEN";
-
 /// Compare GitHub Release tag with current version.
 #[tauri::command]
 pub async fn check_update() -> Result<Value, String> {
     let current = env!("CARGO_PKG_VERSION").to_string();
+    let ua = format!("AuraStream/{current}");
     let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
-    let auth = format!("token {}", GITHUB_READ_TOKEN);
-    let resp = crate::net::get_with_auth(
-        &url,
-        std::time::Duration::from_secs(12),
-        Some("application/vnd.github+json"),
-        None,
-        Some(&auth),
-    )
-    .await?;
+    let timeout = std::time::Duration::from_secs(12);
 
-    let status = resp.status();
+    if let Ok(resp) = crate::net::get_with_ua(
+        &url,
+        timeout,
+        Some("application/vnd.github+json"),
+        Some(&ua),
+    )
+    .await
+    {
+        let status = resp.status();
+        if status.as_u16() == 404 {
+            return Ok(json!({
+                "current": current, "latest": "", "has_update": false,
+                "url": format!("https://github.com/{REPO}/releases"),
+            }));
+        }
+        if status.is_success() {
+            if let Ok(v) = resp.json::<Value>().await {
+                let tag = v
+                    .get("tag_name")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let html = v
+                    .get("html_url")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("https://github.com/{REPO}/releases"));
+                let notes = v.get("body").and_then(|x| x.as_str()).unwrap_or("");
+                let latest = {
+                    let found = version_in(&tag);
+                    if found.is_empty() {
+                        tag.trim_start_matches(['v', 'V']).to_string()
+                    } else {
+                        found
+                    }
+                };
+                let assets = v.get("assets").and_then(Value::as_array).cloned().unwrap_or_default();
+                let asset = assets
+                    .iter()
+                    .filter_map(|a| {
+                        let name = a.get("name").and_then(Value::as_str)?;
+                        let url = a.get("browser_download_url").and_then(Value::as_str)?;
+                        Some((name.to_string(), url.to_string()))
+                    })
+                    .filter(|(n, _)| asset_rank(n) > 0)
+                    .max_by_key(|(n, _)| asset_rank(n));
+                return Ok(json!({
+                    "current": current,
+                    "latest": latest,
+                    "tag": tag,
+                    "has_update": !latest.is_empty() && is_newer(&latest, &current),
+                    "asset": asset.map(|(name, url)| json!({ "name": name, "url": url })),
+                    "url": html,
+                    "name": v.get("name").and_then(|x| x.as_str()).unwrap_or(""),
+                    "published_at": v.get("published_at").and_then(|x| x.as_str()).unwrap_or(""),
+                    "notes": notes.chars().take(800).collect::<String>(),
+                }));
+            }
+        }
+    }
+
+    // Fallback: single-hop redirect probe on GitHub web release URL (survives API rate limits)
+    let web_url = format!("https://github.com/{REPO}/releases/latest");
+    let (status, base_target, location) =
+        crate::net::get_redirect_location(&web_url, timeout, Some(&ua)).await?;
     if status.as_u16() == 404 {
-        // No release found
         return Ok(json!({
             "current": current, "latest": "", "has_update": false,
             "url": format!("https://github.com/{REPO}/releases"),
         }));
     }
-    if !status.is_success() {
-        return Err(format!("GitHub returned HTTP {status}"));
+    if let Some(loc) = location {
+        let resolved = crate::network_policy::redirect_target(&base_target, &loc)?;
+        let path = resolved.path();
+        if let Some(raw_tag) = path.split("/releases/tag/").nth(1) {
+            let tag = raw_tag.split(['?', '#', '/']).next().unwrap_or("").trim().to_string();
+            if !tag.is_empty() {
+                let latest = {
+                    let found = version_in(&tag);
+                    if found.is_empty() {
+                        tag.trim_start_matches(['v', 'V']).to_string()
+                    } else {
+                        found
+                    }
+                };
+                return Ok(json!({
+                    "current": current,
+                    "latest": latest,
+                    "tag": tag,
+                    "has_update": !latest.is_empty() && is_newer(&latest, &current),
+                    "asset": Value::Null,
+                    "url": resolved.to_string(),
+                    "name": "",
+                    "published_at": "",
+                    "notes": "",
+                }));
+            }
+        }
+        return Ok(json!({
+            "current": current, "latest": "", "has_update": false,
+            "url": format!("https://github.com/{REPO}/releases"),
+        }));
     }
 
-    let v: Value = resp.json().await.map_err(|e| crate::net::err_text(&e))?;
-    let tag = v
-        .get("tag_name")
-        .and_then(|x| x.as_str())
-        .unwrap_or("")
-        .to_string();
-    let html = v
-        .get("html_url")
-        .and_then(|x| x.as_str())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| format!("https://github.com/{REPO}/releases"));
-    let notes = v.get("body").and_then(|x| x.as_str()).unwrap_or("");
-    // Extract semver before comparing
-    let latest = {
-        let found = version_in(&tag);
-        if found.is_empty() {
-            tag.trim_start_matches(['v', 'V']).to_string()
-        } else {
-            found
-        }
-    };
-
-    // Select appropriate package asset for this platform
-    let assets = v.get("assets").and_then(Value::as_array).cloned().unwrap_or_default();
-    let asset = assets
-        .iter()
-        .filter_map(|a| {
-            let name = a.get("name").and_then(Value::as_str)?;
-            let url = a.get("browser_download_url").and_then(Value::as_str)?;
-            Some((name.to_string(), url.to_string()))
-        })
-        .filter(|(n, _)| asset_rank(n) > 0)
-        .max_by_key(|(n, _)| asset_rank(n));
-    Ok(json!({
-        "current": current,
-        "latest": latest,
-        "tag": tag,
-        "has_update": !latest.is_empty() && is_newer(&latest, &current),
-        "asset": asset.map(|(name, url)| json!({ "name": name, "url": url })),
-        "url": html,
-        "name": v.get("name").and_then(|x| x.as_str()).unwrap_or(""),
-        "published_at": v.get("published_at").and_then(|x| x.as_str()).unwrap_or(""),
-        "notes": notes.chars().take(800).collect::<String>(),
-    }))
+    Err(format!("GitHub update check failed (HTTP {status})"))
 }
 
 /// Open URL with system browser (http/https only).
@@ -455,7 +495,22 @@ pub async fn set_orientation(app: tauri::AppHandle, landscape: bool) -> Result<(
             request_ios_orientation(landscape);
         });
     }
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(target_os = "android")]
+    {
+        use tauri::Manager;
+        let script = if landscape {
+            "window.AuraNativeExport?.setOrientation?.(true)"
+        } else {
+            "window.AuraNativeExport?.setOrientation?.(false)"
+        };
+        if let Some(window) = app
+            .get_webview_window("main")
+            .or_else(|| app.webview_windows().into_values().next())
+        {
+            let _ = window.eval(script);
+        }
+    }
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
         let _ = (&app, landscape);
     }
@@ -751,6 +806,17 @@ pub async fn api_feed(state: State<'_, Api>, page: u32, size: u32) -> Result<Val
 /// Original channel video feed.
 /// Filter by category route:
 /// `/api/videos/category/{cate}?is_original=1`
+fn encode_query_component(value: &str) -> String {
+    url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
+}
+
+fn format_sort_param(sort: Option<&str>) -> String {
+    match sort.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(s) => format!("&sort={}", encode_query_component(s)),
+        None => String::new(),
+    }
+}
+
 #[tauri::command]
 pub async fn api_original_videos(
     state: State<'_, Api>,
@@ -759,14 +825,12 @@ pub async fn api_original_videos(
     size: u32,
     sort: Option<String>,
 ) -> Result<Value, String> {
-    let sort = match sort.as_deref() {
-        Some(s) if !s.trim().is_empty() => format!("&sort={s}"),
-        _ => String::new(),
-    };
+    let sort = format_sort_param(sort.as_deref());
     let path = if cate == "all" {
         format!("/api/videos?is_original=1&page={page}&size={size}{sort}")
     } else {
-        format!("/api/videos/category/{cate}?is_original=1&page={page}&size={size}{sort}")
+        let encoded_cate = encode_query_component(&cate);
+        format!("/api/videos/category/{encoded_cate}?is_original=1&page={page}&size={size}{sort}")
     };
     state.get(&path).await
 }
@@ -814,13 +878,11 @@ pub async fn api_category(
     size: u32,
     sort: Option<String>,
 ) -> Result<Value, String> {
-    let sort = match sort.as_deref() {
-        Some(s) if !s.trim().is_empty() => format!("&sort={s}"),
-        _ => String::new(),
-    };
+    let sort = format_sort_param(sort.as_deref());
+    let encoded_cate = encode_query_component(&cate);
     state
         .get(&format!(
-            "/api/videos/category/{cate}?page={page}&size={size}{sort}"
+            "/api/videos/category/{encoded_cate}?page={page}&size={size}{sort}"
         ))
         .await
 }
@@ -869,10 +931,7 @@ pub async fn api_posts(
     size: u32,
     sort: Option<String>,
 ) -> Result<Value, String> {
-    let sort = match sort.as_deref() {
-        Some(s) if !s.trim().is_empty() => format!("&sort={s}"),
-        _ => String::new(),
-    };
+    let sort = format_sort_param(sort.as_deref());
     state
         .get(&format!("/api/posts?page={page}&size={size}{sort}"))
         .await
@@ -1074,10 +1133,7 @@ pub async fn api_post_category(
     sort: Option<String>,
 ) -> Result<Value, String> {
     let encoded: String = url::form_urlencoded::byte_serialize(route.as_bytes()).collect();
-    let sort = match sort.as_deref() {
-        Some(s) if !s.trim().is_empty() => format!("&sort={s}"),
-        _ => String::new(),
-    };
+    let sort = format_sort_param(sort.as_deref());
     state
         .get(&format!(
             "/api/posts/category/{encoded}?page={page}&size={size}{sort}"

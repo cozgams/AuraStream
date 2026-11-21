@@ -28,12 +28,16 @@ if (!m) {
 }
 
 const [, major, minor, patch] = m.map(Number);
-if (minor > 999 || patch > 999) {
-  console.error("minor / patch exceeds 999");
+if (major > 99 || minor > 99 || patch > 99) {
+  console.error("major / minor / patch exceeds 99");
   process.exit(1);
 }
 // Ensure versionCode is always > 2001000 so Android OS never rejects the update as a downgrade
 const versionCode = 3_000_000 + major * 10_000 + minor * 100 + patch;
+if (versionCode > 2_100_000_000) {
+  console.error(`versionCode ${versionCode} exceeds Android maximum 2100000000`);
+  process.exit(1);
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");

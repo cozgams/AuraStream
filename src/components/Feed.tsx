@@ -102,7 +102,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [controlsLocked, setControlsLocked] = useState(false);
   const [rate, setRate] = useState(1);
   const [waiting, setWaiting] = useState(false);
-  const [bufferingSlow, setBufferingSlow] = useState(false);
   const [videoStarted, setVideoStarted] = useState(false);
   const [err, setErr] = useState("");
   const [panel, setPanel] = useState<"episodes" | "comments" | "article" | "detail" | "captions" | "more" | null>(null);
@@ -253,30 +252,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const hevcUrl = hevcUrls[playKey] || "";
   const playUrl = preferHevc && hevcUrl ? hevcUrl : mainUrl;
 
-  /* Slow buffering watchdog (> 5s waiting shows interactive recovery overlay) */
-  useEffect(() => {
-    if (active && waiting && !err && !paused) {
-      const timer = window.setTimeout(() => {
-        setBufferingSlow(true);
-      }, 5000);
-      return () => window.clearTimeout(timer);
-    } else {
-      setBufferingSlow(false);
-    }
-  }, [active, waiting, err, paused]);
-
-  const handleBufferingRetry = useCallback(() => {
-    setWaiting(false);
-    setBufferingSlow(false);
-    setErr("");
-    setPlayUrls((m) => {
-      const copy = { ...m };
-      delete copy[playKey];
-      return copy;
-    });
-    setProxyRetry((v) => v + 1);
-    videoRef.current?.reload?.();
-  }, [playKey]);
   useEffect(() => {
     const retry = () => {
       setErr("");
@@ -1461,10 +1436,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         }}
                         onDuration={onDurationTick}
                         onSize={(w, h) => setVsize((prev) => (prev.w === w && prev.h === h ? prev : { w, h }))}
-                        onPlaying={() => { setPaused(false); setWaiting(false); setBufferingSlow(false); setErr(""); setVideoStarted(true); }}
+                        onPlaying={() => { setPaused(false); setWaiting(false); setErr(""); setVideoStarted(true); }}
                         onPause={() => setPaused(true)}
                         onWaiting={() => setWaiting(true)}
-                        onStallTimeout={() => setBufferingSlow(true)}
                         onEnded={() => {
                           void checkAutoDeleteFinishedEpisode(curId, curEp);
                           let sleepTriggered = false;
@@ -1930,29 +1904,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                   <div className="w-12 h-12 rounded-full bg-black/60 backdrop-blur-md flex items-center justify-center border border-white/15 shadow-[0_8px_24px_rgba(0,0,0,0.5)]">
                     <Loader className="w-6 h-6 spinner text-primary" />
                   </div>
-                  {bufferingSlow && (
-                    <div className="mt-4 flex flex-col items-center gap-2.5 bg-black/80 backdrop-blur-xl border border-white/15 rounded-2xl px-5 py-3.5 shadow-[0_12px_32px_rgba(0,0,0,0.7)] pointer-events-auto a-rise max-w-[90%]">
-                      <div className="text-sm font-medium text-white/90 text-center tracking-wide">
-                        Buffering is slow · Tap to Retry
-                      </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <button
-                          type="button"
-                          onClick={handleBufferingRetry}
-                          className="px-3.5 py-1.5 rounded-full bg-primary text-black font-semibold text-xs transition-transform active:scale-95 shadow-md flex items-center gap-1.5 cursor-pointer"
-                        >
-                          Retry
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setLineOpen(true)}
-                          className="px-3.5 py-1.5 rounded-full bg-white/15 hover:bg-white/20 text-white font-medium text-xs transition-colors border border-white/10 active:scale-95 cursor-pointer"
-                        >
-                          Switch Line
-                        </button>
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
               {isActive && err && (
@@ -2084,29 +2035,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       <div className="w-12 h-12 rounded-full bg-black/60 backdrop-blur-md flex items-center justify-center border border-white/15 shadow-[0_8px_24px_rgba(0,0,0,0.5)]">
                         <Loader className="w-6 h-6 spinner text-primary" />
                       </div>
-                      {bufferingSlow && (
-                        <div className="mt-4 flex flex-col items-center gap-2.5 bg-black/80 backdrop-blur-xl border border-white/15 rounded-2xl px-5 py-3.5 shadow-[0_12px_32px_rgba(0,0,0,0.7)] pointer-events-auto a-rise max-w-[90%]">
-                          <div className="text-sm font-medium text-white/90 text-center tracking-wide">
-                            Buffering is slow · Tap to Retry
-                          </div>
-                          <div className="flex items-center gap-2 mt-1">
-                            <button
-                              type="button"
-                              onClick={handleBufferingRetry}
-                              className="px-3.5 py-1.5 rounded-full bg-primary text-black font-semibold text-xs transition-transform active:scale-95 shadow-md flex items-center gap-1.5 cursor-pointer"
-                            >
-                              Retry
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setLineOpen(true)}
-                              className="px-3.5 py-1.5 rounded-full bg-white/15 hover:bg-white/20 text-white font-medium text-xs transition-colors border border-white/10 active:scale-95 cursor-pointer"
-                            >
-                              Switch Line
-                            </button>
-                          </div>
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>

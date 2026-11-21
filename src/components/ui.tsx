@@ -35,7 +35,7 @@ export function Avatar({ hue = 250, icon, name, size = 40, ring = false, classNa
           className="w-full h-full object-cover"
         />
       ) : (
-        icon ?? <span style={{ fontSize: size * 0.42 }} className="leading-none">{(name || "H").replace(/^@/, "")[0].toUpperCase()}</span>
+        icon ?? <span style={{ fontSize: size * 0.42 }} className="leading-none">{((name || "").replace(/^@/, "").trim()[0] || "A").toUpperCase()}</span>
       )}
     </div>
   );
@@ -128,7 +128,7 @@ export function ToastHost() {
         ) : (
           <Surface key={t.id} className="a-toast pointer-events-auto flex items-center gap-2.5 max-w-full bg-s4/95 backdrop-blur-md rounded-(--r-sm) pl-3.5 pr-4 py-2.5 elev-3">
             {t.icon === "ok" && <ICheck size={16} className="text-mint shrink-0" />}
-            {(t.icon === "star" || t.icon === "heart") && <IStarF size={16} className="text-amber-400 shrink-0" />}
+            {(t.icon === "star" || t.icon === "heart") && <IStarF size={16} className="text-amber shrink-0" />}
             {t.icon === "info" && <ISparkF size={15} className="text-cyan shrink-0" />}
             <span className="text-[14px] text-on truncate">{t.msg}</span>
           </Surface>

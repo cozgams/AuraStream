@@ -38,7 +38,6 @@ type Props = {
   onPlaying?: () => void;
   onPause?: () => void;
   onWaiting?: () => void;
-  onStallTimeout?: () => void;
   onEnded?: () => void;
   onError?: (msg: string) => void;
   onClick?: () => void;
@@ -50,7 +49,7 @@ const safeVolume = (vol: number) => Math.max(0, Math.min(1, Number.isFinite(vol)
 /** Core video playback surface (HLS.js + HTMLVideoElement) */
 const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
   { src, poster, autoPlay = true, active = true, diagnosticContext = {}, muted = false, loop = false, fit = "contain", volume = 1, rate = 1,
-    onTime, onDuration, onSize, onPlaying, onPause, onWaiting, onStallTimeout, onEnded, onError, onClick, className = "" },
+    onTime, onDuration, onSize, onPlaying, onPause, onWaiting, onEnded, onError, onClick, className = "" },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -116,13 +115,18 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
       } else if (v) {
         try {
           const cur = v.currentTime;
+          if (cur > 0) {
+            v.addEventListener("loadedmetadata", () => {
+              if (!v.isConnected) return;
+              try { v.currentTime = cur; } catch { /* ignore */ }
+            }, { once: true });
+          }
           v.load();
-          v.currentTime = cur;
           v.play().catch(() => {});
         } catch { /* ignore */ }
       }
     },
-  }), []);
+  }), [trace]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -197,7 +201,10 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         if (!hls.loadingEnabled && activity.isActive()) hls.startLoad(resume?.time ?? -1);
         if (autoPlay && !resume) activity.play("manifest_autoplay", true);
       });
-      hls.on(Hls.Events.FRAG_BUFFERED, () => { recoverCountRef.current = 0; });
+      hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        recoverCountRef.current = 0;
+        if (recoverTimerRef.current) { window.clearTimeout(recoverTimerRef.current); recoverTimerRef.current = null; }
+      });
       hls.on(Hls.Events.ERROR, (_e, data) => {
         if (!data.fatal) {
           if (
@@ -214,6 +221,8 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
           const delay = 250 * recoverCountRef.current;
           if (recoverTimerRef.current) window.clearTimeout(recoverTimerRef.current);
           recoverTimerRef.current = window.setTimeout(() => {
+            recoverTimerRef.current = null;
+            if (hlsRef.current !== hls || !activity.isActive()) return;
             try {
               if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad(video.currentTime || -1);
               else hls.recoverMediaError();
@@ -222,6 +231,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         };
         if (data.type === Hls.ErrorTypes.NETWORK_ERROR && recoverCountRef.current < 4) { retry(); return; }
         if (data.type === Hls.ErrorTypes.MEDIA_ERROR && recoverCountRef.current < 4) { retry(); return; }
+        if (recoverTimerRef.current) { window.clearTimeout(recoverTimerRef.current); recoverTimerRef.current = null; }
         onError?.(`${data.type}/${data.details}`);
         hls.destroy();
         hlsRef.current = null;
@@ -270,7 +280,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
       const video = videoRef.current;
       if (!video) return;
 
-      const isPlaybackActive = active && autoPlay && !video.paused;
+      const isPlaybackActive = active && !video.paused && !video.ended;
       if (!isPlaybackActive) {
         lastAdvanceTimeRef.current = Date.now();
         stallStageRef.current = 0;
@@ -309,7 +319,6 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
             hls.startLoad(curTime || -1);
           } catch { /* ignore */ }
         }
-        onStallTimeout?.();
       }
 
       // > 8s stall watchdog: attempt recovery (hls.recoverMediaError() or reload)
@@ -331,19 +340,23 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
           }
         } else {
           try {
+            if (curTime > 0) {
+              video.addEventListener("loadedmetadata", () => {
+                if (!video.isConnected) return;
+                try { video.currentTime = curTime; } catch { /* ignore */ }
+              }, { once: true });
+            }
             video.load();
-            video.currentTime = curTime;
             video.play().catch(() => {});
           } catch { /* ignore */ }
         }
-        onStallTimeout?.();
       }
     }, 1000);
 
     return () => {
       window.clearInterval(interval);
     };
-  }, [active, autoPlay, onStallTimeout, trace]);
+  }, [active, trace]);
 
   const reapply = (v: HTMLVideoElement) => {
     v.volume = safeVolume(volume);
@@ -352,8 +365,22 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
   };
 
   const handleVideoError = () => {
-    if (hlsRef.current) return;
-    onError?.(mediaErrorMessage(videoRef.current?.error ?? null));
+    const err = videoRef.current?.error ?? null;
+    if (!err) return;
+    const hls = hlsRef.current;
+    if (hls && err.code === 3 && recoverCountRef.current < 4 && activity.isActive()) {
+      recoverCountRef.current += 1;
+      try {
+        hls.recoverMediaError();
+        return;
+      } catch { /* fall through to fatal */ }
+    }
+    if (recoverTimerRef.current) { window.clearTimeout(recoverTimerRef.current); recoverTimerRef.current = null; }
+    if (hls) {
+      hls.destroy();
+      hlsRef.current = null;
+    }
+    onError?.(mediaErrorMessage(err));
   };
 
   return (

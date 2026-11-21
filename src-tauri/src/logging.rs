@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::Mutex;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset};
 
+const MAX_DEBUG_LOG: u64 = 2 * 1024 * 1024;
 static DEBUG_WRITER: Mutex<()> = Mutex::new(());
 
 fn format_utc(at: OffsetDateTime) -> Result<String, String> {
@@ -18,7 +19,7 @@ pub(crate) fn utc_timestamp() -> Result<String, String> {
 }
 
 pub(crate) fn append_debug(dir: &Path, message: &str) -> Result<(), String> {
-    let _writer = DEBUG_WRITER.lock().map_err(|_| "Failed to acquire log lock")?;
+    let _writer = DEBUG_WRITER.lock().unwrap_or_else(|e| e.into_inner());
     fs::create_dir_all(dir).map_err(|_| "Failed to create log directory")?;
     let at = utc_timestamp()?;
     let prefix = format!("[{at}] [pid={}] ", std::process::id());
@@ -33,10 +34,20 @@ pub(crate) fn append_debug(dir: &Path, message: &str) -> Result<(), String> {
         record.push_str(&prefix);
         record.push('\n');
     }
+    let path = dir.join("debug.log");
+    if fs::metadata(&path).map(|m| m.len()).unwrap_or(0) + record.len() as u64 > MAX_DEBUG_LOG {
+        let previous = dir.join("debug.previous.log");
+        if previous.exists() {
+            let _ = fs::remove_file(&previous);
+        }
+        if path.exists() {
+            let _ = fs::rename(&path, previous);
+        }
+    }
     OpenOptions::new()
         .create(true)
         .append(true)
-        .open(dir.join("debug.log"))
+        .open(&path)
         .and_then(|mut f| f.write_all(record.as_bytes()))
         .map_err(|_| "Failed to write debug log".to_string())
 }

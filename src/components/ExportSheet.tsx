@@ -1,14 +1,26 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Sheet, Toggle } from "./ui";
 import { Button } from "./ios/controls";
 import { Loader } from "./ios/effects";
-import { ICheck, IClose, IDownload, IExport, IFilm, IFolder, IMessageSquare, ISdCard, IShare } from "../icons";
+import {
+  IAlertTriangle,
+  ICheck,
+  IClose,
+  IDownload,
+  IExport,
+  IFilm,
+  IFolder,
+  IMessageSquare,
+  ISdCard,
+  IShare,
+} from "../icons";
 import { useStore } from "../store";
 import {
   processEpisodeExport,
   processSubtitleExport,
   openInGallery,
   getDeviceStorageInfo,
+  isNativeExportSupported,
   type ExportAction,
   type StorageInfo,
 } from "../offline/exportService";
@@ -39,6 +51,12 @@ interface ExportSheetProps {
   batchItems?: ExportBatchItem[];
 }
 
+interface ExportBannerStatus {
+  kind: "success" | "error";
+  message: string;
+  showGallery: boolean;
+}
+
 export default function ExportSheet({
   isOpen,
   onClose,
@@ -53,8 +71,19 @@ export default function ExportSheet({
   const [exporting, setExporting] = useState<boolean>(false);
   const [progress, setProgress] = useState<number>(0);
   const [currentEpIndex, setCurrentEpIndex] = useState<number>(0);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [exportStatus, setExportStatus] = useState<ExportBannerStatus | null>(null);
   const [includeSubtitles, setIncludeSubtitles] = useState<boolean>(true);
+
+  const abortRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      abortRef.current?.abort();
+    };
+  }, []);
 
   const itemsToExport: ExportBatchItem[] =
     batchItems && batchItems.length > 0
@@ -71,22 +100,14 @@ export default function ExportSheet({
   useEffect(() => {
     if (isOpen) {
       setStorageInfo(getDeviceStorageInfo());
-      setSuccessMsg(null);
+      setExportStatus(null);
       setProgress(0);
+      setCurrentEpIndex(0);
       setExporting(false);
+    } else {
+      abortRef.current?.abort();
     }
   }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !exporting) {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, exporting, onClose]);
 
   if (!isOpen) return null;
 
@@ -126,48 +147,131 @@ export default function ExportSheet({
     },
   ];
 
+  const handleCancelExport = () => {
+    abortRef.current?.abort();
+  };
+
   const handleExecuteExport = async (action: ExportAction) => {
     if (exporting) return;
     if (itemsToExport.length === 0) {
       toast("No episode available to export", "info");
       return;
     }
+
+    const controller = new AbortController();
+    abortRef.current = controller;
     setExporting(true);
     setProgress(0);
-    setSuccessMsg(null);
+    setCurrentEpIndex(0);
+    setExportStatus(null);
+
+    const nativeActive = isNativeExportSupported();
+    const isGalleryEligibleAction =
+      nativeActive && (action === "save" || action === "save_movies" || action === "save_downloads" || action === "save_sdcard");
 
     try {
       let savedPathResult = "";
+      let succeededCount = 0;
+      const failures: Array<{ episode: number; error: string }> = [];
+
       for (let i = 0; i < itemsToExport.length; i++) {
-        const item = itemsToExport[i];
-        setCurrentEpIndex(i + 1);
-        const epProgressBase = (i / itemsToExport.length) * 100;
-        const res = await processEpisodeExport(
-          item.videoId,
-          item.episode,
-          action,
-          (pct) => {
-            setProgress(Math.round(epProgressBase + (pct / itemsToExport.length)));
-          },
-          { includeSubtitles }
-        );
-        if (!res.success) {
-          throw new Error(res.error || `Failed to export episode ${item.episode}`);
+        if (controller.signal.aborted || !mountedRef.current) {
+          throw new DOMException("Export cancelled", "AbortError");
         }
-        savedPathResult = res.savedPath || "Storage";
+        const item = itemsToExport[i];
+        if (mountedRef.current) setCurrentEpIndex(i + 1);
+        const epProgressBase = (i / itemsToExport.length) * 100;
+
+        try {
+          const res = await processEpisodeExport(
+            item.videoId,
+            item.episode,
+            action,
+            (pct) => {
+              if (mountedRef.current) {
+                setProgress(Math.round(epProgressBase + pct / itemsToExport.length));
+              }
+            },
+            { includeSubtitles, signal: controller.signal }
+          );
+          if (res.cancelled) {
+            throw new DOMException(res.error || "Export cancelled", "AbortError");
+          }
+          if (!res.success) {
+            failures.push({ episode: item.episode, error: res.error || "Failed" });
+          } else {
+            succeededCount++;
+            savedPathResult = res.savedPath || "Storage";
+          }
+        } catch (epErr: any) {
+          if (epErr?.name === "AbortError" || controller.signal.aborted) {
+            throw epErr;
+          }
+          failures.push({ episode: item.episode, error: epErr?.message || "Failed" });
+        }
+      }
+
+      if (!mountedRef.current) return;
+
+      if (succeededCount === 0) {
+        const errMsg = failures[0]?.error || "Failed to export";
+        setExportStatus({
+          kind: "error",
+          message: `Export error: ${errMsg}`,
+          showGallery: false,
+        });
+        toast(errMsg, "info");
+        return;
       }
 
       setProgress(100);
-      const msg = itemsToExport.length > 1
-        ? `Successfully exported ${itemsToExport.length} episodes to ${savedPathResult}${includeSubtitles ? " (+ Subtitles)" : ""}`
-        : `Saved to ${savedPathResult}${includeSubtitles ? " (+ Subtitles)" : ""}`;
-      setSuccessMsg(msg);
-      toast(msg, "ok");
+      if (failures.length > 0) {
+        const msg = `Exported ${succeededCount} of ${itemsToExport.length} episodes (${failures.length} failed)`;
+        setExportStatus({
+          kind: "success",
+          message: msg,
+          showGallery: isGalleryEligibleAction,
+        });
+        toast(msg, "info");
+      } else {
+        const msg =
+          action === "share"
+            ? `Shared ${savedPathResult || "episode"}`
+            : itemsToExport.length > 1
+              ? `Successfully exported ${itemsToExport.length} episodes to ${savedPathResult}${includeSubtitles ? " (+ Subtitles)" : ""}`
+              : `Saved to ${savedPathResult}${includeSubtitles ? " (+ Subtitles)" : ""}`;
+        setExportStatus({
+          kind: "success",
+          message: msg,
+          showGallery: isGalleryEligibleAction,
+        });
+        toast(msg, "ok");
+      }
     } catch (e: any) {
-      toast(e?.message || "Export failed", "info");
-      setSuccessMsg(`Export error: ${e?.message || "Failed"}`);
+      if (!mountedRef.current) return;
+      if (e?.name === "AbortError" || controller.signal.aborted) {
+        setExportStatus({
+          kind: "error",
+          message: "Export cancelled",
+          showGallery: false,
+        });
+        toast("Export cancelled", "info");
+      } else {
+        const errText = e?.message || "Failed";
+        toast(errText, "info");
+        setExportStatus({
+          kind: "error",
+          message: `Export error: ${errText}`,
+          showGallery: false,
+        });
+      }
     } finally {
-      setExporting(false);
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
+      if (mountedRef.current) {
+        setExporting(false);
+      }
     }
   };
 
@@ -177,48 +281,110 @@ export default function ExportSheet({
       toast("No episode available to export", "info");
       return;
     }
+
+    const controller = new AbortController();
+    abortRef.current = controller;
     setExporting(true);
     setProgress(0);
-    setSuccessMsg(null);
+    setCurrentEpIndex(0);
+    setExportStatus(null);
 
     try {
       let savedPathResult = "";
+      let succeededCount = 0;
+      const failures: Array<{ episode: number; error: string }> = [];
+
       for (let i = 0; i < itemsToExport.length; i++) {
-        const item = itemsToExport[i];
-        setCurrentEpIndex(i + 1);
-        const res = await processSubtitleExport(
-          item.videoId,
-          item.episode,
-          fmt,
-          item.title,
-          "en",
-          "save_movies"
-        );
-        if (!res.success) {
-          throw new Error(res.error || `Failed to export subtitle for episode ${item.episode}`);
+        if (controller.signal.aborted || !mountedRef.current) {
+          throw new DOMException("Export cancelled", "AbortError");
         }
-        savedPathResult = res.savedPath || "Storage";
-        setProgress(Math.round(((i + 1) / itemsToExport.length) * 100));
+        const item = itemsToExport[i];
+        if (mountedRef.current) setCurrentEpIndex(i + 1);
+        try {
+          const res = await processSubtitleExport(
+            item.videoId,
+            item.episode,
+            fmt,
+            item.title,
+            "en",
+            "save_downloads"
+          );
+          if (!res.success) {
+            failures.push({ episode: item.episode, error: res.error || "Failed" });
+          } else {
+            succeededCount++;
+            savedPathResult = res.savedPath || "Storage";
+          }
+        } catch (subErr: any) {
+          failures.push({ episode: item.episode, error: subErr?.message || "Failed" });
+        }
+        if (mountedRef.current) {
+          setProgress(Math.round(((i + 1) / itemsToExport.length) * 100));
+        }
+      }
+
+      if (!mountedRef.current) return;
+
+      if (succeededCount === 0) {
+        const errMsg = failures[0]?.error || "Subtitle export failed";
+        setExportStatus({
+          kind: "error",
+          message: `Subtitle error: ${errMsg}`,
+          showGallery: false,
+        });
+        toast(errMsg, "info");
+        return;
       }
 
       setProgress(100);
-      const msg = itemsToExport.length > 1
-        ? `Saved ${itemsToExport.length} .${fmt.toUpperCase()} subtitles to ${savedPathResult}`
-        : `Saved subtitle (.${fmt.toUpperCase()}) to ${savedPathResult}`;
-      setSuccessMsg(msg);
-      toast(msg, "ok");
+      const msg =
+        failures.length > 0
+          ? `Saved ${succeededCount} of ${itemsToExport.length} .${fmt.toUpperCase()} subtitles (${failures.length} failed)`
+          : itemsToExport.length > 1
+            ? `Saved ${itemsToExport.length} .${fmt.toUpperCase()} subtitles to ${savedPathResult}`
+            : `Saved subtitle (.${fmt.toUpperCase()}) to ${savedPathResult}`;
+      setExportStatus({
+        kind: "success",
+        message: msg,
+        showGallery: false,
+      });
+      toast(msg, failures.length > 0 ? "info" : "ok");
     } catch (e: any) {
-      toast(e?.message || "Subtitle export failed", "info");
-      setSuccessMsg(`Subtitle error: ${e?.message || "Failed"}`);
+      if (!mountedRef.current) return;
+      if (e?.name === "AbortError" || controller.signal.aborted) {
+        setExportStatus({
+          kind: "error",
+          message: "Subtitle export cancelled",
+          showGallery: false,
+        });
+        toast("Subtitle export cancelled", "info");
+      } else {
+        const errText = e?.message || "Failed";
+        toast(errText, "info");
+        setExportStatus({
+          kind: "error",
+          message: `Subtitle error: ${errText}`,
+          showGallery: false,
+        });
+      }
     } finally {
-      setExporting(false);
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
+      if (mountedRef.current) {
+        setExporting(false);
+      }
     }
   };
 
   const cleanTitle = formatDramaTitle(title);
 
   return (
-    <Sheet open={isOpen} onClose={exporting ? () => {} : onClose} label="Export Episode">
+    <Sheet
+      open={isOpen}
+      onClose={exporting ? () => {} : onClose}
+      label={isBatch ? "Export Series" : "Export Episode"}
+    >
       <div className="flex flex-col max-h-[85vh] overflow-hidden bg-canvas text-on">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-edge/30 shrink-0">
@@ -231,14 +397,16 @@ export default function ExportSheet({
                 {isBatch ? `Export Series (${epCount} Episodes)` : "Export Episode to Phone / SD Card"}
               </div>
               <div className="text-[12px] text-mut truncate max-w-[240px]">
-                {cleanTitle} {episode != null && !isBatch ? `· Ep. ${episode}` : ""}
+                {isBatch
+                  ? `${cleanTitle} · ${epCount} Episodes`
+                  : `${cleanTitle}${episode != null ? ` · Ep. ${episode}` : ""}`}
               </div>
             </div>
           </div>
           <Button
             disabled={exporting}
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-s3 flex items-center justify-center text-mut pressable"
+            className="w-8 h-8 rounded-full bg-s3 flex items-center justify-center text-mut pressable disabled:opacity-40"
             aria-label="Close"
           >
             <IClose size={14} />
@@ -248,14 +416,24 @@ export default function ExportSheet({
         {/* Progress or Status */}
         {exporting && (
           <div className="p-4 bg-primary/10 border-b border-primary/20 flex flex-col gap-2 shrink-0">
-            <div className="flex items-center justify-between text-[12px]">
-              <span className="font-semibold text-primary flex items-center gap-1.5">
-                <Loader className="w-4 h-4 spinner" />
-                {isBatch
-                  ? `Exporting episode ${currentEpIndex} of ${itemsToExport.length}...`
-                  : "Writing video file to device storage..."}
+            <div className="flex items-center justify-between gap-2 text-[12px]">
+              <span className="font-semibold text-primary flex items-center gap-1.5 min-w-0 truncate">
+                <Loader className="w-4 h-4 spinner shrink-0" />
+                <span className="truncate">
+                  {isBatch
+                    ? `Exporting episode ${currentEpIndex} of ${itemsToExport.length}...`
+                    : "Writing video file to device storage..."}
+                </span>
               </span>
-              <span className="font-bold text-primary tabular-nums">{progress}%</span>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="font-bold text-primary tabular-nums">{progress}%</span>
+                <Button
+                  onClick={handleCancelExport}
+                  className="px-2.5 py-1 rounded-lg bg-red-500/15 text-red-500 text-[11px] font-bold pressable"
+                >
+                  Cancel
+                </Button>
+              </div>
             </div>
             <div className="w-full h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
               <div
@@ -266,30 +444,45 @@ export default function ExportSheet({
           </div>
         )}
 
-        {successMsg && !exporting && (
+        {exportStatus && !exporting && (
           <div className="mx-4 mt-3 flex flex-col gap-2 shrink-0">
-            <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-[12px] flex items-center gap-2">
-              <ICheck size={16} className="shrink-0" strokeWidth={2.5} />
-              <span className="truncate flex-1 font-semibold">{successMsg}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                onClick={() => {
-                  const ok = openInGallery();
-                  if (ok) {
-                    toast("Opening in Gallery / Player...", "ok");
-                  } else {
-                    toast("Opening player...", "info");
-                  }
-                }}
-                className="flex-1 h-10 rounded-xl bg-primary text-on-primary font-bold text-[13px] flex items-center justify-center gap-2 pressable shadow-md hover:brightness-110"
+            {exportStatus.kind === "success" ? (
+              <div
+                role="status"
+                className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-[12px] flex items-center gap-2"
               >
-                <IFilm size={15} />
-                <span>Open in Gallery</span>
-              </Button>
+                <ICheck size={16} className="shrink-0" strokeWidth={2.5} />
+                <span className="truncate flex-1 font-semibold">{exportStatus.message}</span>
+              </div>
+            ) : (
+              <div
+                role="alert"
+                className="p-3 rounded-xl bg-red-500/15 border border-red-500/30 text-red-700 dark:text-red-300 text-[12px] flex items-center gap-2"
+              >
+                <IAlertTriangle size={16} className="shrink-0 text-red-500" />
+                <span className="flex-1 font-semibold break-words">{exportStatus.message}</span>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              {exportStatus.kind === "success" && exportStatus.showGallery && isNativeExportSupported() && (
+                <Button
+                  onClick={() => {
+                    const ok = openInGallery();
+                    if (ok) {
+                      toast("Opening in Gallery / Player...", "ok");
+                    } else {
+                      toast("No compatible gallery app available", "info");
+                    }
+                  }}
+                  className="flex-1 h-10 rounded-xl bg-primary text-on-primary font-bold text-[13px] flex items-center justify-center gap-2 pressable shadow-md hover:brightness-110"
+                >
+                  <IFilm size={15} />
+                  <span>Open in Gallery</span>
+                </Button>
+              )}
               <Button
                 onClick={onClose}
-                className="h-10 px-4 rounded-xl bg-s3 text-on font-semibold text-[13px] pressable"
+                className="h-10 px-4 rounded-xl bg-s3 text-on font-semibold text-[13px] pressable ml-auto"
               >
                 Done
               </Button>
@@ -322,9 +515,10 @@ export default function ExportSheet({
             Video Destinations
           </div>
 
-          {targets.map((t) => (
+          {targets.filter((t) => t.available).map((t) => (
             <button
               key={t.id}
+              type="button"
               disabled={exporting}
               onClick={() => void handleExecuteExport(t.id)}
               className="p-3.5 rounded-2xl border border-edge/60 bg-s2/60 hover:bg-s2 text-left flex items-center gap-3 transition-all pressable disabled:opacity-50"

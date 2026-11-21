@@ -46,7 +46,7 @@ function GroupHead({ title, hint, actions }: { title: string; hint: string; acti
 }
 
 export default function LinePicker({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { toast, setUser } = useStore();
+  const { toast, user, setUser } = useStore();
   const [state, setState] = useState<LineState | null>(null);
   const [mirrors, setMirrors] = useState<LineItem[] | null>(null);
   const [recommended, setRecommended] = useState<LineItem[] | null>(null);
@@ -140,7 +140,9 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
       await setAutoLine(false);
       const next = await apply();
       tracePlayback("line.manual", { line: hostOf(next.base), prev: hostOf(state?.base ?? ""), custom: next.custom, ok: true });
-      if (next.base !== state?.base) setUser(null);
+      if (next.base !== state?.base && (!user || (user.user_type !== "firebase" && user.user_type !== "offline"))) {
+        setUser(null);
+      }
       setState((s) => (s ? { ...s, ...next } : s));
       if (key === "custom" || key === "reset") setCustom(next.custom ? next.base : "");
       toast(`Endpoint switched to ${hostOf(next.base)}`, "ok");

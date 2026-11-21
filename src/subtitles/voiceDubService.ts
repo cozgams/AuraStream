@@ -15,12 +15,97 @@ const STORAGE_KEYS = {
 };
 
 let cachedVoices: SpeechSynthesisVoice[] = [];
-let lastSpokenCueId: string | number | null = null;
+let lastSpokenCueKey: string | null = null;
 let isDucked = false;
 let preDuckVolume = 1.0;
+let isApplyingDuckVolume = false;
+let lastDuckAppliedVolume: number | null = null;
 let activeUtterance: SpeechSynthesisUtterance | null = null;
 let activeVideoEl: HTMLVideoElement | null = null;
+let attachedVideoEl: HTMLVideoElement | null = null;
 let currentUtteranceId = 0;
+
+function applyVideoVolume(v: HTMLVideoElement, vol: number): void {
+  isApplyingDuckVolume = true;
+  try {
+    v.volume = vol;
+  } catch {
+    // ignore
+  } finally {
+    isApplyingDuckVolume = false;
+  }
+}
+
+function onVolumeChange(): void {
+  if (isApplyingDuckVolume || !attachedVideoEl) return;
+  if (
+    isDucked &&
+    lastDuckAppliedVolume !== null &&
+    Math.abs(attachedVideoEl.volume - lastDuckAppliedVolume) < 0.001
+  ) {
+    return;
+  }
+  preDuckVolume = typeof attachedVideoEl.volume === "number" ? attachedVideoEl.volume : 1.0;
+  isDucked = false;
+  lastDuckAppliedVolume = null;
+}
+
+function onSeeked(): void {
+  lastSpokenCueKey = null;
+  currentUtteranceId++;
+  activeUtterance = null;
+  if (typeof window !== "undefined" && "speechSynthesis" in window) {
+    try {
+      window.speechSynthesis.cancel();
+    } catch {
+      // ignore
+    }
+  }
+  if (attachedVideoEl && isDucked) {
+    applyVideoVolume(attachedVideoEl, preDuckVolume);
+    isDucked = false;
+    lastDuckAppliedVolume = null;
+  }
+}
+
+function onPause(): void {
+  currentUtteranceId++;
+  activeUtterance = null;
+  if (typeof window !== "undefined" && "speechSynthesis" in window) {
+    try {
+      window.speechSynthesis.cancel();
+    } catch {
+      // ignore
+    }
+  }
+  if (attachedVideoEl && isDucked) {
+    applyVideoVolume(attachedVideoEl, preDuckVolume);
+    isDucked = false;
+    lastDuckAppliedVolume = null;
+  }
+}
+
+function detachVideoListeners(): void {
+  if (!attachedVideoEl) return;
+  attachedVideoEl.removeEventListener("volumechange", onVolumeChange);
+  attachedVideoEl.removeEventListener("seeked", onSeeked);
+  attachedVideoEl.removeEventListener("pause", onPause);
+  attachedVideoEl = null;
+}
+
+function attachVideoListeners(v: HTMLVideoElement): void {
+  if (attachedVideoEl === v) return;
+  if (attachedVideoEl && isDucked) {
+    applyVideoVolume(attachedVideoEl, preDuckVolume);
+    isDucked = false;
+    lastDuckAppliedVolume = null;
+  }
+  detachVideoListeners();
+  attachedVideoEl = v;
+  v.addEventListener("volumechange", onVolumeChange);
+  v.addEventListener("seeked", onSeeked);
+  v.addEventListener("pause", onPause);
+}
 
 function loadVoices(): SpeechSynthesisVoice[] {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return [];
@@ -33,9 +118,14 @@ function loadVoices(): SpeechSynthesisVoice[] {
 }
 
 if (typeof window !== "undefined" && "speechSynthesis" in window) {
-  window.speechSynthesis.onvoiceschanged = () => {
+  const handleVoicesChanged = () => {
     cachedVoices = window.speechSynthesis.getVoices();
   };
+  if (typeof window.speechSynthesis.addEventListener === "function") {
+    window.speechSynthesis.addEventListener("voiceschanged", handleVoicesChanged);
+  } else {
+    window.speechSynthesis.onvoiceschanged = handleVoicesChanged;
+  }
 }
 
 export function isVoiceDubEnabled(): boolean {
@@ -61,7 +151,9 @@ export function setVoiceDubEnabled(enabled: boolean): void {
 export function getVoiceDubVolume(): number {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.VOLUME);
-    return raw ? Math.max(0.1, Math.min(1.0, parseFloat(raw))) : 1.0;
+    if (!raw) return 1.0;
+    const parsed = parseFloat(raw);
+    return Number.isFinite(parsed) ? Math.max(0.1, Math.min(1.0, parsed)) : 1.0;
   } catch {
     return 1.0;
   }
@@ -69,7 +161,8 @@ export function getVoiceDubVolume(): number {
 
 export function setVoiceDubVolume(vol: number): void {
   try {
-    const clamped = Math.max(0.1, Math.min(1.0, vol));
+    const safeVol = Number.isFinite(vol) ? vol : 1.0;
+    const clamped = Math.max(0.1, Math.min(1.0, safeVol));
     localStorage.setItem(STORAGE_KEYS.VOLUME, String(clamped));
     window.dispatchEvent(new CustomEvent("aurastream:voice-dub-changed", { detail: { volume: clamped } }));
   } catch {
@@ -124,15 +217,16 @@ function getBestEnglishVoice(): SpeechSynthesisVoice | null {
  * Speaks an active cue in sync with the scene.
  * Dynamically adjusts speech rate so the voice finishes before the actor stops speaking.
  */
-export function speakActiveCue(cue: SubtitleCue, videoEl?: HTMLVideoElement | null): void {
+export function speakActiveCue(cue: SubtitleCue, videoEl?: HTMLVideoElement | null, trackKey?: string): void {
   if (!isVoiceDubEnabled()) return;
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
   if (document.visibilityState !== "visible") return;
   if (videoEl && videoEl.paused) return;
 
+  const cueKey = trackKey ? `${trackKey}:${cue.id}` : String(cue.id);
   // Avoid repeating the same cue multiple times
-  if (lastSpokenCueId === cue.id) return;
-  lastSpokenCueId = cue.id;
+  if (lastSpokenCueKey === cueKey) return;
+  lastSpokenCueKey = cueKey;
 
   const text = formatSubtitleText(cue.en || cue.zh);
   if (!text || text.trim().length === 0) return;
@@ -140,6 +234,7 @@ export function speakActiveCue(cue: SubtitleCue, videoEl?: HTMLVideoElement | nu
   // Track active video element for volume restore
   if (videoEl) {
     activeVideoEl = videoEl;
+    attachVideoListeners(videoEl);
   }
 
   // Cancel any prior speech to keep tight synchronization with current frame
@@ -176,7 +271,9 @@ export function speakActiveCue(cue: SubtitleCue, videoEl?: HTMLVideoElement | nu
       if (!isDucked) {
         preDuckVolume = typeof targetVideo.volume === "number" ? targetVideo.volume : 1.0;
       }
-      targetVideo.volume = Math.min(preDuckVolume, 0.22);
+      const duckVol = Math.min(preDuckVolume, 0.22);
+      lastDuckAppliedVolume = duckVol;
+      applyVideoVolume(targetVideo, duckVol);
       isDucked = true;
     } catch {
       // ignore
@@ -188,14 +285,11 @@ export function speakActiveCue(cue: SubtitleCue, videoEl?: HTMLVideoElement | nu
     if (utteranceId !== currentUtteranceId) return;
 
     activeUtterance = null;
-    const v = targetVideo || activeVideoEl || (typeof document !== "undefined" ? document.querySelector("video") : null);
+    const v = targetVideo || attachedVideoEl || activeVideoEl || (typeof document !== "undefined" ? document.querySelector("video") : null);
     if (v && isDucked) {
-      try {
-        v.volume = preDuckVolume;
-        isDucked = false;
-      } catch {
-        // ignore
-      }
+      applyVideoVolume(v, preDuckVolume);
+      isDucked = false;
+      lastDuckAppliedVolume = null;
     }
   };
 
@@ -213,7 +307,7 @@ export function speakActiveCue(cue: SubtitleCue, videoEl?: HTMLVideoElement | nu
  * Cancels any active speech synthesis and restores video volume immediately.
  */
 export function cancelVoiceDub(videoEl?: HTMLVideoElement | null): void {
-  lastSpokenCueId = null;
+  lastSpokenCueKey = null;
   currentUtteranceId++;
   activeUtterance = null;
 
@@ -225,13 +319,12 @@ export function cancelVoiceDub(videoEl?: HTMLVideoElement | null): void {
     }
   }
 
-  const v = videoEl || activeVideoEl || (typeof document !== "undefined" ? document.querySelector("video") : null);
+  const v = videoEl || attachedVideoEl || activeVideoEl || (typeof document !== "undefined" ? document.querySelector("video") : null);
   if (v && isDucked) {
-    try {
-      v.volume = preDuckVolume;
-      isDucked = false;
-    } catch {
-      // ignore
-    }
+    applyVideoVolume(v, preDuckVolume);
+    isDucked = false;
+    lastDuckAppliedVolume = null;
   }
+  detachVideoListeners();
+  activeVideoEl = null;
 }

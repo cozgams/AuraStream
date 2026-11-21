@@ -19,7 +19,7 @@ export interface SubtitleStyleConfig {
   bgStyle: SubtitleBgStyle;
   bgOpacity: number; // 0 to 100
   position?: SubtitlePosition;
-  customOffsetPercent?: number; // 5 to 92 (%)
+  customOffsetPercent?: number; // 5 to 90 (%)
 }
 
 export interface AICaptionConfig {

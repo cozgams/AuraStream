@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct Session {
@@ -45,7 +45,7 @@ mod tests {
     #[test]
     fn legacy_sessions_are_not_assigned_to_current_line() {
         let store = SessionStore::new();
-        *store.current.lock().unwrap() =
+        *store.lock_current() =
             serde_json::from_str(r#"{"token":"legacy","user":{"id":1}}"#).unwrap();
         assert_eq!(store.token("https://huangguoai.com"), None);
         assert!(store.user("https://huangguoai.com").is_null());
@@ -88,6 +88,24 @@ mod tests {
         assert!(!store.set_if_revision(revision, origin, "late".into(), json!({"id": 1})));
         assert_eq!(store.user(origin)["id"], 2);
     }
+
+    #[test]
+    fn poisoned_mutex_recovers_without_panicking() {
+        let store = std::sync::Arc::new(SessionStore::new());
+        let poisoned = store.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoned.current.lock().unwrap();
+            panic!("intentional poison for recovery test");
+        })
+        .join();
+        assert!(store.current.is_poisoned());
+        let origin = "https://huangguoai.com";
+        store.set(origin, "recovered".into(), json!({"id": 9}));
+        assert_eq!(store.token(origin).as_deref(), Some("recovered"));
+        assert_eq!(store.user(origin)["id"], 9);
+        store.clear();
+        assert_eq!(store.token(origin), None);
+    }
 }
 
 pub struct SessionStore {
@@ -103,24 +121,32 @@ impl SessionStore {
         }
     }
 
+    fn lock_current(&self) -> MutexGuard<'_, Session> {
+        self.current.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn lock_file(&self) -> MutexGuard<'_, Option<PathBuf>> {
+        self.file.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     pub fn bind(&self, dir: PathBuf) {
         let mut path = dir;
         path.push("session.json");
         if let Ok(text) = std::fs::read_to_string(&path) {
             if let Ok(sess) = serde_json::from_str::<Session>(&text) {
-                *self.current.lock().unwrap() = sess;
+                *self.lock_current() = sess;
             }
         }
-        *self.file.lock().unwrap() = Some(path);
+        *self.lock_file() = Some(path);
     }
 
     pub fn token(&self, origin: &str) -> Option<String> {
-        let cur = self.current.lock().unwrap();
+        let cur = self.lock_current();
         (cur.origin == origin && !cur.token.is_empty()).then(|| cur.token.clone())
     }
 
     pub fn user(&self, origin: &str) -> serde_json::Value {
-        let cur = self.current.lock().unwrap();
+        let cur = self.lock_current();
         if cur.origin == origin && !cur.token.is_empty() {
             cur.user.clone()
         } else {
@@ -129,17 +155,17 @@ impl SessionStore {
     }
 
     pub fn snapshot(&self, origin: &str) -> Option<Session> {
-        let cur = self.current.lock().unwrap();
+        let cur = self.lock_current();
         (cur.origin == origin && !cur.token.is_empty()).then(|| cur.clone())
     }
 
     pub fn revision(&self) -> u64 {
-        self.current.lock().unwrap().revision
+        self.lock_current().revision
     }
 
     pub fn set_if_revision(&self, expected_revision: u64, origin: &str, token: String, user: serde_json::Value) -> bool {
         {
-            let mut cur = self.current.lock().unwrap();
+            let mut cur = self.lock_current();
             if cur.revision != expected_revision { return false; }
             cur.origin = origin.to_string();
             cur.token = token;
@@ -158,12 +184,12 @@ impl SessionStore {
     }
 
     pub fn is_current(&self, expected: &Session) -> bool {
-        Self::same_identity(&self.current.lock().unwrap(), expected)
+        Self::same_identity(&self.lock_current(), expected)
     }
 
     pub fn update_user_if_current(&self, expected: &Session, user: serde_json::Value) -> bool {
         {
-            let mut cur = self.current.lock().unwrap();
+            let mut cur = self.lock_current();
             if !Self::same_identity(&cur, expected) || user.get("id") != expected.user.get("id") {
                 return false;
             }
@@ -175,7 +201,7 @@ impl SessionStore {
 
     pub fn clear_if_current(&self, expected: &Session) -> bool {
         {
-            let mut cur = self.current.lock().unwrap();
+            let mut cur = self.lock_current();
             if !Self::same_identity(&cur, expected) { return false; }
             cur.token.clear();
             cur.origin.clear();
@@ -189,7 +215,7 @@ impl SessionStore {
     #[allow(dead_code)]
     pub fn set(&self, origin: &str, token: String, user: serde_json::Value) {
         {
-            let mut cur = self.current.lock().unwrap();
+            let mut cur = self.lock_current();
             cur.origin = origin.to_string();
             cur.token = token;
             cur.user = user;
@@ -200,7 +226,7 @@ impl SessionStore {
 
     pub fn clear(&self) {
         {
-            let mut cur = self.current.lock().unwrap();
+            let mut cur = self.lock_current();
             cur.token.clear();
             cur.origin.clear();
             cur.user = serde_json::Value::Null;
@@ -210,11 +236,35 @@ impl SessionStore {
     }
 
     fn persist(&self) {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
         // Keep state locked through the write so a slower earlier writer cannot persist over a new login.
-        let snapshot = self.current.lock().unwrap();
-        if let Some(path) = self.file.lock().unwrap().as_ref() {
+        let snapshot = self.lock_current();
+        if let Some(path) = self.lock_file().as_ref() {
             if let Ok(text) = serde_json::to_string_pretty(&*snapshot) {
-                let _ = std::fs::write(path, text);
+                let temp = path.with_extension(format!(
+                    "json.{}.{}.tmp",
+                    std::process::id(),
+                    NEXT.fetch_add(1, Ordering::Relaxed)
+                ));
+                let write_res = (|| -> std::io::Result<()> {
+                    let mut options = std::fs::OpenOptions::new();
+                    options.write(true).create_new(true);
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::OpenOptionsExt;
+                        options.mode(0o600);
+                    }
+                    let mut file = options.open(&temp)?;
+                    file.write_all(text.as_bytes())?;
+                    file.sync_all()?;
+                    drop(file);
+                    std::fs::rename(&temp, path)
+                })();
+                if write_res.is_err() {
+                    let _ = std::fs::remove_file(&temp);
+                }
             }
         }
     }

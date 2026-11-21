@@ -1,7 +1,7 @@
 /**
  * AuraStream Offline Download Manager
  * Uses IndexedDB to store video blobs and subtitle tracks for zero-data offline playback on Android.
- * Features: live speed (MB/s), ETA calculation, cancel/pause controls, Smart Downloads (auto-download next ep, auto-delete watched),
+ * Features: live speed (MB/s), ETA calculation, cancel/pause controls, Smart Downloads (auto-download next ep),
  * Phone Storage visualizer, "Download on Wi-Fi Only" cellular guard, and 1-Click Series Batch Downloader.
  */
 
@@ -10,6 +10,7 @@ import { readStorage, writeStorage, STORAGE_KEYS } from "../storage";
 import { getSubtitlesForEpisode } from "../subtitles/aiSubtitleService";
 import type { SubtitleCue } from "../subtitles/types";
 import type { PlayInfo } from "../types";
+import type { NativeExportBridge } from "./exportService";
 
 export type DownloadQuality = "auto" | "hevc" | "standard";
 
@@ -45,18 +46,18 @@ export interface ActiveDownloadProgress {
   streamUrl?: string;
   quality?: DownloadQuality;
   isHevc?: boolean;
+  autoResume?: boolean;
 }
 
 const DB_NAME = "AuraStreamOfflineDB";
+const LEGACY_DB_NAME = "aurastream_offline_db";
 const DB_VERSION = 1;
 const STORE_NAME = "episodes";
-const META_KEY = "aurastream_offline_episodes_v1";
 const SMART_DOWNLOAD_KEY = "aurastream_smart_download_v1";
 const AUTO_DELETE_KEY = "aurastream_auto_delete_watched_v1";
 const WIFI_ONLY_KEY = "aurastream_wifi_only_download_v1";
 const CELLULAR_SAVER_KEY = "aurastream_cellular_data_saver_v1";
 const DOWNLOAD_QUALITY_KEY = "aurastream_download_quality_preference_v1";
-const ACTIVE_DOWNLOADS_KEY = "aurastream_active_downloads_v1";
 
 // Request persistent storage on mobile WebView so Android never wipes IndexedDB/localStorage
 if (typeof navigator !== "undefined" && navigator.storage && typeof navigator.storage.persist === "function") {
@@ -65,8 +66,43 @@ if (typeof navigator !== "undefined" && navigator.storage && typeof navigator.st
 
 const activeProgress = new Map<string, ActiveDownloadProgress>();
 const activeAbortControllers = new Map<string, AbortController>();
+const activeRunTokens = new Map<string, number>();
+let runTokenSeq = 0;
+
 const progressListeners = new Set<(progress: Map<string, ActiveDownloadProgress>) => void>();
 const triggeringSmartDownloads = new Set<string>();
+
+let lastPersistTime = 0;
+let lastNativeActiveState: boolean | null = null;
+
+// Forward-declared batch token/state references used by syncNativeDownloadCount
+let batchTokenSeq = 0;
+let activeBatchToken = 0;
+
+export interface BatchProgressState {
+  active: boolean;
+  videoId: number;
+  title: string;
+  total: number;
+  completed: number;
+  currentEpisode: number;
+  failedCount: number;
+}
+
+let batchState: BatchProgressState = {
+  active: false,
+  videoId: 0,
+  title: "",
+  total: 0,
+  completed: 0,
+  currentEpisode: 0,
+  failedCount: 0,
+};
+
+function getNativeBridge(): NativeExportBridge | undefined {
+  if (typeof window === "undefined") return undefined;
+  return window.AuraNativeExport;
+}
 
 // Restore any active or paused downloads from previous session so exiting app never deletes them
 try {
@@ -79,6 +115,7 @@ try {
           activeProgress.set(item.id, {
             ...item,
             status: "paused",
+            autoResume: item.status === "downloading" || item.autoResume === true,
             speedBytesPerSec: 0,
             speedFormatted: "Paused",
             etaFormatted: "--",
@@ -106,19 +143,28 @@ function persistActiveDownloads() {
 }
 
 function syncNativeDownloadCount() {
-  if (typeof window === "undefined") return;
-  const bridge = (window as any).AuraNativeExport;
+  const bridge = getNativeBridge();
   if (!bridge) return;
-  const activeCount = Array.from(activeProgress.values()).filter((p) => p.status === "downloading").length;
+  const downloadingCount = Array.from(activeProgress.values()).filter((p) => p.status === "downloading").length;
+  const activeCount = downloadingCount > 0 ? downloadingCount : (batchState.active && activeBatchToken > 0 ? 1 : 0);
+
   if (typeof bridge.setDownloadActiveCount === "function") {
     bridge.setDownloadActiveCount(activeCount);
   } else if (typeof bridge.setDownloadActive === "function") {
-    bridge.setDownloadActive(activeCount > 0);
+    const nextActive = activeCount > 0;
+    if (nextActive !== lastNativeActiveState) {
+      lastNativeActiveState = nextActive;
+      bridge.setDownloadActive(nextActive);
+    }
   }
 }
 
-function notifyProgress() {
-  persistActiveDownloads();
+function notifyProgress(immediatePersist = false) {
+  const now = Date.now();
+  if (immediatePersist || now - lastPersistTime >= 2000) {
+    lastPersistTime = now;
+    persistActiveDownloads();
+  }
   syncNativeDownloadCount();
   for (const listener of progressListeners) {
     try {
@@ -132,16 +178,18 @@ function notifyProgress() {
 export function isDownloadNotificationEnabled(): boolean {
   try {
     const val = localStorage.getItem("aurastream_download_notif_enabled");
-    return val === "true"; // default off per user preference
+    return val !== "false";
   } catch {
-    return false;
+    return true;
   }
 }
 
 export function setDownloadNotificationEnabled(enabled: boolean): void {
   try {
     localStorage.setItem("aurastream_download_notif_enabled", enabled ? "true" : "false");
-  } catch {}
+  } catch {
+    // ignore
+  }
 }
 
 function notifyNativeDownloadProgress(
@@ -152,26 +200,30 @@ function notifyNativeDownloadProgress(
   speedFormatted: string,
   fileSizeFormatted: string = ""
 ) {
-  if (!isDownloadNotificationEnabled()) return;
-  if (typeof window !== "undefined" && typeof (window as any).AuraNativeExport?.updateDownloadNotification === "function") {
+  const bridge = getNativeBridge();
+  if (bridge && typeof bridge.updateDownloadNotification === "function") {
     const notifId = ((Math.abs(videoId) % 10000) * 100 + (episode % 100)) & 0x7fffffff;
-    (window as any).AuraNativeExport.updateDownloadNotification(notifId, title, `Episode ${episode}`, pct, speedFormatted, fileSizeFormatted);
+    const cleanTitle = title || `Series #${videoId}`;
+    bridge.updateDownloadNotification(notifId, cleanTitle, `Episode ${episode}`, pct, speedFormatted, fileSizeFormatted);
   }
 }
 
 function notifyNativeDownloadComplete(videoId: number, episode: number, title: string, fileSizeFormatted: string = "") {
   syncNativeDownloadCount();
   if (!isDownloadNotificationEnabled()) return;
-  if (typeof window !== "undefined" && typeof (window as any).AuraNativeExport?.showDownloadCompleteNotification === "function") {
+  const bridge = getNativeBridge();
+  if (bridge && typeof bridge.showDownloadCompleteNotification === "function") {
     const notifId = ((Math.abs(videoId) % 10000) * 100 + (episode % 100)) & 0x7fffffff;
-    (window as any).AuraNativeExport.showDownloadCompleteNotification(notifId, title, `Episode ${episode}`, fileSizeFormatted);
+    const cleanTitle = title || `Series #${videoId}`;
+    bridge.showDownloadCompleteNotification(notifId, cleanTitle, `Episode ${episode}`, fileSizeFormatted);
   }
 }
 
 function notifyNativeDownloadCancel(videoId: number, episode: number) {
-  if (typeof window !== "undefined" && typeof (window as any).AuraNativeExport?.cancelDownloadNotification === "function") {
+  const bridge = getNativeBridge();
+  if (bridge && typeof bridge.cancelDownloadNotification === "function") {
     const notifId = ((Math.abs(videoId) % 10000) * 100 + (episode % 100)) & 0x7fffffff;
-    (window as any).AuraNativeExport.cancelDownloadNotification(notifId);
+    bridge.cancelDownloadNotification(notifId);
   }
   syncNativeDownloadCount();
 }
@@ -203,6 +255,61 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
+async function dbExists(dbName: string): Promise<boolean> {
+  if (typeof indexedDB === "undefined") return false;
+  if (typeof indexedDB.databases === "function") {
+    try {
+      const list = await indexedDB.databases();
+      return list.some((d) => d.name === dbName);
+    } catch {
+      // fallback below
+    }
+  }
+  return true;
+}
+
+async function openExistingDB(dbName: string): Promise<IDBDatabase | null> {
+  if (typeof indexedDB === "undefined") return null;
+  if (!(await dbExists(dbName))) return null;
+
+  return new Promise((resolve) => {
+    let abortedNew = false;
+    const req = indexedDB.open(dbName);
+    req.onupgradeneeded = (ev) => {
+      if (ev.oldVersion === 0) {
+        abortedNew = true;
+        try {
+          req.transaction?.abort();
+        } catch {
+          // ignore
+        }
+      }
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      if (abortedNew || !db.objectStoreNames.contains(STORE_NAME)) {
+        db.close();
+        resolve(null);
+        return;
+      }
+      resolve(db);
+    };
+    req.onerror = () => resolve(null);
+    req.onblocked = () => resolve(null);
+  });
+}
+
+function isValidOfflineRecord(rec: any): boolean {
+  if (!rec || !rec.id) return false;
+  if (rec.isHls) {
+    return Boolean(rec.playlistText) && Array.isArray(rec.segments) && rec.segments.length > 0;
+  }
+  if (!rec.blob) return false;
+  if (rec.blob instanceof Blob) return rec.blob.size > 0;
+  if (typeof rec.blob.byteLength === "number") return rec.blob.byteLength > 0;
+  return false;
+}
+
 /**
  * Returns metadata list for all downloaded episodes (strictly deduplicated)
  */
@@ -226,28 +333,43 @@ export function getOfflineEpisodes(): OfflineEpisode[] {
   }
 }
 
-/**
- * Synchronizes records from persistent IndexedDB to metadata list on boot
- * ensuring downloaded episodes survive app exit and are never lost.
- */
-export async function syncOfflineEpisodesFromIndexedDB(): Promise<OfflineEpisode[]> {
-  try {
-    const db = await openDB();
-    return new Promise((resolve) => {
-      const tx = db.transaction(STORE_NAME, "readonly");
-      const store = tx.objectStore(STORE_NAME);
-      const currentList = getOfflineEpisodes();
-      const map = new Map<string, OfflineEpisode>();
-      for (const it of currentList) map.set(it.id, it);
-      let changed = false;
+function pruneStaleOfflineMetadata(id: string): void {
+  const current = getOfflineEpisodes();
+  if (current.some((it) => it.id === id)) {
+    saveOfflineEpisodesList(current.filter((it) => it.id !== id));
+  }
+}
 
+async function scanDbRecords(
+  dbName: string,
+  createPrimaryIfMissing: boolean,
+  into: Map<string, OfflineEpisode>
+): Promise<boolean> {
+  let db: IDBDatabase | null = null;
+  try {
+    db = createPrimaryIfMissing ? await openDB() : await openExistingDB(dbName);
+  } catch {
+    return false;
+  }
+  if (!db) return !createPrimaryIfMissing;
+
+  const database = db;
+  return new Promise((resolve) => {
+    try {
+      if (!database.objectStoreNames.contains(STORE_NAME)) {
+        database.close();
+        resolve(true);
+        return;
+      }
+      const tx = database.transaction(STORE_NAME, "readonly");
+      const store = tx.objectStore(STORE_NAME);
       const req = store.openCursor();
       req.onsuccess = (e: any) => {
         const cursor: IDBCursorWithValue | null = e.target.result;
         if (cursor) {
           const rec = cursor.value;
-          if (rec && rec.id && !map.has(rec.id)) {
-            map.set(rec.id, {
+          if (isValidOfflineRecord(rec) && !into.has(rec.id)) {
+            into.set(rec.id, {
               id: rec.id,
               videoId: rec.videoId,
               episode: rec.episode,
@@ -259,33 +381,88 @@ export async function syncOfflineEpisodesFromIndexedDB(): Promise<OfflineEpisode
               quality: rec.quality,
               isHevc: rec.isHevc,
             });
-            changed = true;
           }
           cursor.continue();
         } else {
-          // Completed cursor scan
-          db.close();
-          const merged = Array.from(map.values());
-          if (changed) {
-            saveOfflineEpisodesList(merged);
-          }
-          resolve(merged);
+          database.close();
+          resolve(true);
         }
       };
       req.onerror = () => {
-        db.close();
-        resolve(getOfflineEpisodes());
+        database.close();
+        resolve(false);
       };
-    });
+    } catch {
+      database.close();
+      resolve(false);
+    }
+  });
+}
+
+/**
+ * Bidirectionally synchronizes records between persistent IndexedDB and metadata list
+ * so downloaded episodes survive app exit and evicted/deleted IDB records do not leave ghosts.
+ */
+export async function syncOfflineEpisodesFromIndexedDB(): Promise<OfflineEpisode[]> {
+  try {
+    const idbRecords = new Map<string, OfflineEpisode>();
+    const primaryOk = await scanDbRecords(DB_NAME, true, idbRecords);
+    const legacyOk = await scanDbRecords(LEGACY_DB_NAME, false, idbRecords);
+
+    // Read fresh localStorage after async cursor scans to avoid clobbering concurrent finishes/deletes
+    const currentList = getOfflineEpisodes();
+    if (!primaryOk || !legacyOk) {
+      // If scan failed, only add any discovered records without pruning
+      if (idbRecords.size === 0) return currentList;
+      const mergedMap = new Map<string, OfflineEpisode>();
+      for (const it of currentList) mergedMap.set(it.id, it);
+      let changed = false;
+      for (const [id, ep] of idbRecords) {
+        if (!mergedMap.has(id)) {
+          mergedMap.set(id, ep);
+          changed = true;
+        }
+      }
+      const merged = Array.from(mergedMap.values());
+      if (changed) saveOfflineEpisodesList(merged);
+      return merged;
+    }
+
+    const mergedMap = new Map<string, OfflineEpisode>();
+    let changed = false;
+
+    for (const it of currentList) {
+      if (idbRecords.has(it.id) || activeProgress.get(it.id)?.status === "downloading") {
+        mergedMap.set(it.id, it);
+      } else {
+        // Record is no longer in IndexedDB (evicted or deleted)
+        changed = true;
+      }
+    }
+
+    for (const [id, recMeta] of idbRecords) {
+      if (!mergedMap.has(id)) {
+        mergedMap.set(id, recMeta);
+        changed = true;
+      }
+    }
+
+    const merged = Array.from(mergedMap.values());
+    if (changed) {
+      saveOfflineEpisodesList(merged);
+    }
+    return merged;
   } catch {
     return getOfflineEpisodes();
   }
 }
 
-// Auto-sync persistent storage and auto-resume downloads so exiting app never deletes or interrupts them
+// Auto-sync persistent storage first, then auto-resume interrupted downloads
 if (typeof window !== "undefined") {
-  void syncOfflineEpisodesFromIndexedDB();
-  void resumeAllDownloads();
+  void (async () => {
+    await syncOfflineEpisodesFromIndexedDB();
+    await resumeAllDownloads(false, true);
+  })();
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       void syncOfflineEpisodesFromIndexedDB();
@@ -295,8 +472,7 @@ if (typeof window !== "undefined") {
     void syncOfflineEpisodesFromIndexedDB();
   });
   window.addEventListener("online", () => {
-    void syncOfflineEpisodesFromIndexedDB();
-    void resumeAllDownloads();
+    void syncOfflineEpisodesFromIndexedDB().then(() => resumeAllDownloads(false, true));
   });
 }
 
@@ -370,9 +546,10 @@ export function formatBytes(bytes: number): string {
  * Detects whether the current device connection is on cellular (mobile data)
  */
 export function isCellularConnection(): boolean {
-  if (typeof window !== "undefined" && typeof (window as any).AuraNativeExport?.isCellularNetwork === "function") {
+  const bridge = getNativeBridge();
+  if (bridge && typeof bridge.isCellularNetwork === "function") {
     try {
-      return Boolean((window as any).AuraNativeExport.isCellularNetwork());
+      return Boolean(bridge.isCellularNetwork());
     } catch {
       // fallback to web API
     }
@@ -511,109 +688,277 @@ export function resolveStreamUrlForQuality(
   return null;
 }
 
-async function fetchRecordFromAnyDB(id: string): Promise<any> {
-  const check = (dbName: string): Promise<any> =>
-    new Promise((resolve) => {
-      if (typeof indexedDB === "undefined") {
-        resolve(null);
-        return;
-      }
-      const req = indexedDB.open(dbName);
-      req.onsuccess = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          db.close();
-          resolve(null);
-          return;
-        }
-        const tx = db.transaction(STORE_NAME, "readonly");
-        const store = tx.objectStore(STORE_NAME);
-        const getReq = store.get(id);
-        getReq.onsuccess = () => {
-          db.close();
-          resolve(getReq.result || null);
-        };
-        getReq.onerror = () => {
-          db.close();
-          resolve(null);
-        };
-      };
-      req.onerror = () => resolve(null);
-    });
+async function fetchRecordFromDB(dbName: string, id: string): Promise<any> {
+  const db = await openExistingDB(dbName);
+  if (!db) return null;
 
-  let rec = await check(DB_NAME);
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE_NAME, "readonly");
+      const store = tx.objectStore(STORE_NAME);
+      const getReq = store.get(id);
+      getReq.onsuccess = () => {
+        db.close();
+        resolve(getReq.result || null);
+      };
+      getReq.onerror = () => {
+        db.close();
+        resolve(null);
+      };
+    } catch {
+      db.close();
+      resolve(null);
+    }
+  });
+}
+
+async function fetchRecordFromAnyDB(id: string): Promise<any> {
+  let rec = await fetchRecordFromDB(DB_NAME, id);
   if (!rec) {
-    rec = await check("aurastream_offline_db");
+    rec = await fetchRecordFromDB(LEGACY_DB_NAME, id);
   }
   return rec;
 }
 
-const activeOfflineUrls = new Set<string>();
+const offlineUrlSessions = new Map<string, Set<string>>();
+const sessionKeyToPlaylistUrl = new Map<string, string>();
 
-/**
- * Revokes previously created Object URLs for offline playback to free RAM
- */
-export function revokeOfflinePlaybackUrls(): void {
-  for (const url of activeOfflineUrls) {
+function revokeUrlSet(urls: Set<string>): void {
+  for (const url of urls) {
     try {
       URL.revokeObjectURL(url.split("#")[0]);
     } catch {
       // ignore
     }
   }
-  activeOfflineUrls.clear();
 }
 
 /**
- * Retrieves the local playback Object URL for a downloaded episode
+ * Revokes previously created Object URLs for offline playback to free RAM.
+ * Supports revoking a specific sessionKey or playlist/object URL, or all sessions when omitted.
  */
-export async function getOfflinePlaybackUrl(videoId: number, episode: number): Promise<string | null> {
+export function revokeOfflinePlaybackUrls(targetUrlOrSessionKey?: string): void {
+  if (!targetUrlOrSessionKey) {
+    for (const urls of offlineUrlSessions.values()) {
+      revokeUrlSet(urls);
+    }
+    offlineUrlSessions.clear();
+    sessionKeyToPlaylistUrl.clear();
+    return;
+  }
+
+  const mappedUrl = sessionKeyToPlaylistUrl.get(targetUrlOrSessionKey);
+  if (mappedUrl) {
+    sessionKeyToPlaylistUrl.delete(targetUrlOrSessionKey);
+    const urls = offlineUrlSessions.get(mappedUrl);
+    if (urls) {
+      revokeUrlSet(urls);
+      offlineUrlSessions.delete(mappedUrl);
+    }
+    return;
+  }
+
+  const directUrls = offlineUrlSessions.get(targetUrlOrSessionKey);
+  if (directUrls) {
+    revokeUrlSet(directUrls);
+    offlineUrlSessions.delete(targetUrlOrSessionKey);
+    for (const [k, v] of sessionKeyToPlaylistUrl.entries()) {
+      if (v === targetUrlOrSessionKey) sessionKeyToPlaylistUrl.delete(k);
+    }
+  }
+}
+
+function splitHlsAttrs(attrList: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < attrList.length; i++) {
+    const ch = attrList[i];
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+      current += ch;
+    } else if (ch === "," && !inQuotes) {
+      parts.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
+function parseHlsTagAttrs(line: string): Record<string, string> {
+  const colonIdx = line.indexOf(":");
+  if (colonIdx < 0) return {};
+  const attrs = splitHlsAttrs(line.slice(colonIdx + 1));
+  const out: Record<string, string> = {};
+  for (const attr of attrs) {
+    const eqIdx = attr.indexOf("=");
+    if (eqIdx < 0) continue;
+    const k = attr.slice(0, eqIdx).trim().toUpperCase();
+    let v = attr.slice(eqIdx + 1).trim();
+    if (v.startsWith('"') && v.endsWith('"') && v.length >= 2) {
+      v = v.slice(1, -1);
+    }
+    out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Retrieves the local playback Object URL for a downloaded episode.
+ * Optional sessionKey isolates Blob URL lifecycles between concurrent player instances.
+ */
+export async function getOfflinePlaybackUrl(
+  videoId: number,
+  episode: number,
+  sessionKey?: string
+): Promise<string | null> {
   const id = `${videoId}_${episode}`;
   try {
     const record = await fetchRecordFromAnyDB(id);
-    if (!record) return null;
+    if (!record) {
+      pruneStaleOfflineMetadata(id);
+      return null;
+    }
 
-    // Revoke previous URLs before allocating new ones
-    revokeOfflinePlaybackUrls();
+    if (sessionKey) {
+      revokeOfflinePlaybackUrls(sessionKey);
+    }
 
-    if (record.isHls && record.playlistText && record.segments) {
-      // Recreate blob URLs for AES-128 key (if encrypted) and each segment
-      let offlineKeyUrl = "";
+    const sessionUrls = new Set<string>();
+
+    if (record.isHls && record.playlistText && Array.isArray(record.segments) && record.segments.length > 0) {
+      let fallbackKeyUrl = "";
       if (record.keyBuffer) {
-        const keyBlob = new Blob([record.keyBuffer], { type: "application/octet-stream" });
-        offlineKeyUrl = URL.createObjectURL(keyBlob);
-        activeOfflineUrls.add(offlineKeyUrl);
+        const keyBlob =
+          record.keyBuffer instanceof Blob
+            ? record.keyBuffer
+            : new Blob([record.keyBuffer], { type: "application/octet-stream" });
+        fallbackKeyUrl = URL.createObjectURL(keyBlob);
+        sessionUrls.add(fallbackKeyUrl);
       }
 
-      const lines = record.playlistText.split("\n");
+      const keyUrlMap = new Map<string, string>();
+      if (record.keyBuffers && typeof record.keyBuffers === "object") {
+        for (const [origUri, buf] of Object.entries(record.keyBuffers)) {
+          if (buf) {
+            const kb =
+              buf instanceof Blob
+                ? buf
+                : new Blob([buf as BlobPart], { type: "application/octet-stream" });
+            const kbUrl = URL.createObjectURL(kb);
+            sessionUrls.add(kbUrl);
+            keyUrlMap.set(origUri, kbUrl);
+          }
+        }
+      }
+
+      let fallbackMapUrl = "";
+      const mapUrlByOrigUri = new Map<string, string>();
+      if (Array.isArray(record.mapSegments)) {
+        for (const entry of record.mapSegments) {
+          if (entry && entry.uri && entry.blob) {
+            const mb = entry.blob instanceof Blob ? entry.blob : new Blob([entry.blob], { type: "video/mp4" });
+            const mbUrl = URL.createObjectURL(mb);
+            sessionUrls.add(mbUrl);
+            mapUrlByOrigUri.set(entry.uri, mbUrl);
+            if (!fallbackMapUrl) fallbackMapUrl = mbUrl;
+          }
+        }
+      } else if (record.initSegment) {
+        const ib =
+          record.initSegment instanceof Blob
+            ? record.initSegment
+            : new Blob([record.initSegment], { type: "video/mp4" });
+        fallbackMapUrl = URL.createObjectURL(ib);
+        sessionUrls.add(fallbackMapUrl);
+      }
+
+      const lines = record.playlistText.split(/\r?\n/);
       let segIndex = 0;
-      const newLines = lines.map((line: string) => {
+      const newLines: string[] = [];
+
+      for (const line of lines) {
         const trimmed = line.trim();
-        if (trimmed.startsWith("#EXT-X-KEY:") && offlineKeyUrl) {
-          return line.replace(/URI="[^"]+"/, `URI="${offlineKeyUrl}"`);
+        if (trimmed.startsWith("#EXT-X-KEY:")) {
+          const attrs = parseHlsTagAttrs(trimmed);
+          const origUri = attrs.URI;
+          const mappedKeyUrl = (origUri && keyUrlMap.get(origUri)) || fallbackKeyUrl;
+          if (mappedKeyUrl && /URI="[^"]+"/.test(line)) {
+            newLines.push(line.replace(/URI="[^"]+"/, `URI="${mappedKeyUrl}"`));
+          } else {
+            newLines.push(line);
+          }
+          continue;
+        }
+        if (trimmed.startsWith("#EXT-X-MAP:")) {
+          const attrs = parseHlsTagAttrs(trimmed);
+          const origUri = attrs.URI;
+          const mappedInitUrl = (origUri && mapUrlByOrigUri.get(origUri)) || fallbackMapUrl;
+          if (!mappedInitUrl) {
+            revokeUrlSet(sessionUrls);
+            pruneStaleOfflineMetadata(id);
+            return null;
+          }
+          newLines.push(line.replace(/URI="[^"]+"/, `URI="${mappedInitUrl}"`));
+          continue;
         }
         if (trimmed && !trimmed.startsWith("#")) {
           const segData = record.segments[segIndex++];
-          if (segData) {
-            const segBlob = new Blob([segData], { type: "video/mp2t" });
-            const segUrl = URL.createObjectURL(segBlob);
-            activeOfflineUrls.add(segUrl);
-            return segUrl;
+          if (!segData) {
+            revokeUrlSet(sessionUrls);
+            pruneStaleOfflineMetadata(id);
+            return null;
           }
+          const segBlob =
+            segData instanceof Blob
+              ? segData
+              : new Blob([segData], { type: "video/mp2t" });
+          if (segBlob.size <= 0) {
+            revokeUrlSet(sessionUrls);
+            pruneStaleOfflineMetadata(id);
+            return null;
+          }
+          const segUrl = URL.createObjectURL(segBlob);
+          sessionUrls.add(segUrl);
+          newLines.push(segUrl);
+          continue;
         }
-        return line;
-      });
+        newLines.push(line);
+      }
+
+      if (segIndex === 0) {
+        revokeUrlSet(sessionUrls);
+        pruneStaleOfflineMetadata(id);
+        return null;
+      }
+
       const rewritten = newLines.join("\n");
       const plBlob = new Blob([rewritten], { type: "application/vnd.apple.mpegurl" });
       const rawUrl = URL.createObjectURL(plBlob);
-      activeOfflineUrls.add(rawUrl);
+      sessionUrls.add(rawUrl);
       const plUrl = rawUrl + "#.m3u8";
+      offlineUrlSessions.set(plUrl, sessionUrls);
+      if (sessionKey) sessionKeyToPlaylistUrl.set(sessionKey, plUrl);
       return plUrl;
     } else if (record.blob) {
-      const singleUrl = URL.createObjectURL(record.blob);
-      activeOfflineUrls.add(singleUrl);
+      const blob =
+        record.blob instanceof Blob
+          ? record.blob
+          : new Blob([record.blob], { type: "video/mp4" });
+      if (blob.size <= 0) {
+        pruneStaleOfflineMetadata(id);
+        return null;
+      }
+      const singleUrl = URL.createObjectURL(blob);
+      sessionUrls.add(singleUrl);
+      offlineUrlSessions.set(singleUrl, sessionUrls);
+      if (sessionKey) sessionKeyToPlaylistUrl.set(sessionKey, singleUrl);
       return singleUrl;
     } else {
+      pruneStaleOfflineMetadata(id);
       return null;
     }
   } catch {
@@ -635,35 +980,40 @@ export function getOfflineSubtitles(videoId: number, episode: number): SubtitleC
  */
 export function cancelDownload(id: string): void {
   const prog = activeProgress.get(id);
+  activeRunTokens.delete(id);
+  const ctrl = activeAbortControllers.get(id);
+  if (ctrl) {
+    activeAbortControllers.delete(id);
+    ctrl.abort("cancelled");
+  }
+  activeProgress.delete(id);
+  notifyProgress(true);
   if (prog) {
     notifyNativeDownloadCancel(prog.videoId, prog.episode);
   }
-  const ctrl = activeAbortControllers.get(id);
-  if (ctrl) {
-    ctrl.abort("cancelled");
-    activeAbortControllers.delete(id);
-  }
-  activeProgress.delete(id);
-  notifyProgress();
 }
 
 /**
  * Pauses an active download
  */
 export function pauseDownload(id: string): void {
+  activeRunTokens.delete(id);
   const ctrl = activeAbortControllers.get(id);
   if (ctrl) {
-    ctrl.abort("paused");
     activeAbortControllers.delete(id);
+    ctrl.abort("paused");
   }
   const prog = activeProgress.get(id);
   if (prog) {
-    prog.status = "paused";
-    prog.speedBytesPerSec = 0;
-    prog.speedFormatted = "Paused";
-    prog.etaFormatted = "--";
-    activeProgress.set(id, { ...prog });
-    notifyProgress();
+    activeProgress.set(id, {
+      ...prog,
+      status: "paused",
+      autoResume: false,
+      speedBytesPerSec: 0,
+      speedFormatted: "Paused",
+      etaFormatted: "--",
+    });
+    notifyProgress(true);
   }
 }
 
@@ -673,6 +1023,17 @@ export function pauseDownload(id: string): void {
 export async function resumeDownload(id: string, forceAllowCellular = false): Promise<void> {
   const item = activeProgress.get(id);
   if (!item || !item.streamUrl) return;
+  if (isEpisodeDownloaded(item.videoId, item.episode)) {
+    activeProgress.delete(id);
+    notifyProgress(true);
+    return;
+  }
+  if (!forceAllowCellular && isWifiOnlyDownloadEnabled() && isCellularConnection()) {
+    return;
+  }
+  if (!forceAllowCellular && typeof navigator !== "undefined" && navigator.onLine === false) {
+    return;
+  }
   await startEpisodeDownload(
     item.videoId,
     item.episode,
@@ -699,9 +1060,9 @@ export function pauseAllDownloads(): void {
 /**
  * Resumes all paused downloads sequentially
  */
-export async function resumeAllDownloads(forceAllowCellular = false): Promise<void> {
+export async function resumeAllDownloads(forceAllowCellular = false, onlyAutoResumable = false): Promise<void> {
   const pausedIds = Array.from(activeProgress.entries())
-    .filter(([_, prog]) => prog.status === "paused")
+    .filter(([_, prog]) => prog.status === "paused" && (!onlyAutoResumable || prog.autoResume === true))
     .map(([id]) => id);
 
   for (const id of pausedIds) {
@@ -764,6 +1125,13 @@ export function getActiveDownloads(): ActiveDownloadProgress[] {
   return Array.from(activeProgress.values());
 }
 
+function resolveProxyMediaUrl(rawUrl: string): string {
+  if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://") || rawUrl.startsWith("hg://")) {
+    return rawUrl;
+  }
+  return rawUrl.startsWith("/") ? `${LOCAL}${rawUrl}` : `${LOCAL}/${rawUrl}`;
+}
+
 async function fetchWithRetry(
   url: string,
   signal?: AbortSignal,
@@ -820,10 +1188,7 @@ async function fetchSegmentData(
   signal: AbortSignal | undefined,
   onChunk?: (chunkLength: number) => void
 ): Promise<ArrayBuffer> {
-  let targetUrl = segUrl;
-  if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://") && !targetUrl.startsWith("hg://")) {
-    targetUrl = targetUrl.startsWith("/") ? `${LOCAL}${targetUrl}` : `${LOCAL}/${targetUrl}`;
-  }
+  const targetUrl = resolveProxyMediaUrl(segUrl);
 
   let lastError: any = null;
   const maxAttempts = 5;
@@ -857,7 +1222,11 @@ async function fetchSegmentData(
       clearTimeout(timeoutTimer);
       if (onAbort && signal) signal.removeEventListener("abort", onAbort);
 
-      if (onChunk && buf.byteLength > 0) {
+      if (buf.byteLength <= 0) {
+        throw new Error("Empty segment received (0 bytes)");
+      }
+
+      if (onChunk) {
         onChunk(buf.byteLength);
       }
       return buf;
@@ -876,6 +1245,37 @@ async function fetchSegmentData(
   }
 
   throw lastError || new Error("Failed to download segment after retries");
+}
+
+function selectBestHlsVariant(playlistText: string): string | null {
+  const lines = playlistText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  let bestUrl: string | null = null;
+  let bestBandwidth = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.startsWith("#EXT-X-STREAM-INF:")) {
+      const attrs = parseHlsTagAttrs(line);
+      const avgBw = Number(attrs["AVERAGE-BANDWIDTH"]);
+      const bw = Number(attrs.BANDWIDTH);
+      const score = Number.isFinite(bw) ? bw : (Number.isFinite(avgBw) ? avgBw : 0);
+
+      for (let j = i + 1; j < lines.length; j++) {
+        if (!lines[j].startsWith("#")) {
+          if (score > bestBandwidth || bestUrl === null) {
+            bestBandwidth = score;
+            bestUrl = lines[j];
+          }
+          i = j;
+          break;
+        }
+      }
+    }
+  }
+
+  if (bestUrl) return bestUrl;
+  const fallback = lines.find((l) => !l.startsWith("#"));
+  return fallback || null;
 }
 
 /**
@@ -906,10 +1306,15 @@ export async function startEpisodeDownload(
     throw new Error("Battery is low (< 20%). Connect charger to download.");
   }
 
+  if (isEpisodeDownloaded(videoId, episode)) {
+    return;
+  }
+
   // Guard storage space on device (ensure at least 120 MB free)
   try {
-    if (typeof window !== "undefined" && typeof (window as any).AuraNativeExport?.getStorageInfo === "function") {
-      const raw = (window as any).AuraNativeExport.getStorageInfo();
+    const bridge = getNativeBridge();
+    if (bridge && typeof bridge.getStorageInfo === "function") {
+      const raw = bridge.getStorageInfo();
       const parsed = JSON.parse(raw);
       if (parsed.primaryFreeBytes && parsed.primaryFreeBytes < 120 * 1024 * 1024) {
         throw new Error("Device storage is critically low (< 120 MB free). Please free space before downloading.");
@@ -921,8 +1326,10 @@ export async function startEpisodeDownload(
     }
   }
 
-  // Cancel any existing controller for this item
+  // Cancel any existing controller for this item before assigning new run token
   const existingCtrl = activeAbortControllers.get(id);
+  const runToken = ++runTokenSeq;
+  activeRunTokens.set(id, runToken);
   if (existingCtrl) {
     existingCtrl.abort("restarted");
   }
@@ -930,39 +1337,43 @@ export async function startEpisodeDownload(
   const controller = new AbortController();
   activeAbortControllers.set(id, controller);
 
+  const isStillOwner = () => activeRunTokens.get(id) === runToken;
+  const isCurrentRun = () => isStillOwner() && !controller.signal.aborted;
+
   activeProgress.set(id, {
     id,
     videoId,
     episode,
     title,
     cover,
-    progress: 0,
+    progress: 1,
     downloadedBytes: 0,
     totalBytes: 0,
     speedBytesPerSec: 0,
-    speedFormatted: "-- KB/s",
+    speedFormatted: "Connecting...",
     etaSeconds: 0,
     etaFormatted: "--",
     status: "downloading",
+    autoResume: true,
     streamUrl,
     quality,
     isHevc,
   });
-  notifyProgress();
+  // Sync native activeDownloadCount BEFORE emitting initial notification update
+  notifyProgress(true);
 
   let lastSampleTime = performance.now();
   let lastSampleBytes = 0;
   let currentSpeed = 0;
-  let lastNotifPct = -1;
-  let lastNotifTime = 0;
+  let lastNotifPct = 1;
+  let lastNotifTime = Date.now();
 
-  if (typeof window !== "undefined" && typeof (window as any).AuraNativeExport?.setDownloadActive === "function") {
-    (window as any).AuraNativeExport.setDownloadActive(true);
-  }
+  notifyNativeDownloadProgress(videoId, episode, title, 1, "Connecting...", "");
 
   const maybeNotifyNative = (pct: number, speedText: string, downloadedBytes: number, totalExpectedBytes: number) => {
+    if (!isCurrentRun()) return;
     const now = Date.now();
-    if (pct !== lastNotifPct && (pct - lastNotifPct >= 2 || now - lastNotifTime > 1200 || pct >= 99)) {
+    if (pct !== lastNotifPct && (pct - lastNotifPct >= 1 || now - lastNotifTime > 700 || pct >= 99 || pct <= 2)) {
       lastNotifPct = pct;
       lastNotifTime = now;
       const sizeText = totalExpectedBytes > 0
@@ -975,7 +1386,7 @@ export async function startEpisodeDownload(
   const computeSpeedAndEta = (receivedBytes: number, totalExpectedBytes: number) => {
     const now = performance.now();
     const elapsedSec = (now - lastSampleTime) / 1000;
-    if (elapsedSec >= 0.5) {
+    if (elapsedSec >= 0.4) {
       currentSpeed = Math.max(0, (receivedBytes - lastSampleBytes) / elapsedSec);
       lastSampleTime = now;
       lastSampleBytes = receivedBytes;
@@ -1000,23 +1411,25 @@ export async function startEpisodeDownload(
       // Subtitle fallback if offline or request failed
     }
 
-    if (controller.signal.aborted) return;
+    if (!isCurrentRun()) return;
 
     // 2. Fetch the video stream (support HLS .m3u8 & direct stream via local proxy)
-    const chunks: Uint8Array[] = [];
-    let segmentBuffers: ArrayBuffer[] = [];
+    const blobParts: BlobPart[] = [];
+    let segmentBlobs: Blob[] = [];
+    let mapSegments: Array<{ uri: string; blob: Blob }> = [];
     let receivedBytes = 0;
     let mime = "video/mp4";
     const isHls = /\.m3u8(\?|$)/i.test(streamUrl) || streamUrl.includes("/hls?u=");
     let playlistText = "";
 
-    let keyBuffer: ArrayBuffer | undefined = undefined;
+    let keyBlob: Blob | undefined = undefined;
+    let keyBuffers: Record<string, Blob> | undefined = undefined;
     let keyMethod: string | undefined = undefined;
     let keyIv: string | undefined = undefined;
 
     if (isHls) {
       mime = "video/mp2t";
-      let plUrl = streamUrl.startsWith(`${LOCAL}/hls`) || streamUrl.startsWith(`${LOCAL}/seg`)
+      const plUrl = streamUrl.startsWith(`${LOCAL}/hls`) || streamUrl.startsWith(`${LOCAL}/seg`)
         ? streamUrl
         : `${LOCAL}/hls?u=${encodeURIComponent(streamUrl)}`;
 
@@ -1026,64 +1439,91 @@ export async function startEpisodeDownload(
       }
       playlistText = await plRes.text();
 
-      // Master Playlist support: if child variants are present, follow the best variant
+      // Master Playlist support: select highest bandwidth child variant
       if (playlistText.includes("#EXT-X-STREAM-INF")) {
-        const lines = playlistText.split("\n").map((l) => l.trim()).filter(Boolean);
-        const variantUrls = lines.filter((l) => !l.startsWith("#"));
-        if (variantUrls.length > 0) {
-          let variantUrl = variantUrls[0];
-          if (!variantUrl.startsWith("http://") && !variantUrl.startsWith("https://") && !variantUrl.startsWith("hg://")) {
-            variantUrl = variantUrl.startsWith("/") ? `${LOCAL}${variantUrl}` : `${LOCAL}/${variantUrl}`;
-          }
-          plRes = await fetchWithRetry(variantUrl, controller.signal, 3, 300, 15000);
-          if (plRes.ok) {
-            playlistText = await plRes.text();
-          }
+        const chosenVariant = selectBestHlsVariant(playlistText);
+        if (!chosenVariant) {
+          throw new Error("Master playlist contains no playable variant streams");
+        }
+        const variantUrl = resolveProxyMediaUrl(chosenVariant);
+        plRes = await fetchWithRetry(variantUrl, controller.signal, 3, 300, 15000);
+        if (!plRes.ok) {
+          throw new Error(`Failed to load HLS variant playlist: HTTP ${plRes.status}`);
+        }
+        playlistText = await plRes.text();
+        if (!playlistText.trim() || playlistText.includes("#EXT-X-STREAM-INF")) {
+          throw new Error("Invalid HLS media playlist returned by variant");
         }
       }
 
-      const lines = playlistText.split("\n").map((l) => l.trim()).filter(Boolean);
+      const lines = playlistText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 
-      // Check for AES-128 Encryption Key in the HLS playlist
-      const keyLine = lines.find((l) => l.startsWith("#EXT-X-KEY:"));
-      if (keyLine) {
-        const matchUri = /URI="([^"]+)"/.exec(keyLine);
-        const matchMethod = /METHOD=([^,]+)/.exec(keyLine);
-        const matchIv = /IV=([^,]+)/.exec(keyLine);
-        if (matchMethod) keyMethod = matchMethod[1];
-        if (matchIv) keyIv = matchIv[1];
-        if (matchUri && matchUri[1]) {
-          let rawKeyUrl = matchUri[1];
-          if (!rawKeyUrl.startsWith("http://") && !rawKeyUrl.startsWith("https://") && !rawKeyUrl.startsWith("hg://")) {
-            rawKeyUrl = rawKeyUrl.startsWith("/") ? `${LOCAL}${rawKeyUrl}` : `${LOCAL}/${rawKeyUrl}`;
+      // Parse & download all #EXT-X-KEY entries (fail cleanly if AES-128 key fetch fails)
+      const keyLines = lines.filter((l) => l.startsWith("#EXT-X-KEY:"));
+      const downloadedKeys = new Map<string, Blob>();
+      for (const kl of keyLines) {
+        const attrs = parseHlsTagAttrs(kl);
+        const method = (attrs.METHOD || "").toUpperCase();
+        if (!keyMethod && method) keyMethod = method;
+        if (!keyIv && attrs.IV) keyIv = attrs.IV;
+
+        if (!method || method === "NONE") continue;
+        if (!attrs.URI) {
+          throw new Error(`HLS ${method} key tag is missing URI`);
+        }
+        if (!downloadedKeys.has(attrs.URI)) {
+          const rawKeyUrl = resolveProxyMediaUrl(attrs.URI);
+          const keyRes = await fetchWithRetry(rawKeyUrl, controller.signal, 3, 250, 12000);
+          if (!keyRes.ok) {
+            throw new Error(`Failed to fetch HLS decryption key: HTTP ${keyRes.status}`);
           }
-          try {
-            const keyRes = await fetchWithRetry(rawKeyUrl, controller.signal, 3, 250, 12000);
-            if (keyRes.ok) {
-              keyBuffer = await keyRes.arrayBuffer();
-            }
-          } catch {
-            // key fallback if network issue
+          const keyAb = await keyRes.arrayBuffer();
+          if (keyAb.byteLength <= 0) {
+            throw new Error("Empty HLS decryption key received (0 bytes)");
           }
+          const kb = new Blob([keyAb], { type: "application/octet-stream" });
+          downloadedKeys.set(attrs.URI, kb);
+          if (!keyBlob) keyBlob = kb;
+        }
+      }
+      if (downloadedKeys.size > 0) {
+        keyBuffers = Object.fromEntries(downloadedKeys.entries());
+      }
+
+      // Parse & download any #EXT-X-MAP init segments (fMP4 / CMAF / HEVC)
+      const mapLines = lines.filter((l) => l.startsWith("#EXT-X-MAP:"));
+      const seenMapUris = new Set<string>();
+      for (const ml of mapLines) {
+        const attrs = parseHlsTagAttrs(ml);
+        if (attrs.URI && !seenMapUris.has(attrs.URI)) {
+          seenMapUris.add(attrs.URI);
+          const initBuf = await fetchSegmentData(attrs.URI, controller.signal, (delta) => {
+            receivedBytes += delta;
+          });
+          mapSegments.push({
+            uri: attrs.URI,
+            blob: new Blob([initBuf], { type: "video/mp4" }),
+          });
         }
       }
 
-      // Find segment URLs
+      // Find media segment URLs
       const segUrls = lines.filter((l) => !l.startsWith("#"));
       if (segUrls.length === 0) {
         throw new Error("No media segments found in playlist");
       }
 
       const totalSegments = segUrls.length;
-      segmentBuffers = new Array(totalSegments);
+      segmentBlobs = new Array(totalSegments);
       let completedSegments = 0;
       let nextIndex = 0;
 
-      // Mobile network stability: prioritize completion with reliable serial worker on slow/cellular
-      const CONCURRENCY = isSlowOrCellularConnection() ? 1 : 2;
+      // Parallel segment downloading: 4 workers on Wi-Fi, 2 on cellular/slow connections
+      const CONCURRENCY = isSlowOrCellularConnection() ? 2 : 4;
 
       // Provide immediate feedback with initial total size estimation (~1.8MB per segment)
       const initialEstBytes = totalSegments * 1.8 * 1024 * 1024;
+      if (!isCurrentRun()) return;
       activeProgress.set(id, {
         id,
         videoId,
@@ -1091,90 +1531,70 @@ export async function startEpisodeDownload(
         title,
         cover,
         progress: 1,
-        downloadedBytes: 0,
+        downloadedBytes: receivedBytes,
         totalBytes: initialEstBytes,
         speedBytesPerSec: 0,
         speedFormatted: "Connecting...",
         etaSeconds: Math.round(initialEstBytes / (1.5 * 1024 * 1024)),
         etaFormatted: formatEta(Math.round(initialEstBytes / (1.5 * 1024 * 1024))),
         status: "downloading",
+        autoResume: true,
         streamUrl,
+        quality,
+        isHevc,
       });
-      notifyProgress();
-      maybeNotifyNative(1, "Connecting...", 0, initialEstBytes);
+      notifyProgress(false);
+      maybeNotifyNative(1, "Connecting...", receivedBytes, initialEstBytes);
       logLine(`[download] start id=${id} ep=${episode} segments=${totalSegments} estBytes=${initialEstBytes}`);
 
       const failedIndices: number[] = [];
 
+      const updateSegmentProgress = () => {
+        if (!isCurrentRun()) return;
+        const avgSegBytes = receivedBytes / Math.max(1, completedSegments);
+        const estTotalBytes = Math.max(receivedBytes, Math.round(avgSegBytes * totalSegments));
+        const { speedBytesPerSec, speedFormatted, etaSeconds, etaFormatted } = computeSpeedAndEta(
+          receivedBytes,
+          estTotalBytes
+        );
+        const pct = Math.min(99, Math.max(1, Math.round((completedSegments / totalSegments) * 100)));
+        activeProgress.set(id, {
+          id,
+          videoId,
+          episode,
+          title,
+          cover,
+          progress: pct,
+          downloadedBytes: receivedBytes,
+          totalBytes: estTotalBytes,
+          speedBytesPerSec,
+          speedFormatted,
+          etaSeconds,
+          etaFormatted,
+          status: "downloading",
+          autoResume: true,
+          streamUrl,
+          quality,
+          isHevc,
+        });
+        notifyProgress(false);
+        maybeNotifyNative(pct, speedFormatted, receivedBytes, estTotalBytes);
+      };
+
       const worker = async () => {
-        while (nextIndex < totalSegments && !controller.signal.aborted) {
+        while (nextIndex < totalSegments && isCurrentRun()) {
           const i = nextIndex++;
-          let segUrl = segUrls[i];
-          if (!segUrl.startsWith("http://") && !segUrl.startsWith("https://") && !segUrl.startsWith("hg://")) {
-            segUrl = segUrl.startsWith("/") ? `${LOCAL}${segUrl}` : `${LOCAL}/${segUrl}`;
-          }
+          const segUrl = segUrls[i];
           try {
             const segBuf = await fetchSegmentData(segUrl, controller.signal, (chunkDelta) => {
               receivedBytes += chunkDelta;
-              const avgSegBytes = receivedBytes / Math.max(1, completedSegments + 0.5);
-              const estTotalBytes = Math.max(receivedBytes, Math.round(avgSegBytes * totalSegments));
-              const { speedBytesPerSec, speedFormatted, etaSeconds, etaFormatted } = computeSpeedAndEta(
-                receivedBytes,
-                estTotalBytes
-              );
-              const pct = Math.min(99, Math.max(1, Math.round((receivedBytes / estTotalBytes) * 100)));
-              activeProgress.set(id, {
-                id,
-                videoId,
-                episode,
-                title,
-                cover,
-                progress: pct,
-                downloadedBytes: receivedBytes,
-                totalBytes: estTotalBytes,
-                speedBytesPerSec,
-                speedFormatted,
-                etaSeconds,
-                etaFormatted,
-                status: "downloading",
-                streamUrl,
-              });
-              notifyProgress();
-              maybeNotifyNative(pct, speedFormatted, receivedBytes, estTotalBytes);
             });
-            segmentBuffers[i] = segBuf;
+            // Wrap immediately as disk-backed Blob so V8 heap and IndexedDB put() never hit DataCloneError OOM
+            segmentBlobs[i] = new Blob([segBuf], { type: "video/mp2t" });
             completedSegments++;
-
-            // Estimated total bytes based on average segment size so far
-            const avgSegBytes = receivedBytes / completedSegments;
-            const estTotalBytes = Math.round(avgSegBytes * totalSegments);
-
-            const { speedBytesPerSec, speedFormatted, etaSeconds, etaFormatted } = computeSpeedAndEta(
-              receivedBytes,
-              estTotalBytes
-            );
-
-            const pct = Math.min(99, Math.max(1, Math.round((completedSegments / totalSegments) * 100)));
-            activeProgress.set(id, {
-              id,
-              videoId,
-              episode,
-              title,
-              cover,
-              progress: pct,
-              downloadedBytes: receivedBytes,
-              totalBytes: estTotalBytes,
-              speedBytesPerSec,
-              speedFormatted,
-              etaSeconds,
-              etaFormatted,
-              status: "downloading",
-              streamUrl,
-            });
-            notifyProgress();
-            maybeNotifyNative(pct, speedFormatted, receivedBytes, estTotalBytes);
+            updateSegmentProgress();
           } catch (segErr) {
-            if (controller.signal.aborted) return;
+            if (!isCurrentRun()) return;
             logLine(`[download] seg failed id=${id} ep=${episode} seg=${i + 1}/${totalSegments} err=${segErr}`);
             failedIndices.push(i);
           }
@@ -1185,27 +1605,30 @@ export async function startEpisodeDownload(
       await Promise.all(workers);
 
       // Retry any segments that failed during parallel worker phase
-      if (failedIndices.length > 0 && !controller.signal.aborted) {
+      if (failedIndices.length > 0 && isCurrentRun()) {
         logLine(`[download] retrying ${failedIndices.length} failed segments id=${id}`);
         for (const i of failedIndices) {
-          if (controller.signal.aborted) break;
-          let segUrl = segUrls[i];
-          if (!segUrl.startsWith("http://") && !segUrl.startsWith("https://") && !segUrl.startsWith("hg://")) {
-            segUrl = segUrl.startsWith("/") ? `${LOCAL}${segUrl}` : `${LOCAL}/${segUrl}`;
-          }
+          if (!isCurrentRun()) break;
+          const segUrl = segUrls[i];
           const segBuf = await fetchSegmentData(segUrl, controller.signal, (chunkDelta) => {
             receivedBytes += chunkDelta;
           });
-          segmentBuffers[i] = segBuf;
+          segmentBlobs[i] = new Blob([segBuf], { type: "video/mp2t" });
           completedSegments++;
+          updateSegmentProgress();
         }
       }
 
-      if (completedSegments < totalSegments && !controller.signal.aborted) {
+      if (!isCurrentRun()) return;
+
+      if (completedSegments < totalSegments) {
         throw new Error(`Incomplete download: ${completedSegments}/${totalSegments} segments retrieved`);
       }
+      if (segmentBlobs.some((b) => !(b instanceof Blob) || b.size <= 0)) {
+        throw new Error("Incomplete or empty HLS video segment");
+      }
     } else {
-      // Direct video stream (mp4 / m4v / webm)
+      // Direct video stream (mp4 / m4v / webm) with 4 MiB Blob part flushing
       const downloadUrl = streamUrl.startsWith(`${LOCAL}/`) || streamUrl.startsWith("hg://")
         ? streamUrl
         : `${LOCAL}/seg?u=${encodeURIComponent(streamUrl)}`;
@@ -1216,9 +1639,80 @@ export async function startEpisodeDownload(
       }
 
       mime = response.headers.get("content-type") || "video/mp4";
-      const buf = await response.arrayBuffer();
-      chunks.push(new Uint8Array(buf));
-      receivedBytes = buf.byteLength;
+      const contentLength = Number(response.headers.get("content-length") || 0);
+
+      let bufferedChunks: Uint8Array[] = [];
+      let bufferedBytes = 0;
+      const FLUSH_THRESHOLD = 4 * 1024 * 1024;
+      const flushBuffered = () => {
+        if (bufferedChunks.length > 0) {
+          blobParts.push(new Blob(bufferedChunks as BlobPart[], { type: mime }));
+          bufferedChunks = [];
+          bufferedBytes = 0;
+        }
+      };
+
+      if (response.body && typeof response.body.getReader === "function") {
+        const reader = response.body.getReader();
+        while (true) {
+          if (!isCurrentRun()) {
+            try { await reader.cancel(); } catch {}
+            return;
+          }
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value && value.byteLength > 0) {
+            bufferedChunks.push(value);
+            bufferedBytes += value.byteLength;
+            if (bufferedBytes >= FLUSH_THRESHOLD) {
+              flushBuffered();
+            }
+            receivedBytes += value.byteLength;
+            const estTotal = contentLength > 0
+              ? Math.max(contentLength, receivedBytes)
+              : Math.max(15 * 1024 * 1024, Math.round(receivedBytes * 1.25));
+            const pct = Math.min(99, Math.max(1, Math.round((receivedBytes / estTotal) * 100)));
+            const { speedBytesPerSec, speedFormatted, etaSeconds, etaFormatted } = computeSpeedAndEta(
+              receivedBytes,
+              estTotal
+            );
+            if (!isCurrentRun()) {
+              try { await reader.cancel(); } catch {}
+              return;
+            }
+            activeProgress.set(id, {
+              id,
+              videoId,
+              episode,
+              title,
+              cover,
+              progress: pct,
+              downloadedBytes: receivedBytes,
+              totalBytes: estTotal,
+              speedBytesPerSec,
+              speedFormatted,
+              etaSeconds,
+              etaFormatted,
+              status: "downloading",
+              autoResume: true,
+              streamUrl,
+              quality,
+              isHevc,
+            });
+            notifyProgress(false);
+            maybeNotifyNative(pct, speedFormatted, receivedBytes, estTotal);
+          }
+        }
+        flushBuffered();
+      } else {
+        const buf = await response.arrayBuffer();
+        if (buf.byteLength > 0) {
+          blobParts.push(new Blob([buf], { type: mime }));
+          receivedBytes = buf.byteLength;
+        }
+      }
+
+      if (!isCurrentRun()) return;
 
       const { speedBytesPerSec, speedFormatted, etaSeconds, etaFormatted } = computeSpeedAndEta(
         receivedBytes,
@@ -1239,50 +1733,73 @@ export async function startEpisodeDownload(
         etaSeconds,
         etaFormatted,
         status: "downloading",
+        autoResume: true,
         streamUrl,
+        quality,
+        isHevc,
       });
-      notifyProgress();
+      notifyProgress(false);
       maybeNotifyNative(99, speedFormatted, receivedBytes, receivedBytes);
     }
 
-    if (controller.signal.aborted) return;
+    if (!isCurrentRun()) return;
 
-    const finalBlob = isHls ? null : new Blob(chunks as BlobPart[], { type: mime });
+    const finalBlob = isHls ? null : new Blob(blobParts, { type: mime });
     const totalSize = isHls ? receivedBytes : (finalBlob?.size || 0);
+    if (totalSize <= 0) {
+      throw new Error("Empty download received (0 bytes)");
+    }
 
-    // 3. Save to IndexedDB
+    // 3. Save to IndexedDB using disk-backed Blob segments and wait for transaction commit
     const db = await openDB();
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readwrite");
-      const store = tx.objectStore(STORE_NAME);
-      const record = {
-        id,
-        videoId,
-        episode,
-        title: title || `Episode ${episode}`,
-        cover: cover || "",
-        isHls,
-        playlistText: isHls ? playlistText : undefined,
-        segments: isHls ? segmentBuffers : undefined,
-        keyBuffer,
-        keyMethod,
-        keyIv,
-        blob: finalBlob || undefined,
-        sizeBytes: totalSize,
-        cues,
-        quality,
-        isHevc,
-      };
-      const req = store.put(record);
-      req.onsuccess = () => {
+      try {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        const store = tx.objectStore(STORE_NAME);
+        const record = {
+          id,
+          videoId,
+          episode,
+          title: title || `Episode ${episode}`,
+          cover: cover || "",
+          isHls,
+          playlistText: isHls ? playlistText : undefined,
+          segments: isHls ? segmentBlobs : undefined,
+          mapSegments: isHls && mapSegments.length > 0 ? mapSegments : undefined,
+          initSegment: isHls && mapSegments.length > 0 ? mapSegments[0].blob : undefined,
+          keyBuffer: keyBlob,
+          keyBuffers,
+          keyMethod,
+          keyIv,
+          blob: finalBlob || undefined,
+          sizeBytes: totalSize,
+          cues,
+          quality,
+          isHevc,
+        };
+        store.put(record);
+        tx.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        tx.onerror = () => {
+          db.close();
+          reject(tx.error || new Error("IndexedDB transaction failed"));
+        };
+        tx.onabort = () => {
+          db.close();
+          reject(tx.error || new Error("IndexedDB transaction aborted"));
+        };
+      } catch (txErr) {
         db.close();
-        resolve();
-      };
-      req.onerror = () => {
-        db.close();
-        reject(req.error);
-      };
+        reject(txErr);
+      }
     });
+
+    if (!isCurrentRun()) {
+      await deleteFromDb(DB_NAME, id).catch(() => {});
+      return;
+    }
 
     // 4. Update metadata
     const list = getOfflineEpisodes().filter((it) => it.id !== id);
@@ -1300,7 +1817,11 @@ export async function startEpisodeDownload(
     });
     saveOfflineEpisodesList(list);
 
-    activeAbortControllers.delete(id);
+    if (activeAbortControllers.get(id) === controller) {
+      activeAbortControllers.delete(id);
+    }
+    if (!isStillOwner()) return;
+
     activeProgress.set(id, {
       id,
       videoId,
@@ -1315,30 +1836,44 @@ export async function startEpisodeDownload(
       etaSeconds: 0,
       etaFormatted: "Done",
       status: "completed",
+      autoResume: false,
       streamUrl,
+      quality,
+      isHevc,
     });
-    notifyProgress();
+    notifyProgress(true);
     notifyNativeDownloadComplete(videoId, episode, title, formatBytes(totalSize));
     logLine(`[download] finished id=${id} ep=${episode} size=${formatBytes(totalSize)}`);
 
     setTimeout(() => {
-      activeProgress.delete(id);
-      notifyProgress();
+      if (activeRunTokens.get(id) === runToken && activeProgress.get(id)?.status === "completed") {
+        activeProgress.delete(id);
+        activeRunTokens.delete(id);
+        notifyProgress(true);
+      }
     }, 2500);
   } catch (err: unknown) {
-    activeAbortControllers.delete(id);
-    notifyNativeDownloadCancel(videoId, episode);
-    logLine(`[download] error id=${id} ep=${episode} err=${(err as Error)?.message || String(err)}`);
-    const error = err as { name?: string };
-    if (error?.name === "AbortError" || controller.signal.aborted) {
-      if (controller.signal.reason === "paused") {
-        return;
-      }
-      activeProgress.delete(id);
-      notifyProgress();
+    if (activeAbortControllers.get(id) === controller) {
+      activeAbortControllers.delete(id);
+    }
+    if (!isStillOwner()) {
       return;
     }
 
+    logLine(`[download] error id=${id} ep=${episode} err=${(err as Error)?.message || String(err)}`);
+    const error = err as { name?: string };
+    if (error?.name === "AbortError" || controller.signal.aborted) {
+      if (controller.signal.reason === "paused" || activeProgress.get(id)?.status === "paused") {
+        return;
+      }
+      activeRunTokens.delete(id);
+      activeProgress.delete(id);
+      notifyProgress(true);
+      notifyNativeDownloadCancel(videoId, episode);
+      return;
+    }
+
+    activeRunTokens.delete(id);
     activeProgress.set(id, {
       id,
       videoId,
@@ -1353,59 +1888,51 @@ export async function startEpisodeDownload(
       etaSeconds: 0,
       etaFormatted: "--",
       status: "error",
+      autoResume: false,
       error: (err as Error).message || "Download failed",
       streamUrl,
+      quality,
+      isHevc,
     });
-    notifyProgress();
+    notifyProgress(true);
+    notifyNativeDownloadCancel(videoId, episode);
     throw err;
   }
 }
 
 async function deleteFromDb(dbName: string, id: string): Promise<void> {
+  const db = await openExistingDB(dbName);
+  if (!db) return;
+
   return new Promise((resolve) => {
-    if (typeof indexedDB === "undefined") {
-      resolve();
-      return;
-    }
-    const req = indexedDB.open(dbName);
-    req.onsuccess = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.close();
-        resolve();
-        return;
-      }
+    try {
       const tx = db.transaction(STORE_NAME, "readwrite");
       const store = tx.objectStore(STORE_NAME);
       const delReq = store.delete(id);
       delReq.onsuccess = () => { db.close(); resolve(); };
       delReq.onerror = () => { db.close(); resolve(); };
-    };
-    req.onerror = () => resolve();
+    } catch {
+      db.close();
+      resolve();
+    }
   });
 }
 
 async function clearDb(dbName: string): Promise<void> {
+  const db = await openExistingDB(dbName);
+  if (!db) return;
+
   return new Promise((resolve) => {
-    if (typeof indexedDB === "undefined") {
-      resolve();
-      return;
-    }
-    const req = indexedDB.open(dbName);
-    req.onsuccess = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.close();
-        resolve();
-        return;
-      }
+    try {
       const tx = db.transaction(STORE_NAME, "readwrite");
       const store = tx.objectStore(STORE_NAME);
       const clearReq = store.clear();
       clearReq.onsuccess = () => { db.close(); resolve(); };
       clearReq.onerror = () => { db.close(); resolve(); };
-    };
-    req.onerror = () => resolve();
+    } catch {
+      db.close();
+      resolve();
+    }
   });
 }
 
@@ -1416,7 +1943,7 @@ export async function deleteOfflineEpisode(videoId: number, episode: number): Pr
   const id = `${videoId}_${episode}`;
   try {
     await deleteFromDb(DB_NAME, id);
-    await deleteFromDb("aurastream_offline_db", id);
+    await deleteFromDb(LEGACY_DB_NAME, id);
   } catch {
     // ignore
   }
@@ -1435,7 +1962,7 @@ export async function deleteOfflineEpisodesBatch(
   for (const id of idsToDelete) {
     try {
       await deleteFromDb(DB_NAME, id);
-      await deleteFromDb("aurastream_offline_db", id);
+      await deleteFromDb(LEGACY_DB_NAME, id);
     } catch {
       // ignore
     }
@@ -1451,7 +1978,7 @@ export async function deleteOfflineEpisodesBatch(
 export async function clearAllOfflineDownloads(): Promise<void> {
   try {
     await clearDb(DB_NAME);
-    await clearDb("aurastream_offline_db");
+    await clearDb(LEGACY_DB_NAME);
   } catch {
     // ignore
   }
@@ -1525,14 +2052,17 @@ export async function checkSmartDownloadNextEpisode(
   triggeringSmartDownloads.add(nextId);
   try {
     const info = await api.play(currentVideoId, nextEp);
-    const streamUrl = info?.streams?.main || info?.video_url;
-    if (streamUrl) {
+    const streamRes = resolveStreamUrlForQuality(info);
+    if (streamRes?.url) {
       void startEpisodeDownload(
         currentVideoId,
         nextEp,
         meta.title || `Episode ${nextEp}`,
         meta.cover || "",
-        streamUrl
+        streamRes.url,
+        false,
+        streamRes.quality,
+        streamRes.isHevc
       ).catch(() => {});
     }
   } catch {
@@ -1583,27 +2113,6 @@ export function planBatchDownload(
   };
 }
 
-export interface BatchProgressState {
-  active: boolean;
-  videoId: number;
-  title: string;
-  total: number;
-  completed: number;
-  currentEpisode: number;
-  failedCount: number;
-}
-
-let batchState: BatchProgressState = {
-  active: false,
-  videoId: 0,
-  title: "",
-  total: 0,
-  completed: 0,
-  currentEpisode: 0,
-  failedCount: 0,
-};
-
-let batchCancelled = false;
 const batchListeners = new Set<(state: BatchProgressState) => void>();
 
 function notifyBatchProgress() {
@@ -1627,12 +2136,16 @@ export function getBatchProgress(): BatchProgressState {
 }
 
 export function cancelBatchDownload(): void {
-  batchCancelled = true;
-  if (batchState.active && batchState.videoId && batchState.currentEpisode) {
-    cancelDownload(`${batchState.videoId}_${batchState.currentEpisode}`);
-  }
+  const wasActive = batchState.active;
+  const prevVideoId = batchState.videoId;
+  const prevEpisode = batchState.currentEpisode;
+  activeBatchToken = ++batchTokenSeq;
   batchState.active = false;
+  if (wasActive && prevVideoId && prevEpisode) {
+    cancelDownload(`${prevVideoId}_${prevEpisode}`);
+  }
   notifyBatchProgress();
+  syncNativeDownloadCount();
 }
 
 export async function executeBatchDownload(
@@ -1652,7 +2165,8 @@ export async function executeBatchDownload(
     return { success: 0, failed: 0 };
   }
 
-  batchCancelled = false;
+  const myBatchToken = ++batchTokenSeq;
+  activeBatchToken = myBatchToken;
   batchState = {
     active: true,
     videoId,
@@ -1663,26 +2177,28 @@ export async function executeBatchDownload(
     failedCount: 0,
   };
   notifyBatchProgress();
+  syncNativeDownloadCount();
 
   let success = 0;
   let failed = 0;
 
   try {
     for (let i = 0; i < unDownloaded.length; i++) {
-      if (batchCancelled) break;
+      if (activeBatchToken !== myBatchToken) break;
       const ep = unDownloaded[i];
       batchState.currentEpisode = ep;
       notifyBatchProgress();
 
       let downloaded = false;
       for (let attempt = 0; attempt < 2; attempt++) {
-        if (batchCancelled) break;
+        if (activeBatchToken !== myBatchToken) break;
         try {
           const info = await api.play(videoId, ep);
+          if (activeBatchToken !== myBatchToken) break;
           const streamRes = resolveStreamUrlForQuality(info, qualityPreference);
           if (!streamRes?.url) throw new Error("No stream URL");
 
-          if (batchCancelled) break;
+          if (activeBatchToken !== myBatchToken) break;
 
           await startEpisodeDownload(
             videoId,
@@ -1695,29 +2211,37 @@ export async function executeBatchDownload(
             streamRes.isHevc
           );
 
+          if (activeBatchToken !== myBatchToken) break;
+
           if (isEpisodeDownloaded(videoId, ep)) {
             downloaded = true;
             success++;
             batchState.completed = success;
             break;
           }
-        } catch (epErr) {
-          if (attempt === 0 && !batchCancelled) {
+        } catch {
+          if (attempt === 0 && activeBatchToken === myBatchToken) {
             logLine(`[batch] retrying episode ${ep} once after pause`);
             await new Promise((r) => setTimeout(r, 1200));
           }
         }
       }
 
-      if (!downloaded && !batchCancelled) {
+      if (activeBatchToken !== myBatchToken) break;
+
+      if (!downloaded) {
         failed++;
         batchState.failedCount = failed;
       }
       notifyBatchProgress();
     }
   } finally {
-    batchState.active = false;
-    notifyBatchProgress();
+    if (activeBatchToken === myBatchToken) {
+      batchState.active = false;
+      activeBatchToken = 0;
+      notifyBatchProgress();
+      syncNativeDownloadCount();
+    }
   }
 
   return { success, failed };
@@ -1735,8 +2259,9 @@ export async function checkStorageAvailableForBatch(estimatedBytes: number): Pro
 }> {
   let freeBytes = 800 * 1024 * 1024; // Default fallback: 800MB
   try {
-    if (typeof window !== "undefined" && typeof window.AuraNativeExport?.getStorageInfo === "function") {
-      const raw = window.AuraNativeExport.getStorageInfo();
+    const bridge = getNativeBridge();
+    if (bridge && typeof bridge.getStorageInfo === "function") {
+      const raw = bridge.getStorageInfo();
       const parsed = JSON.parse(raw);
       if (parsed.primaryFreeBytes && parsed.primaryFreeBytes > 0) {
         freeBytes = parsed.primaryFreeBytes;
@@ -1771,13 +2296,13 @@ export interface DeviceStorageStats {
   offlineCount: number;
   offlineBytes: number;
   offlineFormatted: string;
-  quotaBytes: number;
+  quotaBytes: number | null;
   quotaFormatted: string;
   usageBytes: number;
   usageFormatted: string;
-  freeBytes: number;
+  freeBytes: number | null;
   freeFormatted: string;
-  percentUsed: number;
+  percentUsed: number | null;
 }
 
 export async function getDetailedStorageStats(): Promise<DeviceStorageStats> {
@@ -1785,37 +2310,55 @@ export async function getDetailedStorageStats(): Promise<DeviceStorageStats> {
   const offlineBytes = list.reduce((acc, item) => acc + (item.sizeBytes || 0), 0);
   const offlineFormatted = formatBytes(offlineBytes);
 
-  let quotaBytes = 0;
-  let usageBytes = 0;
-
-  if (typeof navigator !== "undefined" && navigator.storage && navigator.storage.estimate) {
+  let nativeFreeBytes = 0;
+  const bridge = getNativeBridge();
+  if (bridge && typeof bridge.getStorageInfo === "function") {
     try {
-      const est = await navigator.storage.estimate();
-      quotaBytes = est.quota || 0;
-      usageBytes = est.usage || 0;
+      const raw = bridge.getStorageInfo();
+      const parsed = JSON.parse(raw);
+      if (parsed.primaryFreeBytes && parsed.primaryFreeBytes > 0) {
+        nativeFreeBytes = parsed.primaryFreeBytes;
+      }
     } catch {
       // ignore
     }
   }
 
-  if (quotaBytes === 0) {
-    quotaBytes = 64 * 1024 * 1024 * 1024; // 64 GB standard Android phone baseline
-    usageBytes = offlineBytes;
+  let quotaBytes: number | null = null;
+  let usageBytes = offlineBytes;
+
+  if (typeof navigator !== "undefined" && navigator.storage && navigator.storage.estimate) {
+    try {
+      const est = await navigator.storage.estimate();
+      if (est.quota && est.quota > 0) {
+        quotaBytes = est.quota;
+        usageBytes = est.usage ?? offlineBytes;
+      }
+    } catch {
+      // ignore
+    }
   }
 
-  const freeBytes = Math.max(0, quotaBytes - usageBytes);
-  const percentUsed = Math.min(100, Math.round((usageBytes / quotaBytes) * 100));
+  const freeBytes: number | null = nativeFreeBytes > 0
+    ? nativeFreeBytes
+    : quotaBytes != null
+      ? Math.max(0, quotaBytes - usageBytes)
+      : null;
+
+  const percentUsed: number | null = quotaBytes != null && quotaBytes > 0
+    ? Math.min(100, Math.round((usageBytes / quotaBytes) * 100))
+    : null;
 
   return {
     offlineCount: list.length,
     offlineBytes,
     offlineFormatted,
     quotaBytes,
-    quotaFormatted: formatBytes(quotaBytes),
+    quotaFormatted: quotaBytes != null ? formatBytes(quotaBytes) : "--",
     usageBytes,
     usageFormatted: formatBytes(usageBytes),
     freeBytes,
-    freeFormatted: formatBytes(freeBytes),
+    freeFormatted: freeBytes != null ? formatBytes(freeBytes) : "Available",
     percentUsed,
   };
 }

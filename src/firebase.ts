@@ -37,6 +37,7 @@ export interface FirebaseConfig {
 
 export interface CloudUserData {
   favorites?: number[];
+  likes?: number[];
   watchLater?: number[];
   history?: Array<{
     id: number;
@@ -61,6 +62,17 @@ const DEFAULT_FIREBASE_CONFIG: FirebaseConfig = {
   appId: "1:389274910283:web:7f6a5b4c3d2e1f0a",
 };
 
+function isValidNonPlaceholderConfig(cfg: FirebaseConfig | null | undefined): cfg is FirebaseConfig {
+  return Boolean(
+    cfg &&
+      typeof cfg.apiKey === "string" &&
+      cfg.apiKey.trim().length > 0 &&
+      cfg.apiKey !== DEFAULT_FIREBASE_CONFIG.apiKey &&
+      typeof cfg.projectId === "string" &&
+      cfg.projectId.trim().length > 0
+  );
+}
+
 export function getStoredConfig(): FirebaseConfig | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_FIREBASE_CONFIG);
@@ -69,6 +81,11 @@ export function getStoredConfig(): FirebaseConfig | null {
     if (parsed?.apiKey && parsed?.projectId) return parsed;
   } catch {}
   return DEFAULT_FIREBASE_CONFIG;
+}
+
+export function isUsingPlaceholderFirebaseConfig(): boolean {
+  const cfg = getStoredConfig();
+  return !isValidNonPlaceholderConfig(cfg);
 }
 
 let app: FirebaseApp | null = null;
@@ -84,7 +101,10 @@ export function initFirebase(config?: FirebaseConfig | null): {
     return { app: null, auth: null, db: null };
   }
   const activeConfig = config || getStoredConfig();
-  if (!activeConfig || !activeConfig.apiKey || !activeConfig.projectId) {
+  if (!isValidNonPlaceholderConfig(activeConfig)) {
+    app = null;
+    auth = null;
+    db = null;
     return { app: null, auth: null, db: null };
   }
 
@@ -105,6 +125,9 @@ export function initFirebase(config?: FirebaseConfig | null): {
 
 export function saveFirebaseConfig(config: FirebaseConfig) {
   try {
+    if (!isValidNonPlaceholderConfig(config)) {
+      return null;
+    }
     localStorage.setItem(STORAGE_KEY_FIREBASE_CONFIG, JSON.stringify(config));
     return initFirebase(config);
   } catch {}
@@ -112,7 +135,13 @@ export function saveFirebaseConfig(config: FirebaseConfig) {
 }
 
 export function isFirebaseConfigured(): boolean {
-  return !!(auth && db);
+  return !!(auth && db) && !isUsingPlaceholderFirebaseConfig();
+}
+
+function createConfigError(): Error & { code: string } {
+  const err = new Error("Firebase project is not configured.") as Error & { code: string };
+  err.code = "auth/api-key-not-valid";
+  return err;
 }
 
 // -------------------------------------------------------------
@@ -140,8 +169,9 @@ export function setActiveFirebaseSession(active: boolean): void {
 }
 
 export async function signInWithGoogle(): Promise<FirebaseUser | null> {
+  if (isUsingPlaceholderFirebaseConfig()) throw createConfigError();
   if (!auth) initFirebase();
-  if (!auth) throw new Error("Firebase is not configured yet");
+  if (!auth) throw createConfigError();
   const provider = new GoogleAuthProvider();
   const res = await signInWithPopup(auth, provider);
   if (res.user) setActiveFirebaseSession(true);
@@ -149,16 +179,18 @@ export async function signInWithGoogle(): Promise<FirebaseUser | null> {
 }
 
 export async function signInAsGuest(): Promise<FirebaseUser | null> {
+  if (isUsingPlaceholderFirebaseConfig()) throw createConfigError();
   if (!auth) initFirebase();
-  if (!auth) throw new Error("Firebase is not configured yet");
+  if (!auth) throw createConfigError();
   const res = await signInAnonymously(auth);
   if (res.user) setActiveFirebaseSession(true);
   return res.user;
 }
 
 export async function signInWithEmail(email: string, pass: string): Promise<FirebaseUser | null> {
+  if (isUsingPlaceholderFirebaseConfig()) throw createConfigError();
   if (!auth) initFirebase();
-  if (!auth) throw new Error("Firebase Authentication is not initialized");
+  if (!auth) throw createConfigError();
   const res = await signInWithEmailAndPassword(auth, email.trim(), pass);
   if (res.user) setActiveFirebaseSession(true);
   return res.user;
@@ -169,8 +201,9 @@ export async function signUpWithEmail(
   pass: string,
   displayName?: string
 ): Promise<FirebaseUser | null> {
+  if (isUsingPlaceholderFirebaseConfig()) throw createConfigError();
   if (!auth) initFirebase();
-  if (!auth) throw new Error("Firebase Authentication is not initialized");
+  if (!auth) throw createConfigError();
   const res = await createUserWithEmailAndPassword(auth, email.trim(), pass);
   if (displayName && res.user) {
     try {
@@ -184,8 +217,9 @@ export async function signUpWithEmail(
 }
 
 export async function sendPasswordReset(email: string): Promise<void> {
+  if (isUsingPlaceholderFirebaseConfig()) throw createConfigError();
   if (!auth) initFirebase();
-  if (!auth) throw new Error("Firebase Authentication is not initialized");
+  if (!auth) throw createConfigError();
   await sendPasswordResetEmail(auth, email.trim());
 }
 
@@ -196,6 +230,11 @@ export async function logOutFirebase(): Promise<void> {
 }
 
 export function subscribeAuthState(callback: (user: FirebaseUser | null) => void) {
+  if (isUsingPlaceholderFirebaseConfig()) {
+    setActiveFirebaseSession(false);
+    callback(null);
+    return () => {};
+  }
   if (!auth) initFirebase();
   if (!auth) {
     callback(null);
@@ -209,6 +248,7 @@ export function subscribeAuthState(callback: (user: FirebaseUser | null) => void
 // -------------------------------------------------------------
 
 export async function saveUserDataToCloud(userId: string, data: Partial<CloudUserData>): Promise<void> {
+  if (isUsingPlaceholderFirebaseConfig()) return;
   if (!db) initFirebase();
   if (!db) return;
   try {
@@ -219,19 +259,26 @@ export async function saveUserDataToCloud(userId: string, data: Partial<CloudUse
   }
 }
 
-export async function loadUserDataFromCloud(userId: string): Promise<CloudUserData | null> {
+export async function fetchCloudUserData(userId: string): Promise<{ ok: boolean; data: CloudUserData | null }> {
+  if (isUsingPlaceholderFirebaseConfig()) return { ok: false, data: null };
   if (!db) initFirebase();
-  if (!db) return null;
+  if (!db) return { ok: false, data: null };
   try {
     const userRef = doc(db, "users", userId);
     const snap = await getDoc(userRef);
     if (snap.exists()) {
-      return snap.data() as CloudUserData;
+      return { ok: true, data: snap.data() as CloudUserData };
     }
+    return { ok: true, data: null };
   } catch (err) {
     console.warn("Failed to load user data from Firestore:", err);
+    return { ok: false, data: null };
   }
-  return null;
+}
+
+export async function loadUserDataFromCloud(userId: string): Promise<CloudUserData | null> {
+  const res = await fetchCloudUserData(userId);
+  return res.data;
 }
 
 export { auth, db };

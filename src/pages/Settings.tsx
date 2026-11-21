@@ -393,10 +393,18 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
               <Toggle
                 label="Auto-Select Best Line"
                 on={autoLineOn}
-                onChange={(on) => {
-                  void setAutoLine(on).catch(() => toast("Failed to pause auto line, please retry", "info"));
+                onChange={async (on) => {
                   setAutoLineOn(on);
-                  toast(on ? "Auto-select line enabled" : "Auto-select line disabled, manual selection preserved", "info");
+                  try {
+                    await setAutoLine(on);
+                    toast(
+                      on ? "Auto-select line enabled" : "Auto-select line disabled, manual selection preserved",
+                      "info"
+                    );
+                  } catch {
+                    setAutoLineOn(!on);
+                    toast("Failed to update auto-select line, please retry", "info");
+                  }
                 }}
               />
             </div>
@@ -545,7 +553,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
       <LinePicker open={lineOpen} onClose={() => { setLineOpen(false); readLine(); }} />
 
       {/* Network Diagnostics Report Fallback Modal */}
-      <Modal open={diagReport !== null} onClose={() => setDiagReport(null)} width={520}>
+      <Modal open={diagReport !== null} onClose={() => setDiagReport(null)} width={520} label="Network Diagnostics Report">
         <div className="p-5">
           <h2 className="text-[15px] font-bold text-on">Network Diagnostics Report</h2>
           <p className="text-[13px] text-mut mt-2">Diagnostics completed. Automatic clipboard copy was blocked. You can retry or copy below.</p>
@@ -583,7 +591,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
       </Modal>
 
       {/* About Modal */}
-      <Modal open={about} onClose={() => setAbout(false)} width={392}>
+      <Modal open={about} onClose={() => setAbout(false)} width={392} label={t("settings.about")}>
         <div className="p-5">
           <div className="flex items-center gap-3">
             <span className="w-11 h-11 rounded-(--r-sm) brand-grad glow-neon flex items-center justify-center text-on-primary text-[17px] font-black">
@@ -591,7 +599,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
             </span>
             <div>
               <div className="text-[16px] font-bold text-on leading-tight">AuraStream</div>
-              <div className="text-[12px] text-mut mt-0.5">AuraStream Client v{APP_VERSION} · Created by AAA</div>
+              <div className="text-[12px] text-mut mt-0.5">AuraStream Client v{APP_VERSION} · This App Created by AAA. All rights reserved.</div>
             </div>
           </div>
 
@@ -632,7 +640,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
       </Modal>
 
       {/* Clear Cache Modal */}
-      <Modal open={clearOpen} onClose={() => setClearOpen(false)} width={330}>
+      <Modal open={clearOpen} onClose={() => setClearOpen(false)} width={330} label="Clear Cache">
         <div className="p-5">
           <div className="text-[15px] font-bold text-on">Clear Cache</div>
           <p className="text-[13px] text-mut leading-relaxed mt-2">
@@ -664,7 +672,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
       </Modal>
 
       {/* Update Modal */}
-      <Modal open={!!update?.has_update} onClose={() => setUpdate(null)} width={392}>
+      <Modal open={!!update?.has_update} onClose={() => setUpdate(null)} width={392} label="New Version Available">
         <div className="p-5">
           <div className="text-[16px] font-bold text-on">New Version Available</div>
           <p className="text-[12px] text-mut mt-1.5">

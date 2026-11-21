@@ -75,7 +75,10 @@ export default function ContinueWatchingBar() {
     };
   }, [recent?.id]);
 
-  const offlineItem = !drama && recent ? getOfflineEpisodes().find((it) => it.videoId === recent.id) : null;
+  const offlineItem = useMemo(
+    () => (!drama && recent ? getOfflineEpisodes().find((it) => it.videoId === recent.id) ?? null : null),
+    [drama, recent?.id]
+  );
   const rawTitle = drama?.title || recent?.title || offlineItem?.title;
   const title = rawTitle ? formatDramaTitle(rawTitle) : (recent ? `Drama #${recent.id}` : "");
   const rawCover = drama?.cover || recent?.cover || offlineItem?.cover;
@@ -104,6 +107,15 @@ export default function ContinueWatchingBar() {
       startTime: targetTime,
     });
   };
+  const handleResumeKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      handleResume();
+    }
+  };
+  const resumeLabel = isNextEpPrompt
+    ? `Play next episode: ${title} Episode ${targetEp}`
+    : `Resume watching: ${title} Episode ${targetEp}`;
 
   const bottomPos = !isMobile
     ? "20px"
@@ -120,8 +132,12 @@ export default function ContinueWatchingBar() {
       <div className="relative overflow-hidden rounded-2xl bg-s1/95 backdrop-blur-2xl border border-edge/70 shadow-[0_16px_40px_rgba(0,0,0,0.35)] p-2.5 flex items-center gap-3">
         {/* Cover / Thumbnail with mini play badge & error fallback */}
         <div
+          role="button"
+          tabIndex={0}
+          aria-label={resumeLabel}
           onClick={handleResume}
-          className="relative w-12 h-14 rounded-xl overflow-hidden bg-gradient-to-br from-s2 to-s3 border border-edge/50 shrink-0 cursor-pointer elev-1 group flex items-center justify-center"
+          onKeyDown={handleResumeKeyDown}
+          className="relative w-12 h-14 rounded-xl overflow-hidden bg-gradient-to-br from-s2 to-s3 border border-edge/50 shrink-0 cursor-pointer elev-1 group flex items-center justify-center focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2"
         >
           {coverUrl && !imgError ? (
             <img
@@ -146,7 +162,14 @@ export default function ContinueWatchingBar() {
         </div>
 
         {/* Drama Info & Progress */}
-        <div onClick={handleResume} className="flex-1 min-w-0 cursor-pointer">
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label={resumeLabel}
+          onClick={handleResume}
+          onKeyDown={handleResumeKeyDown}
+          className="flex-1 min-w-0 cursor-pointer rounded-lg focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2"
+        >
           <div className="flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
             <span className="text-[10px] font-bold uppercase tracking-wider text-primary">
@@ -184,7 +207,7 @@ export default function ContinueWatchingBar() {
               setDismissedState({ id: recent.id, at });
             }}
             aria-label={t("player.dismiss_continue")}
-            className="w-7 h-7 rounded-full flex items-center justify-center text-mut hover:text-on hover:bg-white/10 transition-colors pressable"
+            className="w-7 h-7 rounded-full flex items-center justify-center text-mut hover:text-on hover:bg-on/10 transition-colors pressable"
           >
             <IClose size={14} />
           </Button>

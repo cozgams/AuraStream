@@ -589,26 +589,27 @@ export async function getSubtitlesForEpisode(
   return track;
 }
 
+function formatSubtitleTimestamp(rawSec: number, decimalSep: "." | ","): string {
+  const totalMs = Number.isFinite(rawSec) && rawSec >= 0 ? Math.round(rawSec * 1000) : 0;
+  const hrs = Math.floor(totalMs / 3_600_000);
+  const mins = Math.floor((totalMs % 3_600_000) / 60_000);
+  const secs = Math.floor((totalMs % 60_000) / 1000);
+  const ms = totalMs % 1000;
+  return `${String(hrs).padStart(2, "0")}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}${decimalSep}${String(ms).padStart(3, "0")}`;
+}
+
 /**
  * Formats a SubtitleTrack into standard WebVTT format string (English)
  */
 export function exportToVtt(track: SubtitleTrack, _lang: "en" = "en"): string {
-  const formatTime = (sec: number) => {
-    const hrs = Math.floor(sec / 3600);
-    const mins = Math.floor((sec % 3600) / 60);
-    const secs = (sec % 60).toFixed(3);
-    const hh = String(hrs).padStart(2, "0");
-    const mm = String(mins).padStart(2, "0");
-    const ss = String(secs).padStart(6, "0");
-    return `${hh}:${mm}:${ss}`;
-  };
-
   const lines = ["WEBVTT - AuraStream English Captions", ""];
-  for (const cue of track.cues) {
+  for (const cue of track?.cues || []) {
     const text = formatSubtitleText(cue.en || cue.zh);
     if (!text) continue;
+    const startSec = Number.isFinite(cue.start) && cue.start >= 0 ? cue.start : 0;
+    const endSec = Number.isFinite(cue.end) && cue.end >= startSec ? cue.end : startSec + 1.0;
     lines.push(String(cue.id));
-    lines.push(`${formatTime(cue.start)} --> ${formatTime(cue.end)}`);
+    lines.push(`${formatSubtitleTimestamp(startSec, ".")} --> ${formatSubtitleTimestamp(endSec, ".")}`);
     lines.push(text);
     lines.push("");
   }
@@ -619,26 +620,15 @@ export function exportToVtt(track: SubtitleTrack, _lang: "en" = "en"): string {
  * Formats a SubtitleTrack into standard SubRip (.SRT) format string (English)
  */
 export function exportToSrt(track: SubtitleTrack, _lang: "en" = "en"): string {
-  const formatSrtTime = (rawSec: number) => {
-    const sec = Number.isFinite(rawSec) && rawSec >= 0 ? rawSec : 0;
-    const hrs = Math.floor(sec / 3600);
-    const mins = Math.floor((sec % 3600) / 60);
-    const secs = Math.floor(sec % 60);
-    const ms = Math.min(999, Math.floor((sec % 1) * 1000));
-    const hh = String(hrs).padStart(2, "0");
-    const mm = String(mins).padStart(2, "0");
-    const ss = String(secs).padStart(2, "0");
-    const mmm = String(ms).padStart(3, "0");
-    return `${hh}:${mm}:${ss},${mmm}`;
-  };
-
   const blocks: string[] = [];
   let index = 1;
-  for (const cue of track.cues) {
+  for (const cue of track?.cues || []) {
     const text = formatSubtitleText(cue.en || cue.zh);
     if (!text) continue;
-    const startStr = formatSrtTime(cue.start);
-    const endStr = formatSrtTime(cue.end);
+    const startSec = Number.isFinite(cue.start) && cue.start >= 0 ? cue.start : 0;
+    const endSec = Number.isFinite(cue.end) && cue.end >= startSec ? cue.end : startSec + 1.0;
+    const startStr = formatSubtitleTimestamp(startSec, ",");
+    const endStr = formatSubtitleTimestamp(endSec, ",");
     blocks.push(`${index++}\n${startStr} --> ${endStr}\n${text}\n`);
   }
   return blocks.join("\n");

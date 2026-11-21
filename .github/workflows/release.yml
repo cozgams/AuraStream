@@ -94,15 +94,7 @@ jobs:
         run: pnpm tauri android init --ci
 
       - name: Sync Android source files and permissions
-        run: node scripts/sync-android-src.mjs
-
-      - name: Patch Android performance flags (largeHeap & hardwareAccelerated)
-        run: |
-          MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
-          if [ -f "$MANIFEST" ]; then
-            sed -i 's/<application/<application android:largeHeap="true" android:hardwareAccelerated="true"/' "$MANIFEST"
-            echo "Patched $MANIFEST with largeHeap=true and hardwareAccelerated=true"
-          fi
+        run: node scripts/sync-android-src.mjs --required
 
       - name: Build APK (split by ABI)
         run: |
@@ -167,7 +159,7 @@ jobs:
     name: Publish GitHub Release
     needs: [android]
     if: >-
-      always() &&
+      success() &&
       (startsWith(github.ref, 'refs/tags/v') ||
       (github.event_name == 'workflow_dispatch' && inputs.tag != ''))
     runs-on: ubuntu-latest

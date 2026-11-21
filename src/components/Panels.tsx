@@ -1,6 +1,6 @@
 import { Button, Form, Image, Input } from "./ios/controls";
 import { Loader } from "./ios/effects";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fmt, cover as imageCover } from "../api";
 import { handleArticleClick, sanitizeHtml } from "../html";
 import type { Comment, CommentPage, Episode } from "../types";
@@ -41,13 +41,14 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bar
     return () => window.clearTimeout(timer);
   }, []);
 
-  const list = asc ? episodes : [...episodes].reverse();
+  const list = asc ? (episodes || []) : [...(episodes || [])].reverse();
+  const epCount = episodes?.length || 0;
   return (
     <div className="flex flex-col h-full">
       {bare ? (
         <div className="shrink-0 flex items-center gap-2 px-4 pb-2">
-          <span className="text-[12px] text-mut">{episodes.length} Episodes</span>
-          {episodes.length > 1 && (
+          <span className="text-[12px] text-mut">{epCount} Episodes</span>
+          {epCount > 1 && (
             <Button
               onClick={() => setBatchOpen(true)}
               className="ml-auto px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[11px] font-bold flex items-center gap-1 pressable"
@@ -120,7 +121,7 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bar
         videoId={videoId}
         title={title || `Series #${videoId}`}
         cover={cover || ""}
-        totalEpisodes={episodes.length}
+        totalEpisodes={epCount}
       />
     </div>
   );
@@ -139,24 +140,26 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
   const [sending, setSending] = useState(false);
   const [likedComments, setLikedComments] = useState<Record<number, boolean>>({});
   const inputRef = useRef<HTMLInputElement>(null);
+  const reqSeqRef = useRef(0);
+  const isUpstreamUser = Boolean(user && user.user_type !== "firebase" && user.user_type !== "offline");
 
   const toggleCommentLike = (commentId: number) => {
-    setLikedComments((prev) => {
-      const next = !prev[commentId];
-      setItems((list) =>
-        list.map((it) => (it.id === commentId ? { ...it, like_count: Math.max(0, (it.like_count || 0) + (next ? 1 : -1)) } : it))
-      );
-      try { navigator.vibrate?.(12); } catch {}
-      return { ...prev, [commentId]: next };
-    });
+    const next = !likedComments[commentId];
+    setLikedComments((prev) => ({ ...prev, [commentId]: next }));
+    setItems((list) =>
+      list.map((it) => (it.id === commentId ? { ...it, like_count: Math.max(0, (it.like_count || 0) + (next ? 1 : -1)) } : it))
+    );
+    try { navigator.vibrate?.(12); } catch {}
   };
 
-  const load = async (p: number) => {
+  const load = useCallback(async (p: number) => {
+    const seq = ++reqSeqRef.current;
     setLoading(true);
     try {
       const res: CommentPage | null = kind === "post"
         ? await api.postComments(videoId, p, 20)
         : await api.comments(videoId, ep, p, 20);
+      if (seq !== reqSeqRef.current) return;
       setItems((prev) => {
         const base = p === 1 ? [] : prev;
         const seen = new Set(base.map((x) => x.id));
@@ -165,24 +168,36 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
       setPage(p);
       setPages(res?.pagination?.pages || 1);
     } catch {
-      if (p === 1) setItems([]);
+      if (seq === reqSeqRef.current && p === 1) setItems([]);
     } finally {
-      setLoading(false);
+      if (seq === reqSeqRef.current) setLoading(false);
     }
-  };
+  }, [videoId, ep, kind]);
 
-  useEffect(() => { load(1); /* eslint-disable-next-line */ }, [videoId, ep, kind]);
+  useEffect(() => {
+    setItems([]);
+    setPage(0);
+    setPages(1);
+    void load(1);
+    return () => {
+      reqSeqRef.current++;
+    };
+  }, [load]);
 
   const send = async () => {
-    const t = text.trim();
-    if (!t) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
     if (!user) { setLoginOpen(true); return; }
+    if (!isUpstreamUser) {
+      toast("Comments require an upstream mirror account; local/cloud-sync profiles are read-only here.", "info");
+      return;
+    }
     setSending(true);
     try {
-      await api.commentSend(videoId, ep, t);
+      await api.commentSend(videoId, ep, trimmed);
       setText("");
       toast("Comment submitted for review", "ok");
-      load(1);
+      void load(1);
     } catch (e) {
       toast(localizeError(e), "info");
     } finally {
@@ -242,15 +257,25 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
         )}
       </div>
 
-      <Form className="shrink-0 flex items-center gap-2 px-3 pt-2.5 pb-[calc(var(--sab,48px)+12px)] bg-s2/70 border-t border-s3/40" onSubmit={(e) => { e.preventDefault(); send(); }}>
+      <Form className="shrink-0 flex items-center gap-2 px-3 pt-2.5 pb-[calc(var(--sab,48px)+12px)] bg-s2/70 border-t border-s3/40" onSubmit={(e) => { e.preventDefault(); void send(); }}>
         <Avatar size={30} src={user?.avatar} name={user?.nickname || "Me"} hue={322} />
         <Input ref={inputRef} value={text} onChange={(e) => setText(e.target.value)}
-          readOnly={!user} onClick={() => { if (!user) setLoginOpen(true); }}
-          onKeyDown={(event) => { if (!user && event.key === "Enter") { event.preventDefault(); setLoginOpen(true); } }}
-          placeholder={user ? "Add a comment..." : "Sign in to comment"}
+          readOnly={!isUpstreamUser}
+          onClick={() => {
+            if (!user) setLoginOpen(true);
+            else if (!isUpstreamUser) toast("Comments require an upstream mirror account; local/cloud-sync profiles are read-only here.", "info");
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !isUpstreamUser) {
+              event.preventDefault();
+              if (!user) setLoginOpen(true);
+              else toast("Comments require an upstream mirror account; local/cloud-sync profiles are read-only here.", "info");
+            }
+          }}
+          placeholder={!user ? "Sign in to comment" : !isUpstreamUser ? "Mirror account required to comment" : "Add a comment..."}
           className="flex-1 min-w-0 h-9 rounded-(--r-ctl) bg-s4 px-3.5 text-[14px] text-on placeholder-dim outline-none focus:bg-s3" />
-        <Button type="submit" disabled={!text.trim() || sending}
-          className={`w-9 h-9 rounded-full flex items-center justify-center pressable ${text.trim() ? "brand-grad glow-neon" : "bg-s3 text-dim"}`}>
+        <Button type="submit" disabled={!isUpstreamUser || !text.trim() || sending}
+          className={`w-9 h-9 rounded-full flex items-center justify-center pressable ${isUpstreamUser && text.trim() ? "brand-grad glow-neon" : "bg-s3 text-dim"}`}>
           {sending ? <Loader className="w-4 h-4 spinner" /> : <ISendF size={16} />}
         </Button>
       </Form>

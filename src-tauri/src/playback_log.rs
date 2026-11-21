@@ -272,13 +272,31 @@ pub fn playback_log_read() -> Result<String, String> {
 /// Converts the tail of debug.log into structured records (`debug.line`).
 /// Ensures diagnostic exports contain useful context even if diagnostics were not toggled in advance.
 fn debug_lines(dir: &Path) -> Result<Vec<String>, String> {
+    use std::io::{Read, Seek, SeekFrom};
     let path = dir.join("debug.log");
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let bytes = fs::read(&path).map_err(|_| "Failed to read log")?;
-    let start = bytes.len().saturating_sub(64 * 1024);
-    let tail = String::from_utf8_lossy(&bytes[start..]);
+    let mut file = fs::File::open(&path).map_err(|_| "Failed to read log")?;
+    let len = file.metadata().map_err(|_| "Failed to read log")?.len();
+    let keep = 64 * 1024u64;
+    let start = len.saturating_sub(keep);
+    if start > 0 {
+        file.seek(SeekFrom::Start(start))
+            .map_err(|_| "Failed to read log")?;
+    }
+    let mut bytes = Vec::with_capacity((len - start) as usize);
+    file.read_to_end(&mut bytes)
+        .map_err(|_| "Failed to read log")?;
+    let slice = if start > 0 {
+        match bytes.iter().position(|&b| b == b'\n') {
+            Some(pos) => &bytes[pos + 1..],
+            None => &bytes[..],
+        }
+    } else {
+        &bytes[..]
+    };
+    let tail = String::from_utf8_lossy(slice);
     let pid = std::process::id();
     let stamp = crate::logging::utc_timestamp()?;
     let strict = crate::network_policy::strict_security();

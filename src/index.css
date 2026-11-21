@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 @import "./styles/ios.css";
 
 /* ===================================================================
@@ -29,6 +30,8 @@
   --color-blue: var(--p-primary);
   --color-danger: var(--p-danger);
   --color-on-danger: var(--p-on-danger);
+  --color-edge: var(--ios-edge);
+  --color-border: var(--ios-edge);
 }
 
 @layer legacy {

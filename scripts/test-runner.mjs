@@ -36,13 +36,18 @@ for (const { name, script } of suites) {
     stdio: "pipe",
     encoding: "utf8",
     env: process.env,
+    timeout: 240_000,
+    maxBuffer: 10 * 1024 * 1024,
   });
   const dur = ((Date.now() - start) / 1000).toFixed(1);
   if (res.status === 0) {
     console.log(`PASS (${dur}s)`);
   } else {
     console.log(`FAIL (${dur}s)`);
-    console.error(res.stdout || res.stderr);
+    if (res.error) console.error(`[error] ${res.error.message}`);
+    if (res.signal) console.error(`[signal] ${res.signal}`);
+    if (res.stdout) process.stderr.write(res.stdout);
+    if (res.stderr) process.stderr.write(res.stderr);
     failed++;
   }
 }

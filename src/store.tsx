@@ -2,13 +2,13 @@ import React, { createContext, useCallback, useContext, useEffect, useLayoutEffe
 import { api, platform as envPlatform } from "./api";
 import { isStrictSecurity, setStrictSecurity as setHtmlStrictSecurity } from "./html";
 import type { User } from "./types";
-import { readStorage, writeStorage, STORAGE_KEYS } from "./storage";
+import { readStorage, removeStorage, writeStorage, STORAGE_KEYS } from "./storage";
 import { getTranslation, type Language, type TranslationKey } from "./i18n";
 import type { SubtitleMode, SubtitleSize } from "./subtitles/types";
 import {
   auth,
+  fetchCloudUserData,
   saveUserDataToCloud,
-  loadUserDataFromCloud,
   subscribeAuthState,
   logOutFirebase,
   hasActiveFirebaseSession,
@@ -164,6 +164,20 @@ function loadPersist(): Persist {
   }
 }
 
+function loadLocalUser(): User | null {
+  try {
+    const raw = readStorage(STORAGE_KEYS.localUser);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<User> | null;
+    if (parsed && typeof parsed.id === "number" && parsed.user_type === "offline") {
+      return parsed as User;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function readThemePreference(): ThemePreference {
   try {
     const saved = readStorage(STORAGE_KEYS.theme);
@@ -279,6 +293,7 @@ type Store = {
   clearHistory: () => void;
   toggleFollowLocal: (uid: number) => boolean;
   mergeCloudUserData: (cloudData: CloudUserData) => void;
+  hydrateCloudForUid: (uid: string) => Promise<void>;
   theater: boolean; setTheater: (v: boolean | ((p: boolean) => boolean)) => void;
   fs: boolean; setFs: (v: boolean | ((p: boolean) => boolean)) => void;
   /** Immersive clean screen mode: hides player controls and overlays */
@@ -314,8 +329,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const themeRef = useRef(theme);
   const [tab, setTabRaw] = useState<Tab>("home");
   const [stack, setStack] = useState<Page[]>([]);
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUserState] = useState<User | null>(loadLocalUser);
+  const [cloudHydratedUid, setCloudHydratedUid] = useState<string | null>(null);
+  const cloudHydratedUidRef = useRef<string | null>(null);
+  const hydratingUidRef = useRef<string | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
+
+  const setUser = useCallback((next: User | null) => {
+    setUserState(next);
+    if (next?.user_type === "offline") {
+      writeStorage(STORAGE_KEYS.localUser, JSON.stringify(next));
+    } else {
+      removeStorage(STORAGE_KEYS.localUser);
+    }
+    if (next?.user_type !== "firebase") {
+      cloudHydratedUidRef.current = null;
+      hydratingUidRef.current = null;
+      setCloudHydratedUid(null);
+    }
+  }, []);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [lineEpoch, setLineEpoch] = useState(0);
   const [theater, setTheaterState] = useState(false);
@@ -402,12 +434,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+    const uid = auth?.currentUser?.uid;
+    if (!uid || user?.user_type !== "firebase" || cloudHydratedUid !== uid) {
+      return;
+    }
     syncTimeoutRef.current = setTimeout(() => {
       try {
-        const uid = auth?.currentUser?.uid;
-        if (uid && (user?.user_type === "firebase" || user?.desc?.includes("@"))) {
-          void saveUserDataToCloud(uid, {
+        const activeUid = auth?.currentUser?.uid;
+        if (activeUid && user?.user_type === "firebase" && cloudHydratedUid === activeUid) {
+          void saveUserDataToCloud(activeUid, {
             favorites: p.favs,
+            likes: p.likes,
             watchLater: p.watchLater,
             history: p.history.map((h) => ({
               id: h.id,
@@ -427,7 +464,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => {
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     };
-  }, [p.favs, p.watchLater, p.history, user]);
+  }, [p.favs, p.likes, p.watchLater, p.history, user, cloudHydratedUid]);
 
   useEffect(() => {
     let request = 0;
@@ -436,7 +473,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const current = ++request;
       void api.boot().then((r) => {
         if (!active || current !== request) return;
-        setUser(r.user && (r.user as User).id ? r.user as User : null);
+        setUserState((prev) => {
+          if (r.user && (r.user as User).id) {
+            removeStorage(STORAGE_KEYS.localUser);
+            return r.user as User;
+          }
+          if (prev?.user_type === "firebase" || prev?.user_type === "offline") {
+            return prev;
+          }
+          return null;
+        });
         if (typeof r.strict_security === "boolean") {
           setStrictSecurityState(r.strict_security);
           setHtmlStrictSecurity(r.strict_security);
@@ -504,15 +550,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    cloudHydratedUidRef.current = null;
+    hydratingUidRef.current = null;
+    setCloudHydratedUid(null);
+    setUser(null);
     try { await api.logout(); } catch { /* ignore */ }
     try { await logOutFirebase(); } catch { /* ignore */ }
-    setUser(null);
     toast("Logged out successfully", "info");
-  }, [toast]);
+  }, [setUser, toast]);
 
   const mergeCloudUserData = useCallback((cloudData: CloudUserData) => {
     setP((prev) => {
       const mergedFavs = Array.from(new Set([...(cloudData.favorites || []), ...prev.favs]));
+      const mergedLikes = Array.from(new Set([...(cloudData.likes || []), ...prev.likes]));
       const mergedWatchLater = Array.from(new Set([...(cloudData.watchLater || []), ...(prev.watchLater || [])]));
 
       const historyMap = new Map<number, WatchProgress>();
@@ -530,32 +580,60 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 t: ch.t || 0,
                 dur: ch.dur || 0,
                 at: ch.updatedAt || Date.now(),
-                title: ch.title,
-                cover: ch.cover,
+                title: ch.title?.trim() ? ch.title : existing?.title,
+                cover: ch.cover?.trim() ? ch.cover : existing?.cover,
+                tags: existing?.tags,
+                episode_count: existing?.episode_count,
+                is_finished: existing?.is_finished,
               });
             }
           }
         }
       }
-      const mergedHistory = Array.from(historyMap.values()).sort((a, b) => b.at - a.at);
+      const mergedHistory = Array.from(historyMap.values()).sort((a, b) => b.at - a.at).slice(0, 80);
 
       return {
         ...prev,
         favs: mergedFavs,
-        likes: mergedFavs,
+        likes: mergedLikes,
         watchLater: mergedWatchLater,
         history: mergedHistory,
       };
     });
   }, []);
 
-  // Rehydrate Firebase user session and sync cloud data on launch if previously authenticated
+  const hydrateCloudForUid = useCallback(async (uid: string) => {
+    if (!uid || cloudHydratedUidRef.current === uid || hydratingUidRef.current === uid) {
+      return;
+    }
+    hydratingUidRef.current = uid;
+    try {
+      const res = await fetchCloudUserData(uid);
+      if (hydratingUidRef.current !== uid) return;
+      if (res.ok) {
+        if (res.data) {
+          mergeCloudUserData(res.data);
+        }
+        cloudHydratedUidRef.current = uid;
+        setCloudHydratedUid(uid);
+      }
+    } catch {
+      // non-fatal; keep cloudHydratedUid unset so local state never overwrites cloud
+    } finally {
+      if (hydratingUidRef.current === uid) {
+        hydratingUidRef.current = null;
+      }
+    }
+  }, [mergeCloudUserData]);
+
+  // Rehydrate Firebase user session and sync cloud data on launch or sign-in
+  const shouldSubscribeFirebase = hasActiveFirebaseSession() || user?.user_type === "firebase";
   useEffect(() => {
-    if (!hasActiveFirebaseSession()) return;
+    if (!shouldSubscribeFirebase) return;
     if (typeof window !== "undefined" && window.location.pathname.startsWith("/tests/")) {
       return;
     }
-    const unsub = subscribeAuthState(async (fbUser) => {
+    const unsub = subscribeAuthState((fbUser) => {
       if (fbUser && fbUser.email) {
         let hash = 0;
         for (let i = 0; i < fbUser.uid.length; i++) {
@@ -572,20 +650,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           desc: fbUser.email,
           user_type: "firebase",
         });
-        try {
-          const cloud = await loadUserDataFromCloud(fbUser.uid);
-          if (cloud) {
-            mergeCloudUserData(cloud);
-          }
-        } catch {
-          // non-fatal
-        }
+        void hydrateCloudForUid(fbUser.uid);
       } else {
-        setUser((prev) => (prev?.user_type === "firebase" ? null : prev));
+        cloudHydratedUidRef.current = null;
+        hydratingUidRef.current = null;
+        setCloudHydratedUid(null);
+        setUserState((prev) => (prev?.user_type === "firebase" ? null : prev));
       }
     });
     return () => unsub?.();
-  }, [mergeCloudUserData]);
+  }, [shouldSubscribeFirebase, hydrateCloudForUid, setUser]);
   /** Line switch listener: increments epoch key to refresh content across views */
   useEffect(() => {
     const bump = () => setLineEpoch((n) => n + 1);
@@ -725,7 +799,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     isLiked: (id) => p.likes.includes(id),
     isFav: (id) => p.favs.includes(id),
     isWatchLater: (id) => (p.watchLater || []).includes(id),
-    toggleLikeLocal, toggleFavLocal, clearFavs, toggleWatchLaterLocal, clearWatchLater, toggleFollowLocal, addHistory, clearHistory, mergeCloudUserData,
+    toggleLikeLocal, toggleFavLocal, clearFavs, toggleWatchLaterLocal, clearWatchLater, toggleFollowLocal, addHistory, clearHistory, mergeCloudUserData, hydrateCloudForUid,
     muted: p.muted, setMuted, volume: p.volume, setVolume, theater, setTheater, fs, setFs, clean, setClean,
     muteOnStartup: p.muteOnStartup, setMuteOnStartup,
     swipeEp: p.swipeEp, setSwipeEp,
@@ -736,8 +810,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     toasts, toast, lineEpoch,
     language, setLanguage, t,
     subtitleMode, setSubtitleMode, subtitleSize, setSubtitleSize,
-  }), [theme, themePreference, setTheme, accent, setAccent, tab, setTab, stack, push, pop, user, loginOpen, logout,
-    p, toggleLikeLocal, toggleFavLocal, clearFavs, toggleWatchLaterLocal, clearWatchLater, toggleFollowLocal, addHistory, clearHistory, mergeCloudUserData,
+  }), [theme, themePreference, setTheme, accent, setAccent, tab, setTab, stack, push, pop, user, setUser, loginOpen, logout,
+    p, toggleLikeLocal, toggleFavLocal, clearFavs, toggleWatchLaterLocal, clearWatchLater, toggleFollowLocal, addHistory, clearHistory, mergeCloudUserData, hydrateCloudForUid,
     setMuted, setMuteOnStartup, setSwipeEp, setPreferHevc, setVolume, addSearch, removeSearch, clearSearchHist, strictSecurity, strictSecurityReady, securityPending, cliRelaxed, setStrictSecurity,
     toasts, toast, lineEpoch, theater, setTheater, fs, setFs, clean, setClean,
     language, setLanguage, t, subtitleMode, setSubtitleMode, subtitleSize, setSubtitleSize]);

@@ -37,23 +37,30 @@ export default function Player({
   const wrapRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const recoverCountRef = useRef(0);
+  const recoverTimerRef = useRef<number | null>(null);
   const { trace, requestSeek } = usePlayerDiagnostics(videoRef, hlsRef, { view: "post_detail", ...diagnosticContext, active, resource: mediaResource(src) });
   const activity = usePlaybackActivity(videoRef, hlsRef, { active, autoPlay: !!autoPlay, src, trace });
   const proxyRecovery = useProxyPlaybackRecovery(videoRef, src, activity, trace);
   const [playing, setPlaying] = useState(false);
   const [waiting, setWaiting] = useState(false);
-  const [waitingSlow, setWaitingSlow] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [full, setFull] = useState(false);
   const [rate, setRate] = useState(1);
   const [errMsg, setErrMsg] = useState<string>("");
   const [controlsLocked, setControlsLocked] = useState(false);
+  const autoPlayRef = useRef(!!autoPlay);
+  autoPlayRef.current = !!autoPlay;
+  const rateRef = useRef(rate);
+  rateRef.current = rate;
+  const lastTimeRef = useRef(0);
   const seek = useSeekInput({ time, duration, enabled: active && !controlsLocked, resetKey: src,
     onInteraction: (phase, input, target, pointerTarget) => trace(`seek.input.${phase}`, { input, target, pointer_target: pointerTarget }),
-    onSeek: (target, input) => {
+    onSeek: (t, input) => {
       const video = videoRef.current;
-      if (!video || !activity.isActive()) return;
+      if (!video || !activity.isActive() || !Number.isFinite(t)) return;
+      const dur = video.duration && Number.isFinite(video.duration) ? video.duration : 0;
+      const target = dur > 0 ? Math.max(0, Math.min(dur - 0.15, t)) : Math.max(0, t);
       requestSeek(target, `legacy_${input}`);
       setWaiting(true);
       if (hlsRef.current) {
@@ -76,64 +83,38 @@ export default function Player({
     active,
     onPlay: () => activity.play("mediasession"),
     onPause: () => activity.pause("mediasession"),
-    onSeek: (target) => {
+    onSeek: (t) => {
       const video = videoRef.current;
-      if (!video || !activity.isActive()) return;
+      if (!video || !activity.isActive() || !Number.isFinite(t)) return;
+      const dur = video.duration && Number.isFinite(video.duration) ? video.duration : 0;
+      const target = dur > 0 ? Math.max(0, Math.min(dur - 0.15, t)) : Math.max(0, t);
+      requestSeek(target, "mediasession");
+      if (hlsRef.current) {
+        try { hlsRef.current.startLoad(target); } catch { /* ignore */ }
+      }
       video.currentTime = target;
       setTime(video.currentTime);
     },
   });
 
-  /* Slow buffering watchdog (> 6s waiting shows interactive retry button) */
-  useEffect(() => {
-    if (active && waiting && !errMsg) {
-      const timer = window.setTimeout(() => {
-        setWaitingSlow(true);
-      }, 6000);
-      return () => window.clearTimeout(timer);
-    } else {
-      setWaitingSlow(false);
-    }
-  }, [active, waiting, errMsg]);
-
-  const handleRetryPlayback = () => {
-    setWaiting(false);
-    setWaitingSlow(false);
-    setErrMsg("");
-    const video = videoRef.current;
-    const hls = hlsRef.current;
-    if (hls && video) {
-      try {
-        hls.startLoad(video.currentTime || -1);
-        hls.recoverMediaError();
-      } catch { /* ignore */ }
-    } else if (video) {
-      try {
-        const cur = video.currentTime;
-        video.load();
-        video.currentTime = cur;
-        video.play().catch(() => {});
-      } catch { /* ignore */ }
-    }
-    activity.play("user_retry");
-  };
-
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !src) return;
+    if (recoverTimerRef.current) { window.clearTimeout(recoverTimerRef.current); recoverTimerRef.current = null; }
     setErrMsg("");
     setWaiting(false);
-    setWaitingSlow(false);
     recoverCountRef.current = 0;
+    lastTimeRef.current = 0;
     const resume = proxyRecovery.resume();
     const isBlob = src.startsWith("blob:");
     const isHlsBlob = isBlob && (src.includes(".m3u8") || src.includes("type=hls") || src.includes("#.m3u8"));
     const proxied = isLocalMedia(src) || isBlob;
     const url = isBlob ? src : (proxied ? src : playlist(src));
     const useHls = (isHlsBlob || !isBlob) && !url.includes("/seg?u=");
-    trace("source.load", { engine: useHls && Hls.isSupported() ? "hls.js" : "native", auto_play: autoPlay, resource: mediaResource(src), host: mediaHost(src) });
+    trace("source.load", { engine: useHls && Hls.isSupported() ? "hls.js" : "native", auto_play: autoPlayRef.current, resource: mediaResource(src), host: mediaHost(src) });
 
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+    video.playbackRate = rateRef.current;
 
     if (useHls && Hls.isSupported()) {
       const hls = new Hls({
@@ -168,11 +149,12 @@ export default function Player({
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         if (activity.isActive()) hls.startLoad(resume?.time ?? -1);
-        if (autoPlay && !resume) activity.play("manifest_autoplay", true);
+        if (autoPlayRef.current && !resume) activity.play("manifest_autoplay", true);
       });
       hls.on(Hls.Events.FRAG_BUFFERED, () => {
         recoverCountRef.current = 0;
         setErrMsg("");
+        if (recoverTimerRef.current) { window.clearTimeout(recoverTimerRef.current); recoverTimerRef.current = null; }
       });
       hls.on(Hls.Events.ERROR, (_e, data) => {
         if (!data.fatal) {
@@ -185,35 +167,56 @@ export default function Player({
           return;
         }
         if (!activity.isActive()) return;
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && recoverCountRef.current < 4) {
+        const retry = () => {
           recoverCountRef.current += 1;
-          try { hls.startLoad(video.currentTime || -1); } catch { /* ignore */ }
-          return;
-        }
-        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && recoverCountRef.current < 4) {
-          recoverCountRef.current += 1;
-          try { hls.recoverMediaError(); video.play().catch(() => {}); } catch { /* ignore */ }
-          return;
-        }
+          const delay = 250 * recoverCountRef.current;
+          if (recoverTimerRef.current) window.clearTimeout(recoverTimerRef.current);
+          recoverTimerRef.current = window.setTimeout(() => {
+            recoverTimerRef.current = null;
+            if (hlsRef.current !== hls || !activity.isActive()) return;
+            try {
+              if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                hls.startLoad(video.currentTime || -1);
+              } else {
+                hls.recoverMediaError();
+                if (activity.isPlayWanted()) activity.play("error_recover", true);
+              }
+            } catch { /* ignore */ }
+          }, delay);
+        };
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && recoverCountRef.current < 4) { retry(); return; }
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && recoverCountRef.current < 4) { retry(); return; }
+        if (recoverTimerRef.current) { window.clearTimeout(recoverTimerRef.current); recoverTimerRef.current = null; }
         const detail = `${data.type}/${data.details}/${data.response?.code ?? ""}/${String(data.reason ?? "").slice(0, 80)}`;
         (window as unknown as { __hlsErr?: string }).__hlsErr = detail;
         setErrMsg(detail);
-        if (!activity.isActive()) return;
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
-        else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
-        else { hls.destroy(); hlsRef.current = null; }
+        setWaiting(false);
+        setPlaying(false);
+        hls.destroy();
+        hlsRef.current = null;
       });
     } else {
       // Native HLS fallback for Safari and compatible WebViews
       video.src = url;
-      if (autoPlay && !resume) activity.play("native_autoplay", true);
+      if (autoPlayRef.current && !resume) activity.play("native_autoplay", true);
     }
 
     return () => {
+      if (recoverTimerRef.current) { window.clearTimeout(recoverTimerRef.current); recoverTimerRef.current = null; }
       trace("source.cleanup");
-      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      } else if (video) {
+        try {
+          video.pause();
+          video.removeAttribute("src");
+          video.load();
+        } catch { /* ignore */ }
+      }
     };
-  }, [src, autoPlay, proxyRecovery.revision]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [src, proxyRecovery.revision]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -257,7 +260,7 @@ export default function Player({
     else el.requestFullscreen().catch(() => {});
   };
 
-  const pct = duration > 0 ? (seek.time / duration) * 100 : 0;
+  const pct = duration > 0 ? Math.max(0, Math.min(100, (seek.time / duration) * 100)) : 0;
 
   return (
     <div ref={wrapRef} className={`relative bg-black overflow-hidden group ${className}`}>
@@ -295,24 +298,41 @@ export default function Player({
         onPause={() => { setPlaying(false); onTogglePlay?.(false); }}
         onWaiting={() => setWaiting(true)}
         onStalled={() => setWaiting(true)}
-        onPlaying={() => { if (activity.isActive()) { setWaiting(false); setWaitingSlow(false); setErrMsg(""); onPlaying?.(); } }}
-        onSeeked={() => { setWaiting(false); setWaitingSlow(false); }}
+        onPlaying={() => { if (activity.isActive()) { setWaiting(false); setErrMsg(""); onPlaying?.(); } }}
+        onSeeked={() => setWaiting(false)}
         onTimeUpdate={(e) => {
           const t = (e.target as HTMLVideoElement).currentTime;
           setTime(t);
-          if (waiting && t > 0) {
-            setWaiting(false);
-            setWaitingSlow(false);
+          if (Math.abs(t - lastTimeRef.current) > 0.05) {
+            lastTimeRef.current = t;
+            if (waiting) setWaiting(false);
           }
         }}
-        onLoadedMetadata={(e) => setDuration((e.target as HTMLVideoElement).duration || 0)}
+        onLoadedMetadata={(e) => {
+          const v = e.target as HTMLVideoElement;
+          v.playbackRate = rateRef.current;
+          setDuration(v.duration || 0);
+        }}
         onEnded={() => { if (activity.isActive()) onEnded?.(); }}
         onError={() => {
-          if (hlsRef.current) return;
+          const err = videoRef.current?.error ?? null;
+          if (!err) return;
+          const hls = hlsRef.current;
+          if (hls && err.code === 3 && recoverCountRef.current < 4 && activity.isActive()) {
+            recoverCountRef.current += 1;
+            try {
+              hls.recoverMediaError();
+              return;
+            } catch { /* fall through to fatal */ }
+          }
+          if (recoverTimerRef.current) { window.clearTimeout(recoverTimerRef.current); recoverTimerRef.current = null; }
+          if (hls) {
+            hls.destroy();
+            hlsRef.current = null;
+          }
           setWaiting(false);
-          setWaitingSlow(false);
           setPlaying(false);
-          setErrMsg(mediaErrorMessage(videoRef.current?.error ?? null));
+          setErrMsg(mediaErrorMessage(err));
         }}
       />
 
@@ -327,20 +347,6 @@ export default function Player({
           <div className="w-12 h-12 rounded-full bg-black/60 backdrop-blur-md flex items-center justify-center border border-white/15 shadow-[0_8px_24px_rgba(0,0,0,0.5)]">
             <Loader className="w-6 h-6 spinner text-primary" />
           </div>
-          {waitingSlow && (
-            <div className="mt-4 flex flex-col items-center gap-2 bg-black/80 backdrop-blur-xl border border-white/15 rounded-2xl px-5 py-3.5 shadow-[0_12px_32px_rgba(0,0,0,0.7)] pointer-events-auto a-rise max-w-[90%]">
-              <span className="text-sm font-medium text-white/90 text-center tracking-wide">
-                Buffering is slow · Tap to Retry
-              </span>
-              <button
-                type="button"
-                onClick={handleRetryPlayback}
-                className="mt-1 px-4 py-1.5 rounded-full bg-primary text-black font-semibold text-xs transition-transform active:scale-95 shadow-md cursor-pointer"
-              >
-                Tap to Retry
-              </button>
-            </div>
-          )}
         </div>
       )}
 

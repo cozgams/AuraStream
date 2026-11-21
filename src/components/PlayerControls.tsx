@@ -50,7 +50,16 @@ export default function PlayerControls({
   const clockTime = useSyncExternalStore(clock.subscribe, clock.getSnapshot, clock.getSnapshot);
   const seek = useSeekInput({ time: clockTime, duration, enabled: seekEnabled, resetKey: seekKey, onInteraction: onSeekInteraction,
     onSeek: (target, input) => onSeek(target, `desktop_${input}`) });
-  const pct = duration ? Math.min(100, (seek.time / duration) * 100) : 0;
+  const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
+  const safeBuffered = Number.isFinite(buffered) ? Math.max(0, Math.min(1, buffered)) : 0;
+  const pct = safeDuration > 0 ? Math.max(0, Math.min(100, (seek.time / safeDuration) * 100)) : 0;
+
+  useEffect(() => {
+    if (!seekEnabled) {
+      setSpeedOpen(false);
+      setCcOpen(false);
+    }
+  }, [seekEnabled]);
 
   useEffect(() => {
     if (!speedOpen && !ccOpen) return;
@@ -83,7 +92,7 @@ export default function PlayerControls({
       }}>
       <div className={`desktop-seek ${seekEnabled ? "is-seekable" : ""}`}>
         <div className="desktop-seek-track">
-          <span className="desktop-seek-buffer" style={{ width: `${Math.min(1, buffered) * 100}%` }} />
+          <span className="desktop-seek-buffer" style={{ width: `${safeBuffered * 100}%` }} />
           <span className="desktop-seek-played" style={{ width: `${pct}%` }} />
         </div>
         <Input aria-label="Playback progress" type="range" {...seek.inputProps} />
@@ -107,20 +116,35 @@ export default function PlayerControls({
         <span className="player-timecode"><span>{formatClock(seek.time)}</span><span className="player-time-separator">/</span>{formatClock(duration)}</span>
         <div className="player-control-spacer" />
         <div className="player-speed-slot">
-          <Button className={`player-control ${store.subtitleMode !== "off" ? "is-on" : ""}`} aria-label={t("captions.title")} aria-haspopup="menu" aria-expanded={ccOpen}
-            data-tooltip={`${t("captions.title")} (${store.subtitleMode === "en" ? "EN" : "OFF"})`} onClick={() => setCcOpen((v) => !v)}>
+          <Button className={`player-control player-cc ${store.subtitleMode !== "off" ? "is-on" : ""}`} aria-label={t("captions.title")} aria-haspopup="menu" aria-expanded={ccOpen}
+            data-tooltip={`${t("captions.title")} (${store.subtitleMode === "en" ? "EN" : "OFF"})`} onClick={() => { setSpeedOpen(false); setCcOpen((v) => !v); }}>
             {store.subtitleMode !== "off" ? <ICaptionsF size={18} /> : <ICaptions size={18} />}
           </Button>
           {ccOpen && (
-            <div className="player-speed-menu player-cc-menu" role="menu" aria-label={t("captions.title")}>
+            <div className="player-speed-menu player-cc-menu" role="menu" aria-label={t("captions.title")} onKeyDownCapture={event => {
+              const entries = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+              const index = entries.indexOf(document.activeElement as HTMLButtonElement);
+              if (event.key === "Escape") {
+                event.preventDefault(); event.stopPropagation(); setCcOpen(false);
+                boxRef.current?.querySelector<HTMLButtonElement>('.player-cc')?.focus();
+              } else if (event.key === "Tab") {
+                setCcOpen(false);
+              } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key) && entries.length > 0) {
+                event.preventDefault(); event.stopPropagation();
+                const next = event.key === "Home" ? 0 : event.key === "End" ? entries.length - 1
+                  : (index + (event.key === "ArrowDown" ? 1 : -1) + entries.length) % entries.length;
+                entries[next]?.focus();
+              }
+            }}>
               <span className="player-menu-title">{t("captions.title")}</span>
-              {[
+              {([
                 { id: "en", label: "English" },
                 { id: "off", label: "Off" },
-              ].map((item) => (
+              ] as const).map((item) => (
                 <Button key={item.id} role="menuitemradio" aria-checked={store.subtitleMode === item.id} onClick={() => {
-                  store.setSubtitleMode(item.id as any);
+                  store.setSubtitleMode(item.id);
                   setCcOpen(false);
+                  boxRef.current?.querySelector<HTMLButtonElement>('.player-cc')?.focus();
                 }}>
                   <span>{item.label}</span>{store.subtitleMode === item.id && <ICheck size={14} />}
                 </Button>
@@ -130,7 +154,7 @@ export default function PlayerControls({
         </div>
         <div className="player-speed-slot">
           <Button className={`player-control player-speed ${rate !== 1 ? "is-on" : ""}`} aria-label={t("player.speed")} aria-haspopup="menu" aria-expanded={speedOpen}
-            data-tooltip={t("player.speed")} onClick={() => setSpeedOpen((v) => !v)}>
+            data-tooltip={t("player.speed")} onClick={() => { setCcOpen(false); setSpeedOpen((v) => !v); }}>
             {Number.isInteger(rate) ? rate.toFixed(1) : rate}x
           </Button>
           {speedOpen && (

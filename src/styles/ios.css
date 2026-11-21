@@ -1,22 +1,22 @@
 /* iOS-inspired materials. Glass belongs to navigation and controls; content
    uses solid, legible surfaces. All effects have a non-transparent fallback. */
 :root {
-  color-scheme: light;
+  color-scheme: dark;
   --sat: max(env(safe-area-inset-top, 0px), 12px);
   --sab: max(env(safe-area-inset-bottom, 0px), 48px);
-  --p-canvas:#e8e6e0; --p-bg:#eeece7; --p-s1:#f8f7f3; --p-s2:#f4f2ed;
-  --p-s3:#e7e5df; --p-s4:#d2cfc7; --p-on:#25241f; --p-mut:#625f58; --p-dim:#706d65;
-  --p-primary:#f4f1eb; --p-on-primary:#191919; --p-pc:#e0edff; --p-on-pc:#0052af;
-  --p-sec:#e3edfb; --p-on-sec:#0054ad; --p-like:#bd2851; --p-star:#886200;
-  --p-success:#247542; --p-danger:#c52b35; --p-on-danger:#fff;
-  --p-glow:rgb(0 122 255 / .13); --p-hover:rgb(60 60 67 / .05); --p-tint:rgb(0 122 255 / .09);
-  --p-shadow:0 12px 36px rgb(30 28 22 / .08);
-  --ios-edge:rgb(60 56 48 / .14); --ios-highlight:rgb(255 255 255 / .92);
-  --ios-glass:rgb(248 247 243 / .78); --ios-glass-solid:#f8f7f3;
-  --ios-selected:rgb(255 255 255 / .78); --ios-scrim:rgb(0 0 0 / .65);
-  --ios-shadow:0 10px 32px rgb(40 36 28 / .12),inset 0 1px 0 var(--ios-highlight),inset 0 -1px 0 rgb(0 0 0 / .035);
-  --control-shadow:0 2px 6px rgb(40 36 28 / .08),inset 0 1px 0 rgb(255 255 255 / .80);
-  --surface-shadow:0 8px 24px rgb(40 36 28 / .07),inset 0 1px 0 rgb(255 255 255 / .72);
+  --p-canvas:#0c0e13; --p-bg:#12141a; --p-s1:#1a1d24; --p-s2:#21252e;
+  --p-s3:#292e3a; --p-s4:#353b4a; --p-on:#f4f4f6; --p-mut:#a3aab8; --p-dim:#7e8696;
+  --p-primary:#f4f1eb; --p-on-primary:#191919; --p-pc:#193c60; --p-on-pc:#d4e8ff;
+  --p-sec:#2a313d; --p-on-sec:#dcecff; --p-like:#ff5e7e; --p-star:#f5b841;
+  --p-success:#4cc38a; --p-danger:#ff6b72; --p-on-danger:#fff;
+  --p-glow:rgb(116 183 255 / .24); --p-hover:rgb(255 255 255 / .07); --p-tint:rgb(116 183 255 / .14);
+  --p-shadow:0 12px 36px rgb(0 0 0 / .42);
+  --ios-edge:rgb(255 255 255 / .12); --ios-highlight:rgb(255 255 255 / .08);
+  --ios-glass:rgb(24 24 28 / .92); --ios-glass-solid:#18181c;
+  --ios-selected:rgb(255 255 255 / .14); --ios-scrim:rgb(0 0 0 / .65);
+  --ios-shadow:0 16px 40px rgb(0 0 0 / .5),inset 0 1px 0 rgb(255 255 255 / .08),inset 0 -1px 0 rgb(0 0 0 / .24);
+  --control-shadow:0 2px 8px rgb(0 0 0 / .28),inset 0 1px 0 rgb(255 255 255 / .1);
+  --surface-shadow:0 8px 24px rgb(0 0 0 / .32),inset 0 1px 0 rgb(255 255 255 / .06);
   --ios-page-inset:clamp(18px,2.5vw,36px);
   --r-xs:8px; --r-sm:16px; --r-md:22px; --r-lg:30px; --r-ctl:999px;
   --nav-h:76px;
@@ -346,35 +346,35 @@ body.has-series-detail .hg-tabbar {
 :root {
   --motion-ink:#1a73e8;
   --motion-on-ink:#fff;
-  --motion-paper:#eeece7;
-  --motion-paper-2:#e5e2db;
+  --motion-paper:#12141a;
+  --motion-paper-2:#1a1d24;
   --motion-accent:#f06d5f;
   --motion-spring:cubic-bezier(.34,1.56,.64,1);
   --motion-spring-soft:cubic-bezier(.22,1.28,.36,1);
   --ios-spring:var(--motion-spring);
-  --p-canvas:#e8e6e0; --p-bg:#eeece7; --p-s1:#f8f7f3; --p-s2:#f4f2ed;
-  --p-s3:#e7e5df; --p-s4:#d2cfc7; --p-on:#25241f; --p-mut:#625f58; --p-dim:#706d65;
-  --p-primary:#f4f1eb; --p-on-primary:#191919; --p-pc:#e0edff; --p-on-pc:#0052af;
-  --p-sec:#e3edfb; --p-on-sec:#0054ad; --p-like:var(--motion-accent); --p-star:#b57528;
-  --p-success:#4f8d65; --p-danger:#c64942; --p-on-danger:#fff; --p-glow:rgb(0 101 213 / .18);
-  --p-hover:rgb(25 25 25 / .06); --p-tint:rgb(0 101 213 / .12); --p-shadow:0 18px 42px rgb(36 32 28 / .10);
-  --ios-edge:rgb(60 56 48 / .14); --ios-highlight:rgb(255 255 255 / .92);
-  --ios-glass:rgb(248 247 243 / .88); --ios-glass-solid:#f8f7f3; --ios-selected:rgb(255 255 255 / .92); --ios-scrim:rgb(0 0 0 / .40);
-  --ios-shadow:0 12px 32px rgb(39 35 30 / .12),0 2px 0 rgb(255 255 255 / .85) inset;
+  --p-canvas:#0c0e13; --p-bg:#12141a; --p-s1:#1a1d24; --p-s2:#21252e;
+  --p-s3:#292e3a; --p-s4:#353b4a; --p-on:#f4f4f6; --p-mut:#a3aab8; --p-dim:#7e8696;
+  --p-primary:#f4f1eb; --p-on-primary:#191919; --p-pc:#193c60; --p-on-pc:#d4e8ff;
+  --p-sec:#2a313d; --p-on-sec:#dcecff; --p-like:var(--motion-accent); --p-star:#f5b841;
+  --p-success:#4cc38a; --p-danger:#ff6b72; --p-on-danger:#fff; --p-glow:rgb(116 183 255 / .24);
+  --p-hover:rgb(255 255 255 / .07); --p-tint:rgb(116 183 255 / .14); --p-shadow:0 18px 42px rgb(0 0 0 / .42);
+  --ios-edge:rgb(255 255 255 / .12); --ios-highlight:rgb(255 255 255 / .08);
+  --ios-glass:rgb(24 24 28 / .92); --ios-glass-solid:#18181c; --ios-selected:rgb(255 255 255 / .14); --ios-scrim:rgb(0 0 0 / .65);
+  --ios-shadow:0 16px 40px rgb(0 0 0 / .5),inset 0 1px 0 rgb(255 255 255 / .08),inset 0 -1px 0 rgb(0 0 0 / .24);
 }
 .ios-segmented-indicator {
   position:absolute; z-index:0; top:4px; bottom:4px; left:4px;
   width:calc((100% - 8px - (var(--segment-count, 2) - 1)*4px)/var(--segment-count, 2));
-  border:1px solid rgba(0, 0, 0, 0.06) !important;
+  border:1px solid rgba(255, 255, 255, 0.12) !important;
   border-radius:var(--control-radius);
-  background:#ffffff !important;
-  box-shadow:0 2px 6px rgba(0, 0, 0, 0.08), 0 0.5px 1.5px rgba(0, 0, 0, 0.04) !important;
+  background:var(--p-s4) !important;
+  box-shadow:0 2px 8px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
   pointer-events:none;
   transform:translateX(calc(var(--segment-index, 0)*100% + var(--segment-index, 0)*4px));
   transition:transform .34s var(--motion-spring);
 }
 .ios-segmented-items > [aria-pressed=true] {
-  color: var(--p-on, #25241f) !important;
+  color: #ffffff !important;
   font-weight: 700 !important;
 }
 html.theme-light {
@@ -402,7 +402,7 @@ html.theme-light .ios-segmented-items > [aria-pressed=true] {
   font-weight: 700 !important;
 }
 
-body { background:var(--motion-paper); }
+body { background:var(--p-canvas); }
 .ios-page {
   background-color:var(--p-bg);
   background-image:linear-gradient(132deg,
@@ -450,28 +450,46 @@ body { background:var(--motion-paper); }
 .ios-mobile-nav .ios-mobile-nav-item[aria-current=page] { color:var(--motion-on-ink); }
 
 /* Solid white floating capsule in light mode matching modern glassmorphic designs without messy content bleed */
-.ios-mobile-nav:not([data-over-video=true]) .hg-glass {
+html.theme-light .ios-mobile-nav:not([data-over-video=true]) .hg-glass {
   background: #ffffff !important;
   border: 1px solid rgba(226, 232, 240, 0.95) !important;
   box-shadow: 0 10px 30px -4px rgba(15, 23, 42, 0.12), 0 4px 12px -2px rgba(15, 23, 42, 0.08) !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
-.ios-mobile-nav:not([data-over-video=true]) .hg-glass::before {
+html.theme-light .ios-mobile-nav:not([data-over-video=true]) .hg-glass::before {
   display: none !important;
 }
-.ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item {
+html.theme-light .ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item {
   color: #475569 !important;
   font-weight: 600 !important;
 }
-.ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item[aria-current=page] {
+html.theme-light .ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item[aria-current=page] {
   color: #ffffff !important;
   font-weight: 700 !important;
 }
-.ios-mobile-nav:not([data-over-video=true]) .hg-drop>.ios-liquid-fill {
+html.theme-light .ios-mobile-nav:not([data-over-video=true]) .hg-drop>.ios-liquid-fill {
   background: #1a73e8 !important;
   border-radius: 999px !important;
   box-shadow: 0 4px 14px rgba(26, 115, 232, 0.4) !important;
+}
+html:not(.theme-light) .ios-mobile-nav:not([data-over-video=true]) .hg-glass {
+  background: rgba(24, 24, 28, 0.94) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  box-shadow: 0 14px 36px -4px rgba(0, 0, 0, 0.55), 0 4px 14px -2px rgba(0, 0, 0, 0.35) !important;
+}
+html:not(.theme-light) .ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item {
+  color: #a3aab8 !important;
+  font-weight: 600 !important;
+}
+html:not(.theme-light) .ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item[aria-current=page] {
+  color: #ffffff !important;
+  font-weight: 700 !important;
+}
+html:not(.theme-light) .ios-mobile-nav:not([data-over-video=true]) .hg-drop>.ios-liquid-fill {
+  background: #1a73e8 !important;
+  border-radius: 999px !important;
+  box-shadow: 0 4px 14px rgba(26, 115, 232, 0.45) !important;
 }
 
 .ios-dialog { border-radius:32px; background:var(--glass-bg); border-color:var(--glass-edge); box-shadow:var(--ios-shadow); backdrop-filter:blur(28px) saturate(150%); -webkit-backdrop-filter:blur(28px) saturate(150%); }

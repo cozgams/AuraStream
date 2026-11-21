@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useSyncExternalStore } from "react";
+import React, { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { SubtitleCue, SubtitleMode, SubtitleSize, SubtitleStyleConfig } from "../subtitles/types";
 import { getSubtitlesForEpisode, getSubtitleStyleConfig } from "../subtitles/aiSubtitleService";
 import type { PlaybackClock } from "../playbackClock";
@@ -37,6 +37,8 @@ export default function SubtitleOverlay({
   const [cues, setCues] = useState<SubtitleCue[]>([]);
   const [styleConfig, setStyleConfig] = useState<SubtitleStyleConfig>(() => getSubtitleStyleConfig());
   const [videoFrameBottom, setVideoFrameBottom] = useState<number | null>(null);
+  const [voiceDubEnabled, setVoiceDubEnabled] = useState<boolean>(() => isVoiceDubEnabled());
+  const prevEpisodeKeyRef = useRef<string>("");
 
   // Listen to live style updates from Settings & SubtitleSheet
   useEffect(() => {
@@ -52,9 +54,22 @@ export default function SubtitleOverlay({
     return () => window.removeEventListener("aurastream:subtitlestyle-changed", onStyleChange);
   }, []);
 
+  // Listen to voice dub toggle updates
+  useEffect(() => {
+    const onVoiceDubChange = (e: Event) => {
+      const detail = (e as CustomEvent<{ enabled?: boolean }>).detail;
+      setVoiceDubEnabled(typeof detail?.enabled === "boolean" ? detail.enabled : isVoiceDubEnabled());
+    };
+    window.addEventListener("aurastream:voice-dub-changed", onVoiceDubChange);
+    return () => window.removeEventListener("aurastream:voice-dub-changed", onVoiceDubChange);
+  }, []);
+
   // Frame-accurate video rect calculation for letterboxed / aspect-ratio playback
   useEffect(() => {
-    if (!videoEl) return;
+    if (!videoEl) {
+      setVideoFrameBottom(null);
+      return;
+    }
     const calculateBounds = () => {
       try {
         const rect = videoEl.getBoundingClientRect();
@@ -79,9 +94,18 @@ export default function SubtitleOverlay({
     calculateBounds();
     window.addEventListener("resize", calculateBounds);
     videoEl.addEventListener("loadedmetadata", calculateBounds);
+    videoEl.addEventListener("resize", calculateBounds);
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(calculateBounds);
+      ro.observe(videoEl);
+      if (videoEl.parentElement) ro.observe(videoEl.parentElement);
+    }
     return () => {
       window.removeEventListener("resize", calculateBounds);
-      videoEl?.removeEventListener("loadedmetadata", calculateBounds);
+      videoEl.removeEventListener("loadedmetadata", calculateBounds);
+      videoEl.removeEventListener("resize", calculateBounds);
+      ro?.disconnect();
     };
   }, [videoEl, videoEl?.videoWidth, videoEl?.videoHeight]);
 
@@ -93,21 +117,34 @@ export default function SubtitleOverlay({
 
   // Direct video element time listener for sub-frame subtitle sync
   const [videoTime, setVideoTime] = useState<number>(() => (videoEl ? videoEl.currentTime : 0));
+  const [isPlaying, setIsPlaying] = useState<boolean>(() => Boolean(videoEl && !videoEl.paused));
   useEffect(() => {
-    if (!videoEl) return;
+    if (!videoEl) {
+      setVideoTime(0);
+      setIsPlaying(false);
+      return;
+    }
     const onTime = () => setVideoTime(videoEl.currentTime);
+    const onPlayState = () => setIsPlaying(!videoEl.paused);
     setVideoTime(videoEl.currentTime);
+    setIsPlaying(!videoEl.paused);
     videoEl.addEventListener("timeupdate", onTime);
     videoEl.addEventListener("seeking", onTime);
     videoEl.addEventListener("seeked", onTime);
     videoEl.addEventListener("play", onTime);
-    videoEl.addEventListener("pause", onTime);
+    videoEl.addEventListener("play", onPlayState);
+    videoEl.addEventListener("playing", onPlayState);
+    videoEl.addEventListener("pause", onPlayState);
+    videoEl.addEventListener("ended", onPlayState);
     return () => {
       videoEl.removeEventListener("timeupdate", onTime);
       videoEl.removeEventListener("seeking", onTime);
       videoEl.removeEventListener("seeked", onTime);
       videoEl.removeEventListener("play", onTime);
-      videoEl.removeEventListener("pause", onTime);
+      videoEl.removeEventListener("play", onPlayState);
+      videoEl.removeEventListener("playing", onPlayState);
+      videoEl.removeEventListener("pause", onPlayState);
+      videoEl.removeEventListener("ended", onPlayState);
     };
   }, [videoEl]);
 
@@ -116,6 +153,11 @@ export default function SubtitleOverlay({
   // Load subtitles when videoId or episode changes
   useEffect(() => {
     let canceled = false;
+    const episodeKey = `${videoId}:${episode}`;
+    if (prevEpisodeKeyRef.current !== episodeKey) {
+      prevEpisodeKeyRef.current = episodeKey;
+      setCues([]);
+    }
     getSubtitlesForEpisode(videoId, episode, title)
       .then((track) => {
         if (!canceled) {
@@ -134,21 +176,23 @@ export default function SubtitleOverlay({
 
   // Find active cue
   const activeCue = cues.find((c) => currentTime >= c.start && currentTime <= c.end);
+  const trackKey = `${videoId}:${episode}`;
+  const cueKey = activeCue ? `${trackKey}:${activeCue.id}` : "";
 
   // Synchronized Voice Dubbing Prototype
   useEffect(() => {
-    if (activeCue) {
-      speakActiveCue(activeCue, videoEl);
+    if (activeCue && voiceDubEnabled) {
+      speakActiveCue(activeCue, videoEl, trackKey);
     }
-  }, [activeCue?.id, videoEl]);
+  }, [cueKey, videoEl, voiceDubEnabled, isPlaying]);
 
   useEffect(() => {
     return () => {
       cancelVoiceDub(videoEl);
     };
-  }, [videoEl]);
+  }, [videoId, episode, videoEl]);
 
-  if ((mode === "off" && !isVoiceDubEnabled()) || !cues.length) {
+  if ((mode === "off" && !voiceDubEnabled) || !cues.length) {
     return null;
   }
 
@@ -260,10 +304,11 @@ export default function SubtitleOverlay({
       };
     } else {
       const baseOffset = bottomOffset !== undefined ? bottomOffset : 54;
+      const minClearance = `calc(var(--sab, 48px) + ${baseOffset + 146}px)`;
       positionStyle = {
-        bottom: videoFrameBottom !== null && videoFrameBottom > baseOffset + 112
-          ? `${videoFrameBottom}px`
-          : `calc(var(--sab, 48px) + ${baseOffset + 112}px)`,
+        bottom: videoFrameBottom !== null
+          ? `max(${videoFrameBottom}px, ${minClearance})`
+          : minClearance,
       };
     }
   }

@@ -1058,29 +1058,23 @@ export default function Profile({ wide }: { wide: boolean }) {
                 </div>
               ) : (
                 <div className="flex items-center gap-2 pt-0.5">
-                  <div className="flex-1 h-1.5 rounded-full bg-[#e2e8f0] overflow-hidden">
+                  <div className="flex-1 h-1.5 rounded-full bg-[#e2e8f0] dark:bg-neutral-800 overflow-hidden">
                     <div
                       className="h-full bg-[#2563eb] rounded-full transition-all duration-300"
                       style={{
-                        width: `${Math.min(
-                          100,
-                          Math.max(
-                            5,
-                            storageStats?.percentUsed != null
-                              ? Math.round(storageStats.percentUsed)
-                              : downloads.length > 0
-                              ? 67
+                        width: `${
+                          storageStats?.percentUsed != null
+                            ? storageStats.percentUsed > 0
+                              ? Math.min(100, Math.max(3, Math.round(storageStats.percentUsed)))
                               : 0
-                          )
-                        )}%`,
+                            : 0
+                        }%`,
                       }}
                     />
                   </div>
-                  <span className="text-[10.5px] font-extrabold text-[#2563eb] tabular-nums">
+                  <span className="text-[10.5px] font-extrabold text-[#2563eb] dark:text-blue-400 tabular-nums">
                     {storageStats?.percentUsed != null
                       ? `${Math.round(storageStats.percentUsed)}%`
-                      : downloads.length > 0
-                      ? "67%"
                       : "0%"}
                   </span>
                 </div>
@@ -1092,10 +1086,10 @@ export default function Profile({ wide }: { wide: boolean }) {
               role="button"
               tabIndex={0}
               onClick={() => push({ kind: "settings" })}
-              className="bg-white/85 dark:bg-neutral-900/85 backdrop-blur-md rounded-2xl border border-white/70 dark:border-white/10 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-3.5 flex items-center justify-between cursor-pointer pressable hover:bg-white active:scale-[0.99] transition-all"
+              className="bg-white/85 dark:bg-neutral-900/85 backdrop-blur-md rounded-2xl border border-white/70 dark:border-white/10 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-3.5 flex items-center justify-between cursor-pointer pressable hover:bg-white dark:hover:bg-neutral-800/90 active:scale-[0.99] transition-all"
             >
               <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-2xl bg-[#f1f5f9] text-[#475569] flex items-center justify-center shrink-0 shadow-xs">
+                <div className="w-11 h-11 rounded-2xl bg-[#f1f5f9] dark:bg-neutral-800 text-[#475569] dark:text-neutral-300 flex items-center justify-center shrink-0 shadow-xs">
                   <ISettings size={20} strokeWidth={2.2} />
                 </div>
                 <div>
@@ -1108,7 +1102,7 @@ export default function Profile({ wide }: { wide: boolean }) {
 
             {/* Footer */}
             <div className="text-center text-[10.5px] text-[#94a3b8] font-medium pt-0.5 pb-1 tracking-tight">
-              AuraStream v{APP_VERSION}
+              AuraStream v{APP_VERSION} · This App Created by AAA. All rights reserved.
             </div>
           </div>
         ) : view === "downloads" ? (
@@ -1267,14 +1261,20 @@ export default function Profile({ wide }: { wide: boolean }) {
                     <div className="text-[16px] font-black text-[#0f172a] dark:text-neutral-100 tracking-tight">
                       {formatBytes(totalDownloadsBytes)}{" "}
                       <span className="text-[12px] text-[#64748b] dark:text-neutral-400 font-normal">
-                        / {storageStats?.quotaBytes ? (storageStats.quotaBytes / (1024 * 1024 * 1024)).toFixed(0) : "2"} GB
+                        {storageStats?.quotaBytes ? `/ ${formatBytes(storageStats.quotaBytes)}` : ""}
                       </span>
                     </div>
-                    <div className="w-full h-1.5 rounded-full bg-slate-200 overflow-hidden mt-1.5">
+                    <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-neutral-800 overflow-hidden mt-1.5">
                       <div
                         className="h-full bg-[#1a73e8] rounded-full transition-all duration-300"
                         style={{
-                          width: `${Math.min(100, Math.max(5, storageStats?.percentUsed != null ? Math.round(storageStats.percentUsed) : 26))}%`,
+                          width: `${
+                            storageStats?.percentUsed != null
+                              ? storageStats.percentUsed > 0
+                                ? Math.min(100, Math.max(3, Math.round(storageStats.percentUsed)))
+                                : 0
+                              : 0
+                          }%`,
                         }}
                       />
                     </div>
@@ -1284,13 +1284,13 @@ export default function Profile({ wide }: { wide: boolean }) {
                     <button
                       type="button"
                       onClick={() => setManageStorageOpen(true)}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white border border-slate-200/80 text-[11.5px] font-bold text-[#334155] shadow-xs hover:bg-slate-50 pressable active:scale-95 transition-all"
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white dark:bg-neutral-800 border border-slate-200/80 dark:border-white/10 text-[11.5px] font-bold text-[#334155] dark:text-neutral-200 shadow-xs hover:bg-slate-50 dark:hover:bg-neutral-700 pressable active:scale-95 transition-all"
                     >
                       <ISettings size={12} />
                       <span>Manage</span>
                     </button>
-                    <span className="text-[11px] font-bold text-[#1a73e8] tabular-nums">
-                      {storageStats?.percentUsed != null ? `${Math.round(storageStats.percentUsed)}%` : "26%"}
+                    <span className="text-[11px] font-bold text-[#1a73e8] dark:text-blue-400 tabular-nums">
+                      {storageStats?.percentUsed != null ? `${Math.round(storageStats.percentUsed)}%` : "0%"}
                     </span>
                   </div>
                 </div>
@@ -1929,7 +1929,7 @@ export default function Profile({ wide }: { wide: boolean }) {
           <div className="flex items-center gap-2.5 mt-2">
             <Button
               onClick={() => setConfirmClearAllOpen(false)}
-              className="flex-1 h-9 rounded-xl bg-slate-100 text-[#0f172a] dark:text-neutral-100 text-[13px] font-medium pressable"
+              className="flex-1 h-9 rounded-xl bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-[#0f172a] dark:text-neutral-100 text-[13px] font-medium pressable"
             >
               {t("common.cancel")}
             </Button>
@@ -1956,7 +1956,7 @@ export default function Profile({ wide }: { wide: boolean }) {
         label="Delete Series"
       >
         <div className="p-4 flex flex-col gap-3 text-center">
-          <div className="w-12 h-12 rounded-full bg-red-100 text-red-500 mx-auto flex items-center justify-center">
+          <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-500/20 text-red-500 mx-auto flex items-center justify-center">
             <ITrash size={22} />
           </div>
           <div>
@@ -1970,7 +1970,7 @@ export default function Profile({ wide }: { wide: boolean }) {
           <div className="flex items-center gap-2.5 mt-2">
             <Button
               onClick={() => setConfirmDeleteSeriesOpen(false)}
-              className="flex-1 h-9 rounded-xl bg-slate-100 text-[#0f172a] dark:text-neutral-100 text-[13px] font-medium pressable"
+              className="flex-1 h-9 rounded-xl bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-[#0f172a] dark:text-neutral-100 text-[13px] font-medium pressable"
             >
               {t("common.cancel")}
             </Button>
@@ -2000,7 +2000,7 @@ export default function Profile({ wide }: { wide: boolean }) {
         label="Manage Downloads"
       >
         <div className="p-4 flex flex-col gap-3 text-center">
-          <div className="w-12 h-12 rounded-full bg-blue-100 text-[#1a73e8] mx-auto flex items-center justify-center">
+          <div className="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-500/20 text-[#1a73e8] dark:text-blue-400 mx-auto flex items-center justify-center">
             <ISettings size={22} />
           </div>
           <div>
@@ -2018,7 +2018,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                 setManageStorageOpen(false);
                 setSelectMode(true);
               }}
-              className="w-full h-10 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#0f172a] dark:text-neutral-100 text-[13px] font-semibold flex items-center justify-center gap-2 pressable"
+              className="w-full h-10 rounded-xl bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-[#0f172a] dark:text-neutral-100 text-[13px] font-semibold flex items-center justify-center gap-2 pressable"
             >
               <ICheck size={14} />
               <span>Select Episodes to Delete</span>
@@ -2029,7 +2029,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                 setManageStorageOpen(false);
                 setConfirmClearAllOpen(true);
               }}
-              className="w-full h-10 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 text-[13px] font-semibold flex items-center justify-center gap-2 pressable"
+              className="w-full h-10 rounded-xl bg-red-50 dark:bg-red-500/15 hover:bg-red-100 dark:hover:bg-red-500/25 text-red-600 dark:text-red-400 text-[13px] font-semibold flex items-center justify-center gap-2 pressable"
             >
               <ITrash size={14} />
               <span>Clear All Offline Downloads</span>
@@ -2037,7 +2037,7 @@ export default function Profile({ wide }: { wide: boolean }) {
             <button
               type="button"
               onClick={() => setManageStorageOpen(false)}
-              className="w-full h-9 rounded-xl border border-slate-200 text-[#64748b] dark:text-neutral-400 text-[12.5px] font-medium pressable"
+              className="w-full h-9 rounded-xl border border-slate-200 dark:border-white/15 text-[#64748b] dark:text-neutral-400 text-[12.5px] font-medium pressable"
             >
               Cancel
             </button>
@@ -2052,7 +2052,7 @@ export default function Profile({ wide }: { wide: boolean }) {
         label="Series Options"
       >
         <div className="p-4 flex flex-col gap-3 text-center">
-          <div className="w-12 h-12 rounded-full bg-blue-100 text-[#1a73e8] mx-auto flex items-center justify-center">
+          <div className="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-500/20 text-[#1a73e8] dark:text-blue-400 mx-auto flex items-center justify-center">
             <ILayers size={22} />
           </div>
           <div>
@@ -2100,10 +2100,10 @@ export default function Profile({ wide }: { wide: boolean }) {
                   });
                 }
               }}
-              className="w-full h-10 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#0f172a] dark:text-neutral-100 text-[13px] font-semibold flex items-center justify-center gap-2 pressable"
+              className="w-full h-10 rounded-xl bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-[#0f172a] dark:text-neutral-100 text-[13px] font-semibold flex items-center justify-center gap-2 pressable"
             >
               <IDownload size={14} />
-              <span>Export All Episodes (ZIP)</span>
+              <span>Export All Episodes (MP4)</span>
             </button>
             <button
               type="button"
@@ -2111,7 +2111,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                 setSeriesMenuOpen(false);
                 setConfirmDeleteSeriesOpen(true);
               }}
-              className="w-full h-10 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 text-[13px] font-semibold flex items-center justify-center gap-2 pressable"
+              className="w-full h-10 rounded-xl bg-red-50 dark:bg-red-500/15 hover:bg-red-100 dark:hover:bg-red-500/25 text-red-600 dark:text-red-400 text-[13px] font-semibold flex items-center justify-center gap-2 pressable"
             >
               <ITrash size={14} />
               <span>Delete Entire Series</span>
@@ -2119,7 +2119,7 @@ export default function Profile({ wide }: { wide: boolean }) {
             <button
               type="button"
               onClick={() => setSeriesMenuOpen(false)}
-              className="w-full h-9 rounded-xl border border-slate-200 text-[#64748b] dark:text-neutral-400 text-[12.5px] font-medium pressable"
+              className="w-full h-9 rounded-xl border border-slate-200 dark:border-white/15 text-[#64748b] dark:text-neutral-400 text-[12.5px] font-medium pressable"
             >
               Cancel
             </button>
@@ -2139,7 +2139,7 @@ export default function Profile({ wide }: { wide: boolean }) {
               <IUser size={28} />
             </div>
             <span
-              className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-[#22c55e] border-2 border-white shadow-xs"
+              className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-[#22c55e] border-2 border-white dark:border-neutral-900 shadow-xs"
               title="Local Storage Ready"
             />
           </div>
@@ -2153,16 +2153,16 @@ export default function Profile({ wide }: { wide: boolean }) {
           </div>
 
           <div className="grid grid-cols-2 gap-2 mt-1 text-left">
-            <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+            <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-neutral-800/80 border border-slate-100 dark:border-white/10">
               <div className="text-[10px] font-semibold text-[#64748b] dark:text-neutral-400">Watch History</div>
               <div className="text-[15px] font-black text-[#0f172a] dark:text-neutral-100 mt-0.5">{history.length} items</div>
             </div>
-            <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+            <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-neutral-800/80 border border-slate-100 dark:border-white/10">
               <div className="text-[10px] font-semibold text-[#64748b] dark:text-neutral-400">Favorites & Saved</div>
               <div className="text-[15px] font-black text-[#0f172a] dark:text-neutral-100 mt-0.5">{favs.length + (watchLater?.length || 0)} dramas</div>
             </div>
-            <div className="col-span-2 p-2.5 rounded-xl bg-blue-50/70 border border-blue-100/80">
-              <div className="text-[10px] font-semibold text-[#1a73e8]">Offline Downloads</div>
+            <div className="col-span-2 p-2.5 rounded-xl bg-blue-50/70 dark:bg-blue-500/15 border border-blue-100/80 dark:border-blue-500/25">
+              <div className="text-[10px] font-semibold text-[#1a73e8] dark:text-blue-400">Offline Downloads</div>
               <div className="text-[14px] font-black text-[#0f172a] dark:text-neutral-100 mt-0.5">
                 {downloads.length} {downloads.length === 1 ? "episode" : "episodes"} ({formatBytes(totalDownloadsBytes)})
               </div>
@@ -2181,7 +2181,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                   setLibraryInfoOpen(false);
                   toast("Signed out successfully", "ok");
                 }}
-                className="w-full h-10 rounded-xl bg-red-50 text-red-600 border border-red-200/80 text-[13px] font-bold pressable active:scale-95 transition-all"
+                className="w-full h-10 rounded-xl bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-400 border border-red-200/80 dark:border-red-500/30 text-[13px] font-bold pressable active:scale-95 transition-all"
               >
                 Sign Out
               </button>
@@ -2202,7 +2202,7 @@ export default function Profile({ wide }: { wide: boolean }) {
           <button
             type="button"
             onClick={() => setLibraryInfoOpen(false)}
-            className="w-full h-10 rounded-xl bg-slate-100 text-[#0f172a] dark:text-neutral-100 text-[13px] font-bold pressable active:scale-95 transition-all"
+            className="w-full h-10 rounded-xl bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-[#0f172a] dark:text-neutral-100 text-[13px] font-bold pressable active:scale-95 transition-all"
           >
             Done
           </button>
