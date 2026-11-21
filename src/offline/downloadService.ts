@@ -160,9 +160,7 @@ function notifyNativeDownloadProgress(
 }
 
 function notifyNativeDownloadComplete(videoId: number, episode: number, title: string, fileSizeFormatted: string = "") {
-  if (typeof window !== "undefined" && typeof (window as any).AuraNativeExport?.setDownloadActive === "function") {
-    (window as any).AuraNativeExport.setDownloadActive(false);
-  }
+  syncNativeDownloadCount();
   if (!isDownloadNotificationEnabled()) return;
   if (typeof window !== "undefined" && typeof (window as any).AuraNativeExport?.showDownloadCompleteNotification === "function") {
     const notifId = ((Math.abs(videoId) % 10000) * 100 + (episode % 100)) & 0x7fffffff;
@@ -175,9 +173,7 @@ function notifyNativeDownloadCancel(videoId: number, episode: number) {
     const notifId = ((Math.abs(videoId) % 10000) * 100 + (episode % 100)) & 0x7fffffff;
     (window as any).AuraNativeExport.cancelDownloadNotification(notifId);
   }
-  if (typeof window !== "undefined" && typeof (window as any).AuraNativeExport?.setDownloadActive === "function") {
-    (window as any).AuraNativeExport.setDownloadActive(false);
-  }
+  syncNativeDownloadCount();
 }
 
 export function subscribeDownloadProgress(
@@ -1671,51 +1667,59 @@ export async function executeBatchDownload(
   let success = 0;
   let failed = 0;
 
-  for (let i = 0; i < unDownloaded.length; i++) {
-    if (batchCancelled) break;
-    const ep = unDownloaded[i];
-    batchState.currentEpisode = ep;
-    notifyBatchProgress();
-
-    let downloaded = false;
-    for (let attempt = 0; attempt < 2; attempt++) {
+  try {
+    for (let i = 0; i < unDownloaded.length; i++) {
       if (batchCancelled) break;
-      try {
-        const info = await api.play(videoId, ep);
-        const streamRes = resolveStreamUrlForQuality(info, qualityPreference);
-        if (!streamRes?.url) throw new Error("No stream URL");
+      const ep = unDownloaded[i];
+      batchState.currentEpisode = ep;
+      notifyBatchProgress();
 
-        await startEpisodeDownload(
-          videoId,
-          ep,
-          title,
-          cover,
-          streamRes.url,
-          forceAllowCellular,
-          streamRes.quality,
-          streamRes.isHevc
-        );
-        downloaded = true;
-        success++;
-        batchState.completed = success;
-        break;
-      } catch (epErr) {
-        if (attempt === 0 && !batchCancelled) {
-          logLine(`[batch] retrying episode ${ep} once after pause`);
-          await new Promise((r) => setTimeout(r, 1200));
+      let downloaded = false;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (batchCancelled) break;
+        try {
+          const info = await api.play(videoId, ep);
+          const streamRes = resolveStreamUrlForQuality(info, qualityPreference);
+          if (!streamRes?.url) throw new Error("No stream URL");
+
+          if (batchCancelled) break;
+
+          await startEpisodeDownload(
+            videoId,
+            ep,
+            title,
+            cover,
+            streamRes.url,
+            forceAllowCellular,
+            streamRes.quality,
+            streamRes.isHevc
+          );
+
+          if (isEpisodeDownloaded(videoId, ep)) {
+            downloaded = true;
+            success++;
+            batchState.completed = success;
+            break;
+          }
+        } catch (epErr) {
+          if (attempt === 0 && !batchCancelled) {
+            logLine(`[batch] retrying episode ${ep} once after pause`);
+            await new Promise((r) => setTimeout(r, 1200));
+          }
         }
       }
-    }
 
-    if (!downloaded && !batchCancelled) {
-      failed++;
-      batchState.failedCount = failed;
+      if (!downloaded && !batchCancelled) {
+        failed++;
+        batchState.failedCount = failed;
+      }
+      notifyBatchProgress();
     }
+  } finally {
+    batchState.active = false;
     notifyBatchProgress();
   }
 
-  batchState.active = false;
-  notifyBatchProgress();
   return { success, failed };
 }
 

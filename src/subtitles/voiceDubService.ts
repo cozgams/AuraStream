@@ -18,6 +18,9 @@ let cachedVoices: SpeechSynthesisVoice[] = [];
 let lastSpokenCueId: string | number | null = null;
 let isDucked = false;
 let preDuckVolume = 1.0;
+let activeUtterance: SpeechSynthesisUtterance | null = null;
+let activeVideoEl: HTMLVideoElement | null = null;
+let currentUtteranceId = 0;
 
 function loadVoices(): SpeechSynthesisVoice[] {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return [];
@@ -95,6 +98,12 @@ function getBestEnglishVoice(): SpeechSynthesisVoice | null {
   const voices = loadVoices();
   if (!voices.length) return null;
 
+  const isOffline = typeof navigator !== "undefined" && navigator.onLine === false;
+  if (isOffline) {
+    const localEn = voices.find((v) => v.lang.startsWith("en") && v.localService === true);
+    if (localEn) return localEn;
+  }
+
   // 1. Prefer natural Google English voices on Android
   const googleEn = voices.find(
     (v) => v.lang.startsWith("en") && (v.name.includes("Google") || v.name.includes("Natural")),
@@ -128,10 +137,18 @@ export function speakActiveCue(cue: SubtitleCue, videoEl?: HTMLVideoElement | nu
   const text = formatSubtitleText(cue.en || cue.zh);
   if (!text || text.trim().length === 0) return;
 
+  // Track active video element for volume restore
+  if (videoEl) {
+    activeVideoEl = videoEl;
+  }
+
   // Cancel any prior speech to keep tight synchronization with current frame
   window.speechSynthesis.cancel();
 
+  const utteranceId = ++currentUtteranceId;
   const utterance = new SpeechSynthesisUtterance(text);
+  activeUtterance = utterance; // Prevent GC in Chromium / Android WebView
+
   const voice = getBestEnglishVoice();
   if (voice) {
     utterance.voice = voice;
@@ -151,13 +168,15 @@ export function speakActiveCue(cue: SubtitleCue, videoEl?: HTMLVideoElement | nu
   utterance.pitch = 1.0;
   utterance.volume = getVoiceDubVolume();
 
+  const targetVideo = videoEl || activeVideoEl;
+
   // Audio Ducking: lower original video volume so English speech is clearly intelligible
-  if (videoEl && isAudioDuckingEnabled()) {
+  if (targetVideo && isAudioDuckingEnabled()) {
     try {
       if (!isDucked) {
-        preDuckVolume = typeof videoEl.volume === "number" ? videoEl.volume : 1.0;
+        preDuckVolume = typeof targetVideo.volume === "number" ? targetVideo.volume : 1.0;
       }
-      videoEl.volume = Math.min(preDuckVolume, 0.22);
+      targetVideo.volume = Math.min(preDuckVolume, 0.22);
       isDucked = true;
     } catch {
       // ignore
@@ -165,9 +184,14 @@ export function speakActiveCue(cue: SubtitleCue, videoEl?: HTMLVideoElement | nu
   }
 
   const restoreVolume = () => {
-    if (videoEl && isDucked) {
+    // Only restore if this callback belongs to the latest utterance
+    if (utteranceId !== currentUtteranceId) return;
+
+    activeUtterance = null;
+    const v = targetVideo || activeVideoEl || (typeof document !== "undefined" ? document.querySelector("video") : null);
+    if (v && isDucked) {
       try {
-        videoEl.volume = preDuckVolume;
+        v.volume = preDuckVolume;
         isDucked = false;
       } catch {
         // ignore
@@ -190,6 +214,9 @@ export function speakActiveCue(cue: SubtitleCue, videoEl?: HTMLVideoElement | nu
  */
 export function cancelVoiceDub(videoEl?: HTMLVideoElement | null): void {
   lastSpokenCueId = null;
+  currentUtteranceId++;
+  activeUtterance = null;
+
   if (typeof window !== "undefined" && "speechSynthesis" in window) {
     try {
       window.speechSynthesis.cancel();
@@ -197,9 +224,11 @@ export function cancelVoiceDub(videoEl?: HTMLVideoElement | null): void {
       // ignore
     }
   }
-  if (videoEl && isDucked) {
+
+  const v = videoEl || activeVideoEl || (typeof document !== "undefined" ? document.querySelector("video") : null);
+  if (v && isDucked) {
     try {
-      videoEl.volume = preDuckVolume;
+      v.volume = preDuckVolume;
       isDucked = false;
     } catch {
       // ignore

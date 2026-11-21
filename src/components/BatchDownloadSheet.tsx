@@ -105,7 +105,7 @@ export default function BatchDownloadSheet({
     setSelectedEps(new Set());
   };
 
-  const avgMb = downloadQuality === "standard" ? 5.8 : 3.3;
+  const avgMb = downloadQuality === "standard" ? 18.0 : 14.5;
   const estBytes = Math.round(selectedEps.size * avgMb * 1024 * 1024);
   const estFormatted = formatBytes(estBytes);
 
@@ -321,16 +321,18 @@ export default function BatchDownloadSheet({
           </div>
 
           <Button
-            disabled={selectedEps.size === 0 || isCurrentBatchActive}
+            disabled={selectedEps.size === 0 || batchProgress.active}
             onClick={startBatch}
             className={`px-5 h-10 rounded-xl text-[13px] font-bold flex items-center gap-2 pressable ${
-              selectedEps.size > 0 && !isCurrentBatchActive
+              selectedEps.size > 0 && !batchProgress.active
                 ? "bg-primary text-on-primary shadow-lg shadow-primary/25"
                 : "bg-s3 text-mut cursor-not-allowed opacity-50"
             }`}
           >
             <IDownload size={15} />
-            {t("batch.download_selected", { count: selectedEps.size })}
+            {batchProgress.active && !isCurrentBatchActive
+              ? "Batch in progress..."
+              : t("batch.download_selected", { count: selectedEps.size })}
           </Button>
         </div>
       </div>

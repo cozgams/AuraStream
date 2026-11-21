@@ -43,6 +43,9 @@ function localizeFirebaseError(err: unknown): string {
       return "Network connection failed. Please check your internet connection.";
     case "auth/too-many-requests":
       return "Too many attempts. Please wait a few moments and try again.";
+    case "auth/invalid-api-key":
+    case "auth/api-key-not-valid":
+      return "Firebase project not configured. Please add your credentials in Settings or continue offline.";
     default:
       return msg.replace(/^Firebase:\s*/i, "") || "Authentication failed. Please retry.";
   }
@@ -131,19 +134,6 @@ export default function LoginModal() {
             if (cloud) {
               mergeCloudUserData(cloud);
             }
-            await saveUserDataToCloud(fbUser.uid, {
-              favorites: favs,
-              watchLater: watchLater,
-              history: history.map((h) => ({
-                id: h.id,
-                ep: h.ep,
-                t: h.t,
-                dur: h.dur,
-                updatedAt: h.at,
-                title: h.title,
-                cover: h.cover,
-              })),
-            });
           } catch {
             // cloud sync non-fatal
           }

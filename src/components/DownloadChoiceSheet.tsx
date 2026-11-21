@@ -42,7 +42,7 @@ interface DownloadChoiceSheetProps {
   downloadProgress?: number;
   onStartSingleDownload: (targetEp?: number) => void;
   onOpenBatchDownload: () => void;
-  onOpenExport?: () => void;
+  onOpenExport?: (episode?: number) => void;
 }
 
 export default function DownloadChoiceSheet({
@@ -94,7 +94,7 @@ export default function DownloadChoiceSheet({
   const handleSingleAction = async () => {
     if (isTargetDownloaded) {
       onClose();
-      onOpenExport?.();
+      onOpenExport?.(targetEpisode);
       return;
     }
     if (isTargetDownloading) {

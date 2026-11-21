@@ -580,6 +580,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         } catch {
           // non-fatal
         }
+      } else {
+        setUser((prev) => (prev?.user_type === "firebase" ? null : prev));
       }
     });
     return () => unsub?.();

@@ -4,6 +4,14 @@ import { formatSubtitleText } from "./dramaTranslator";
 
 const MEMORY_CACHE = new Map<string, SubtitleTrack>();
 
+function setCachedTrack(key: string, track: SubtitleTrack): void {
+  if (MEMORY_CACHE.size >= 50) {
+    const oldest = MEMORY_CACHE.keys().next().value;
+    if (oldest) MEMORY_CACHE.delete(oldest);
+  }
+  MEMORY_CACHE.set(key, track);
+}
+
 const STORAGE_KEYS = {
   PROVIDER: "aurastream_caption_provider",
   GEMINI_KEY: "aurastream_gemini_api_key",
@@ -513,7 +521,7 @@ export async function getSubtitlesForEpisode(
     if (stored) {
       const parsed: SubtitleTrack = JSON.parse(stored);
       if (parsed.cues && Array.isArray(parsed.cues) && parsed.cues.length > 0) {
-        MEMORY_CACHE.set(cacheKey, parsed);
+        setCachedTrack(cacheKey, parsed);
         return parsed;
       }
     }
@@ -535,7 +543,7 @@ export async function getSubtitlesForEpisode(
           source: "offline_download",
           generatedAt: offlineItem.downloadedAt || Date.now(),
         };
-        MEMORY_CACHE.set(cacheKey, track);
+        setCachedTrack(cacheKey, track);
         return track;
       }
     }
@@ -546,7 +554,7 @@ export async function getSubtitlesForEpisode(
   // Try fetching remote WebVTT if provided
   if (remoteVttUrl) {
     try {
-      const resp = await fetch(remoteVttUrl);
+      const resp = await fetch(remoteVttUrl, { signal: AbortSignal.timeout(6000) });
       if (resp.ok) {
         const text = await resp.text();
         const cues = parseVtt(text);
@@ -558,7 +566,7 @@ export async function getSubtitlesForEpisode(
             source: "upstream_vtt",
             generatedAt: Date.now(),
           };
-          MEMORY_CACHE.set(cacheKey, track);
+          setCachedTrack(cacheKey, track);
           return track;
         }
       }
@@ -577,7 +585,7 @@ export async function getSubtitlesForEpisode(
     generatedAt: Date.now(),
   };
 
-  MEMORY_CACHE.set(cacheKey, track);
+  setCachedTrack(cacheKey, track);
   return track;
 }
 

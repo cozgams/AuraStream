@@ -319,6 +319,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [downloadProgressMap, setDownloadProgressMap] = useState<Map<string, ActiveDownloadProgress>>(new Map());
   const [isDownloaded, setIsDownloaded] = useState<boolean>(() => isEpisodeDownloaded(curId, curEp));
   const [exportModalOpen, setExportModalOpen] = useState<boolean>(false);
+  const [targetExportEpisode, setTargetExportEpisode] = useState<number | null>(null);
   const [batchDownloadOpen, setBatchDownloadOpen] = useState<boolean>(false);
   const [downloadChoiceOpen, setDownloadChoiceOpen] = useState<boolean>(false);
   const [sleepTimer, setLocalSleepTimer] = useState<SleepTimerOption>(getSleepTimerOption);
@@ -2928,13 +2929,19 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           }
         }}
         onOpenBatchDownload={() => setBatchDownloadOpen(true)}
-        onOpenExport={() => setExportModalOpen(true)}
+        onOpenExport={(targetEp?: number) => {
+          setTargetExportEpisode(targetEp || curEp);
+          setExportModalOpen(true);
+        }}
       />
       <ExportSheet
         isOpen={exportModalOpen}
-        onClose={() => setExportModalOpen(false)}
+        onClose={() => {
+          setExportModalOpen(false);
+          setTargetExportEpisode(null);
+        }}
         videoId={curId}
-        episode={curEp}
+        episode={targetExportEpisode || curEp}
         title={formatDramaTitle(meta?.title) || formatDramaTitle(detail?.title) || formatDramaTitle(title) || `Series #${curId}`}
       />
       <BatchDownloadSheet
