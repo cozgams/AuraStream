@@ -7,7 +7,7 @@ import type { Comment, CommentPage, Episode } from "../types";
 import { useStore } from "../store";
 import { copyText } from "../clipboard";
 import { Avatar, Empty } from "./ui";
-import { ICheck, IClose, ICommentF, IDownload, ISendF, IStar, IStarF, IVertSwap } from "../icons";
+import { ICheck, IClose, ICommentF, IDownload, ISendF, IStar, IStarF, ITrash, IVertSwap } from "../icons";
 import { formatCommentText, formatDramaAuthor, formatDramaTitle } from "../subtitles/dramaTranslator";
 import { commentText, formatRelativeTime } from "../commentText";
 import { isEpisodeDownloaded } from "../offline/downloadService";
@@ -127,29 +127,114 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bar
   );
 }
 
+const USER_COMMENTS_KEY = "aurastream_user_comments_v1";
+const LIKED_COMMENTS_KEY = "aurastream_liked_comments_v1";
+
+function loadStoredUserComments(scopeKey: string): Comment[] {
+  try {
+    const raw = localStorage.getItem(USER_COMMENTS_KEY);
+    if (!raw) return [];
+    const map = JSON.parse(raw) as Record<string, Comment[]>;
+    return Array.isArray(map?.[scopeKey]) ? map[scopeKey] : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveStoredUserComments(scopeKey: string, comments: Comment[]): void {
+  try {
+    const raw = localStorage.getItem(USER_COMMENTS_KEY);
+    const map = raw ? (JSON.parse(raw) as Record<string, Comment[]>) : {};
+    map[scopeKey] = comments.slice(0, 50);
+    localStorage.setItem(USER_COMMENTS_KEY, JSON.stringify(map));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function loadStoredLikedComments(): Record<number, boolean> {
+  try {
+    const raw = localStorage.getItem(LIKED_COMMENTS_KEY);
+    return raw ? (JSON.parse(raw) as Record<number, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveStoredLikedComments(liked: Record<number, boolean>): void {
+  try {
+    localStorage.setItem(LIKED_COMMENTS_KEY, JSON.stringify(liked));
+  } catch {
+    // ignore storage errors
+  }
+}
+
 /* ================= Comments ================= */
 export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
   videoId: number; ep: number; total: number; kind?: "video" | "post"; onClose: () => void;
 }) {
   const { user, setLoginOpen, toast, t } = useStore();
-  const [items, setItems] = useState<Comment[]>([]);
+  const scopeKey = `${kind}:${videoId}:${kind === "post" ? 0 : ep}`;
+  const [localComments, setLocalComments] = useState<Comment[]>(() => loadStoredUserComments(scopeKey));
+  const [remoteItems, setRemoteItems] = useState<Comment[]>([]);
   const [page, setPage] = useState(0);
   const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(false);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
-  const [likedComments, setLikedComments] = useState<Record<number, boolean>>({});
+  const [likedComments, setLikedComments] = useState<Record<number, boolean>>(() => loadStoredLikedComments());
   const inputRef = useRef<HTMLInputElement>(null);
   const reqSeqRef = useRef(0);
   const isUpstreamUser = Boolean(user && user.user_type !== "firebase" && user.user_type !== "offline");
 
+  useEffect(() => {
+    setLocalComments(loadStoredUserComments(scopeKey));
+  }, [scopeKey]);
+
+  const items = useMemo(() => {
+    const seen = new Set<number>();
+    const combined: Comment[] = [];
+    for (const c of localComments) {
+      if (c && typeof c.id === "number" && !seen.has(c.id)) {
+        seen.add(c.id);
+        combined.push(c);
+      }
+    }
+    for (const c of remoteItems) {
+      if (c && typeof c.id === "number" && !seen.has(c.id)) {
+        seen.add(c.id);
+        combined.push(c);
+      }
+    }
+    return combined;
+  }, [localComments, remoteItems]);
+
   const toggleCommentLike = (commentId: number) => {
     const next = !likedComments[commentId];
-    setLikedComments((prev) => ({ ...prev, [commentId]: next }));
-    setItems((list) =>
+    const updatedLikes = { ...likedComments, [commentId]: next };
+    if (!next) delete updatedLikes[commentId];
+    setLikedComments(updatedLikes);
+    saveStoredLikedComments(updatedLikes);
+    setLocalComments((list) => {
+      const nextList = list.map((it) =>
+        it.id === commentId ? { ...it, like_count: Math.max(0, (it.like_count || 0) + (next ? 1 : -1)) } : it
+      );
+      saveStoredUserComments(scopeKey, nextList);
+      return nextList;
+    });
+    setRemoteItems((list) =>
       list.map((it) => (it.id === commentId ? { ...it, like_count: Math.max(0, (it.like_count || 0) + (next ? 1 : -1)) } : it))
     );
     try { navigator.vibrate?.(12); } catch {}
+  };
+
+  const deleteLocalComment = (commentId: number) => {
+    setLocalComments((prev) => {
+      const nextList = prev.filter((c) => c.id !== commentId);
+      saveStoredUserComments(scopeKey, nextList);
+      return nextList;
+    });
+    toast("Comment deleted", "info");
   };
 
   const load = useCallback(async (p: number) => {
@@ -160,7 +245,7 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
         ? await api.postComments(videoId, p, 20)
         : await api.comments(videoId, ep, p, 20);
       if (seq !== reqSeqRef.current) return;
-      setItems((prev) => {
+      setRemoteItems((prev) => {
         const base = p === 1 ? [] : prev;
         const seen = new Set(base.map((x) => x.id));
         return [...base, ...(res?.items || []).filter((x) => !seen.has(x.id))];
@@ -168,14 +253,14 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
       setPage(p);
       setPages(res?.pagination?.pages || 1);
     } catch {
-      if (seq === reqSeqRef.current && p === 1) setItems([]);
+      if (seq === reqSeqRef.current && p === 1) setRemoteItems([]);
     } finally {
       if (seq === reqSeqRef.current) setLoading(false);
     }
   }, [videoId, ep, kind]);
 
   useEffect(() => {
-    setItems([]);
+    setRemoteItems([]);
     setPage(0);
     setPages(1);
     void load(1);
@@ -188,16 +273,35 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
     const trimmed = text.trim();
     if (!trimmed) return;
     if (!user) { setLoginOpen(true); return; }
-    if (!isUpstreamUser) {
-      toast("Comments require an upstream mirror account; local/cloud-sync profiles are read-only here.", "info");
-      return;
-    }
     setSending(true);
     try {
-      await api.commentSend(videoId, ep, trimmed);
+      if (isUpstreamUser && kind === "video") {
+        await api.commentSend(videoId, ep, trimmed);
+        setText("");
+        toast("Comment submitted", "ok");
+        void load(1);
+        return;
+      }
+      const newComment: Comment = {
+        id: Date.now(),
+        user_id: user.id || 10001,
+        nickname: user.nickname || user.username || "Viewer",
+        avatar: user.avatar || "",
+        avatar_color: user.avatar_color || "#1a73e8",
+        text: trimmed,
+        time: "Just now",
+        like_count: 0,
+        liked: false,
+        reply_count: 0,
+        reply_id: 0,
+      };
+      setLocalComments((prev) => {
+        const nextList = [newComment, ...prev];
+        saveStoredUserComments(scopeKey, nextList);
+        return nextList;
+      });
       setText("");
-      toast("Comment submitted for review", "ok");
-      void load(1);
+      toast("Comment posted", "ok");
     } catch (e) {
       toast(localizeError(e), "info");
     } finally {
@@ -205,49 +309,64 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
     }
   };
 
+  const displayTotal = Math.max(total || 0, items.length);
+
   return (
     <div className="flex flex-col h-full">
       <div className="shrink-0 flex items-center gap-2 px-4 h-12">
         <span className="text-[14px] font-bold text-on">{t("player.comments")}</span>
-        <span className="text-[12px] text-mut">{fmt(total)} · {t("player.episode_num", { num: ep })}</span>
+        <span className="text-[12px] text-mut">{fmt(displayTotal)} · {t("player.episode_num", { num: ep })}</span>
         <Button onClick={onClose} aria-label={t("common.close")} className="ml-auto w-7 h-7 rounded-full bg-s3 flex items-center justify-center text-mut pressable">
           <IClose size={13} />
         </Button>
       </div>
 
       <div className="flex-1 scroll-y px-4">
-        {items.length ? items.map((c) => (
-          <div key={c.id} className="flex gap-2.5 py-3 border-b border-s3 last:border-0">
-            <Avatar size={32} src={c.avatar} name={formatDramaAuthor(c.nickname)} hue={((Number(c.user_id) || 0) * 37) % 360} />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[12px] font-semibold text-on/90">{formatDramaAuthor(c.nickname)}</span>
-                <span className="text-[12px] text-dim">{formatRelativeTime(c.time)}</span>
-              </div>
-              <p className="text-[14px] text-on/80 mt-1 leading-relaxed whitespace-pre-wrap">{formatCommentText(commentText(c.text))}</p>
-              <div className="flex items-center gap-3 mt-1.5 text-[12px] text-dim">
-                <button
-                  type="button"
-                  onClick={() => toggleCommentLike(c.id)}
-                  className={`flex items-center gap-1 pressable transition-colors ${
-                    likedComments[c.id] ? "text-amber-400 font-semibold" : "text-dim hover:text-on"
-                  }`}
-                  aria-label="Star comment"
-                  aria-pressed={Boolean(likedComments[c.id])}
-                >
-                  {likedComments[c.id] ? <IStarF size={12} className="text-amber-400" /> : <IStar size={12} />}
-                  <span>{c.like_count || 0}</span>
-                </button>
-                {c.reply_count > 0 && <span>{c.reply_count} replies</span>}
+        {items.length ? items.map((c) => {
+          const isOwnLocal = localComments.some((lc) => lc.id === c.id);
+          return (
+            <div key={c.id} className="flex gap-2.5 py-3 border-b border-s3 last:border-0">
+              <Avatar size={32} src={c.avatar} name={formatDramaAuthor(c.nickname)} hue={((Number(c.user_id) || 0) * 37) % 360} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[12px] font-semibold text-on/90">{formatDramaAuthor(c.nickname)}</span>
+                  <span className="text-[12px] text-dim">{formatRelativeTime(c.time)}</span>
+                  {isOwnLocal && (
+                    <button
+                      type="button"
+                      onClick={() => deleteLocalComment(c.id)}
+                      aria-label="Delete comment"
+                      className="ml-auto text-dim hover:text-red-500 p-1 pressable"
+                    >
+                      <ITrash size={12} />
+                    </button>
+                  )}
+                </div>
+                <p className="text-[14px] text-on/80 mt-1 leading-relaxed whitespace-pre-wrap">{formatCommentText(commentText(c.text))}</p>
+                <div className="flex items-center gap-3 mt-1.5 text-[12px] text-dim">
+                  <button
+                    type="button"
+                    onClick={() => toggleCommentLike(c.id)}
+                    className={`flex items-center gap-1 pressable transition-colors ${
+                      likedComments[c.id] ? "text-amber-400 font-semibold" : "text-dim hover:text-on"
+                    }`}
+                    aria-label="Star comment"
+                    aria-pressed={Boolean(likedComments[c.id])}
+                  >
+                    {likedComments[c.id] ? <IStarF size={12} className="text-amber-400" /> : <IStar size={12} />}
+                    <span>{c.like_count || 0}</span>
+                  </button>
+                  {c.reply_count > 0 && <span>{c.reply_count} replies</span>}
+                </div>
               </div>
             </div>
-          </div>
-        )) : loading ? (
+          );
+        }) : loading ? (
           <div className="flex justify-center py-10"><Loader className="w-7 h-7 spinner" /></div>
         ) : (
           <Empty icon={<ICommentF size={24} className="text-primary" />} title="No comments yet" sub="Be the first to share your thoughts" />
         )}
-        {items.length > 0 && (
+        {remoteItems.length > 0 && (
           <div className="flex justify-center py-4">
             {loading ? <Loader className="w-5 h-5 spinner" />
               : page < pages ? (
@@ -260,22 +379,20 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
       <Form className="shrink-0 flex items-center gap-2 px-3 pt-2.5 pb-[calc(var(--sab,48px)+12px)] bg-s2/70 border-t border-s3/40" onSubmit={(e) => { e.preventDefault(); void send(); }}>
         <Avatar size={30} src={user?.avatar} name={user?.nickname || "Me"} hue={322} />
         <Input ref={inputRef} value={text} onChange={(e) => setText(e.target.value)}
-          readOnly={!isUpstreamUser}
+          readOnly={!user}
           onClick={() => {
             if (!user) setLoginOpen(true);
-            else if (!isUpstreamUser) toast("Comments require an upstream mirror account; local/cloud-sync profiles are read-only here.", "info");
           }}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !isUpstreamUser) {
+            if (event.key === "Enter" && !user) {
               event.preventDefault();
-              if (!user) setLoginOpen(true);
-              else toast("Comments require an upstream mirror account; local/cloud-sync profiles are read-only here.", "info");
+              setLoginOpen(true);
             }
           }}
-          placeholder={!user ? "Sign in to comment" : !isUpstreamUser ? "Mirror account required to comment" : "Add a comment..."}
+          placeholder={!user ? "Sign in to comment" : "Add a comment..."}
           className="flex-1 min-w-0 h-9 rounded-(--r-ctl) bg-s4 px-3.5 text-[14px] text-on placeholder-dim outline-none focus:bg-s3" />
-        <Button type="submit" disabled={!isUpstreamUser || !text.trim() || sending}
-          className={`w-9 h-9 rounded-full flex items-center justify-center pressable ${isUpstreamUser && text.trim() ? "brand-grad glow-neon" : "bg-s3 text-dim"}`}>
+        <Button type="submit" disabled={!user || !text.trim() || sending}
+          className={`w-9 h-9 rounded-full flex items-center justify-center pressable ${user && text.trim() ? "brand-grad glow-neon" : "bg-s3 text-dim"}`}>
           {sending ? <Loader className="w-4 h-4 spinner" /> : <ISendF size={16} />}
         </Button>
       </Form>

@@ -9,7 +9,7 @@ import { autoLineEnabled, setAutoLine } from "../autoLine";
 import { copyPlaybackLog, initPlaybackLog, setPlaybackLog, tracePlayback, usePlaybackLog } from "../playbackDiagnostics";
 import { formatNetDiag, shortVerdict } from "../netDiagReport";
 import { copyText } from "../clipboard";
-import { IBack, IBoltF, IBroom, ICaptionsF, IChevR, IClock, IDownload, IHeart, IInfo, ILink, ILockF, IMoon, IRefresh, ISun, IVolMute } from "../icons";
+import { IBack, IBoltF, IBroom, ICaptionsF, ICheck, IChevR, IClock, IDownload, IHeart, IInfo, ILink, ILockF, IMoon, IPalette, IRefresh, ISun, IVolMute } from "../icons";
 import { getSubtitleStyleConfig, setSubtitleStyleConfig } from "../subtitles/aiSubtitleService";
 import type { SubtitleStyleConfig } from "../subtitles/types";
 import {
@@ -17,8 +17,20 @@ import {
   setDownloadQualityPreference,
   isDownloadNotificationEnabled,
   setDownloadNotificationEnabled,
+  isWifiOnlyDownloadEnabled,
+  setWifiOnlyDownloadEnabled,
+  isSmartDownloadEnabled,
+  setSmartDownloadEnabled,
   type DownloadQuality,
 } from "../offline/downloadService";
+import {
+  isFullEpisodePreCacheEnabled,
+  setFullEpisodePreCacheEnabled,
+  isNextEpisodePreloadEnabled,
+  setNextEpisodePreloadEnabled,
+  runDeepRamPurge,
+} from "../playbackFeatures";
+import type { AccentColor } from "../store";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -34,6 +46,8 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
     theme,
     themePreference,
     setTheme,
+    accent,
+    setAccent,
     favs,
     history,
     muteOnStartup,
@@ -66,6 +80,29 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
   const [subStyle, setSubStyle] = useState<SubtitleStyleConfig>(() => getSubtitleStyleConfig());
   const [downloadQuality, setDownloadQuality] = useState<DownloadQuality>(() => getDownloadQualityPreference());
   const [downloadNotifs, setDownloadNotifs] = useState(() => isDownloadNotificationEnabled());
+  const [wifiOnlyDl, setWifiOnlyDl] = useState(() => isWifiOnlyDownloadEnabled());
+  const [smartDl, setSmartDl] = useState(() => isSmartDownloadEnabled());
+  const [fullPreCache, setFullPreCache] = useState(() => isFullEpisodePreCacheEnabled());
+  const [nextPreload, setNextPreload] = useState(() => isNextEpisodePreloadEnabled());
+  const [purgingRam, setPurgingRam] = useState(false);
+
+  useEffect(() => {
+    const syncStorageCfg = () => {
+      setDownloadQuality(getDownloadQualityPreference());
+      setWifiOnlyDl(isWifiOnlyDownloadEnabled());
+      setSmartDl(isSmartDownloadEnabled());
+    };
+    const syncPlaybackCfg = () => {
+      setFullPreCache(isFullEpisodePreCacheEnabled());
+      setNextPreload(isNextEpisodePreloadEnabled());
+    };
+    window.addEventListener("aurastream:storage-config-changed", syncStorageCfg);
+    window.addEventListener("aurastream:playback-config-changed", syncPlaybackCfg);
+    return () => {
+      window.removeEventListener("aurastream:storage-config-changed", syncStorageCfg);
+      window.removeEventListener("aurastream:playback-config-changed", syncPlaybackCfg);
+    };
+  }, []);
 
   useEffect(() => {
     const onStyleChange = (e: Event) => {
@@ -187,6 +224,55 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                   </Button>
                 ))}
               </SegmentedControl>
+            </div>
+            {/* Accent Color Picker */}
+            <div className="flex flex-col gap-2.5 px-3.5 py-3">
+              <div className="flex items-center gap-3">
+                <span className="ios-setting-icon"><IPalette size={16} /></span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] text-on">{t("settings.accent")}</div>
+                  <div className="text-[12px] text-mut">{t("settings.accent_desc")}</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-6 gap-2 pt-0.5">
+                {(
+                  [
+                    ["blue", "Blue", "#1a73e8"],
+                    ["cyan", "Cyan", "#00b8d4"],
+                    ["emerald", "Emerald", "#10b981"],
+                    ["rose", "Rose", "#f43f5e"],
+                    ["amber", "Amber", "#f59e0b"],
+                    ["violet", "Violet", "#8b5cf6"],
+                  ] as const
+                ).map(([key, label, swatch]) => {
+                  const active = accent === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      aria-label={`Accent ${label}`}
+                      aria-pressed={active}
+                      onClick={() => {
+                        setAccent(key as AccentColor);
+                        toast(`Accent color: ${label}`, "ok");
+                      }}
+                      className={`flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-xl border transition-all pressable ${
+                        active
+                          ? "bg-s2 border-primary text-on font-bold shadow-xs"
+                          : "bg-s3/60 border-edge/30 text-mut hover:text-on"
+                      }`}
+                    >
+                      <span
+                        className="w-5 h-5 rounded-full flex items-center justify-center text-white shadow-xs"
+                        style={{ backgroundColor: swatch }}
+                      >
+                        {active && <ICheck size={11} strokeWidth={3} />}
+                      </span>
+                      <span className="text-[10.5px] leading-tight">{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </Section>
 
@@ -339,6 +425,70 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
             <div className="flex items-center gap-3 px-3.5 py-3 border-t border-edge/20">
               <span className="ios-setting-icon"><IDownload size={16} /></span>
               <div className="flex-1 min-w-0">
+                <div className="text-[14px] text-on">{t("profile.wifi_only")}</div>
+                <div className="text-[12px] text-mut">{t("profile.wifi_only_desc")}</div>
+              </div>
+              <Toggle
+                on={wifiOnlyDl}
+                onChange={(enabled) => {
+                  setWifiOnlyDl(enabled);
+                  setWifiOnlyDownloadEnabled(enabled);
+                  toast(enabled ? "Download on Wi-Fi Only enabled" : "Cellular downloads allowed", "info");
+                }}
+                label={t("profile.wifi_only")}
+              />
+            </div>
+            <div className="flex items-center gap-3 px-3.5 py-3 border-t border-edge/20">
+              <span className="ios-setting-icon"><IDownload size={16} /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[14px] text-on">{t("profile.auto_dl_next")}</div>
+                <div className="text-[12px] text-mut">{t("profile.auto_dl_next_desc")}</div>
+              </div>
+              <Toggle
+                on={smartDl}
+                onChange={(enabled) => {
+                  setSmartDl(enabled);
+                  setSmartDownloadEnabled(enabled);
+                  toast(enabled ? "Smart Auto-Download enabled" : "Smart Auto-Download disabled", "info");
+                }}
+                label={t("profile.auto_dl_next")}
+              />
+            </div>
+            <div className="flex items-center gap-3 px-3.5 py-3 border-t border-edge/20">
+              <span className="ios-setting-icon"><IBoltF size={16} /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[14px] text-on">Turbo Full-Episode Pre-Cache</div>
+                <div className="text-[12px] text-mut">Buffers entire short episode ahead on Wi-Fi to eliminate mid-scene pauses</div>
+              </div>
+              <Toggle
+                on={fullPreCache}
+                onChange={(enabled) => {
+                  setFullPreCache(enabled);
+                  setFullEpisodePreCacheEnabled(enabled);
+                  toast(enabled ? "Turbo full-episode pre-cache enabled" : "Standard buffer window enabled", "info");
+                }}
+                label="Turbo Full-Episode Pre-Cache"
+              />
+            </div>
+            <div className="flex items-center gap-3 px-3.5 py-3 border-t border-edge/20">
+              <span className="ios-setting-icon"><IBoltF size={16} /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[14px] text-on">Instant Next-Episode Preload</div>
+                <div className="text-[12px] text-mut">Pre-fetches upcoming episode playlist and first segments for zero-wait transitions</div>
+              </div>
+              <Toggle
+                on={nextPreload}
+                onChange={(enabled) => {
+                  setNextPreload(enabled);
+                  setNextEpisodePreloadEnabled(enabled);
+                  toast(enabled ? "Instant next-episode preload enabled" : "Next-episode preload disabled", "info");
+                }}
+                label="Instant Next-Episode Preload"
+              />
+            </div>
+            <div className="flex items-center gap-3 px-3.5 py-3 border-t border-edge/20">
+              <span className="ios-setting-icon"><IDownload size={16} /></span>
+              <div className="flex-1 min-w-0">
                 <div className="text-[14px] text-on">Background Download Alerts</div>
                 <div className="text-[12px] text-mut">Show progress notifications in system bar when app is minimized</div>
               </div>
@@ -363,6 +513,28 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 <div className="text-[12px] text-mut">{favs.length} favorites · {history.length} watch history items</div>
               </div>
             </div>
+            <Button
+              disabled={purgingRam}
+              onClick={async () => {
+                setPurgingRam(true);
+                try {
+                  const res = await runDeepRamPurge();
+                  toast(`Memory optimized · Freed ${res.freedFormatted}`, "ok");
+                } catch {
+                  toast("Memory & temporary buffers optimized", "ok");
+                } finally {
+                  setPurgingRam(false);
+                }
+              }}
+              className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable disabled:opacity-60"
+            >
+              <span className="ios-setting-icon"><IBoltF size={16} /></span>
+              <div className="flex-1">
+                <div className="text-[14px] text-on">{purgingRam ? "Optimizing Memory..." : "Optimize Memory & Temp Buffers"}</div>
+                <div className="text-[12px] text-mut">Purges inactive preloaded segments and frees RAM while keeping all downloads</div>
+              </div>
+              <IChevR size={15} className="text-mut" />
+            </Button>
             <Button onClick={() => setClearOpen(true)} className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable">
               <span className="ios-setting-icon"><IBroom size={16} /></span>
               <div className="flex-1">

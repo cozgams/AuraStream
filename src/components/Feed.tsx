@@ -658,7 +658,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
     // Check offline downloads first for instant zero-data playback
     if (isEpisodeDownloaded(curId, curEp)) {
-      getOfflinePlaybackUrl(curId, curEp).then((localUrl) => {
+      getOfflinePlaybackUrl(curId, curEp, "feed-active").then((localUrl) => {
         if (!alive) return;
         if (localUrl) {
           logLine(`[play] id=${curId} ep=${curEp} playing from local offline cache`);
@@ -674,7 +674,15 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       }).catch(() => {
         if (alive) fetchOnlineStream(true);
       });
-      return () => { alive = false; };
+      return () => {
+        alive = false;
+        setPlayUrls((m) => {
+          if (!m[playKey]?.startsWith("blob:")) return m;
+          const next = { ...m };
+          delete next[playKey];
+          return next;
+        });
+      };
     }
 
     function fetchOnlineStream(fromOfflineFallback = false) {
@@ -2446,7 +2454,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       }}
                       className={`p-2.5 rounded-xl border flex flex-col text-left transition-all pressable ${
                         preferHevc
-                          ? "border-amber-500/50 bg-white text-on shadow-xs ring-1 ring-amber-500/30"
+                          ? "border-amber-500/50 bg-white dark:bg-neutral-800 text-on shadow-xs ring-1 ring-amber-500/30"
                           : "border-border bg-s2 text-on/80 hover:bg-s3"
                       }`}
                     >
@@ -2475,7 +2483,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       }}
                       className={`p-2.5 rounded-xl border flex flex-col text-left transition-all pressable ${
                         !preferHevc
-                          ? "border-amber-500/50 bg-white text-on shadow-xs ring-1 ring-amber-500/30"
+                          ? "border-amber-500/50 bg-white dark:bg-neutral-800 text-on shadow-xs ring-1 ring-amber-500/30"
                           : "border-border bg-s2 text-on/80 hover:bg-s3"
                       }`}
                     >
@@ -2501,7 +2509,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     <div className="flex flex-col">
                       <div className="flex items-center gap-1.5">
                         <span className="text-[12.5px] font-bold text-on">Streaming Source</span>
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 border border-emerald-500/20">
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
                           4 Lines Active
                         </span>
                       </div>
@@ -2516,7 +2524,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         setPanel(null);
                         setLineOpen(true);
                       }}
-                      className="px-2.5 py-1.5 rounded-lg bg-white border border-border text-[11.5px] font-bold text-on shadow-xs hover:bg-s3 pressable flex items-center gap-1"
+                      className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-neutral-800 border border-border text-[11.5px] font-bold text-on shadow-xs hover:bg-s3 pressable flex items-center gap-1"
                     >
                       <span>Switch Line</span>
                       <IChevR size={12} className="text-mut" />
@@ -2545,7 +2553,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       }}
                       className={`py-2 rounded-lg text-[13px] font-bold flex items-center justify-center gap-2 transition-all ${
                         store.subtitleMode === "en"
-                          ? "bg-white text-on shadow-xs border border-black/5"
+                          ? "bg-white dark:bg-neutral-800 text-on shadow-xs border border-black/5 dark:border-white/15"
                           : "text-mut hover:text-on"
                       }`}
                     >
@@ -2560,7 +2568,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       }}
                       className={`py-2 rounded-lg text-[13px] font-bold flex items-center justify-center gap-2 transition-all ${
                         store.subtitleMode === "off"
-                          ? "bg-white text-on shadow-xs border border-black/5"
+                          ? "bg-white dark:bg-neutral-800 text-on shadow-xs border border-black/5 dark:border-white/15"
                           : "text-mut hover:text-on"
                       }`}
                     >
@@ -2575,7 +2583,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     <div className="flex flex-col">
                       <div className="flex items-center gap-1.5">
                         <span className="text-[12px] font-bold text-on">English Voice Dubbing</span>
-                        <span className="text-[8.5px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-600">Beta</span>
+                        <span className="text-[8.5px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400">Beta</span>
                       </div>
                       <span className="text-[10px] text-mut mt-0.5">Spoken English dialogue synced with scenes</span>
                     </div>
@@ -2589,7 +2597,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         }}
                         className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all ${
                           voiceDub
-                            ? "bg-white text-on shadow-xs border border-black/5"
+                            ? "bg-white dark:bg-neutral-800 text-on shadow-xs border border-black/5 dark:border-white/15"
                             : "text-mut hover:text-on"
                         }`}
                       >
@@ -2605,7 +2613,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         }}
                         className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all ${
                           !voiceDub
-                            ? "bg-white text-on shadow-xs border border-black/5"
+                            ? "bg-white dark:bg-neutral-800 text-on shadow-xs border border-black/5 dark:border-white/15"
                             : "text-mut hover:text-on"
                         }`}
                       >
@@ -2633,7 +2641,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         }}
                         className={`py-1.5 rounded-lg text-center text-[12.5px] font-bold transition-all ${
                           rate === r
-                            ? "bg-white text-on shadow-xs border border-black/5"
+                            ? "bg-white dark:bg-neutral-800 text-on shadow-xs border border-black/5 dark:border-white/15"
                             : "text-mut hover:text-on hover:bg-s4/10"
                         }`}
                       >
@@ -2648,7 +2656,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold uppercase tracking-wider text-mut">Sleep Timer</span>
                     {sleepTimer !== "off" && (
-                      <span className="text-[11px] font-bold text-emerald-600">
+                      <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
                         Active ({sleepTimer === "episode_end" ? "End Ep" : `${sleepTimer}m`})
                       </span>
                     )}
@@ -2674,7 +2682,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         }}
                         className={`py-1.5 rounded-lg text-center text-[12px] font-bold transition-all ${
                           sleepTimer === val
-                            ? "bg-white text-on shadow-xs border border-black/5"
+                            ? "bg-white dark:bg-neutral-800 text-on shadow-xs border border-black/5 dark:border-white/15"
                             : "text-mut hover:text-on hover:bg-s4/10"
                         }`}
                       >
@@ -2708,7 +2716,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                           }}
                           className={`py-1.5 rounded-lg text-center text-[12px] font-bold transition-all ${
                             autoSkipSec === sec
-                              ? "bg-white text-on shadow-xs border border-black/5"
+                              ? "bg-white dark:bg-neutral-800 text-on shadow-xs border border-black/5 dark:border-white/15"
                               : "text-mut hover:text-on hover:bg-s4/10"
                           }`}
                         >

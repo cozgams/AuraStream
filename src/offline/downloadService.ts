@@ -66,6 +66,7 @@ if (typeof navigator !== "undefined" && navigator.storage && typeof navigator.st
 
 const activeProgress = new Map<string, ActiveDownloadProgress>();
 const activeAbortControllers = new Map<string, AbortController>();
+const activeDownloadPromises = new Map<string, Promise<void>>();
 const activeRunTokens = new Map<string, number>();
 let runTokenSeq = 0;
 
@@ -1296,6 +1297,18 @@ export async function startEpisodeDownload(
     return;
   }
 
+  // If this exact episode is already actively downloading, await the in-flight promise instead of restarting from 0%
+  const existingCtrlCheck = activeAbortControllers.get(id);
+  const existingPromise = activeDownloadPromises.get(id);
+  if (
+    existingPromise &&
+    existingCtrlCheck &&
+    !existingCtrlCheck.signal.aborted &&
+    activeProgress.get(id)?.status === "downloading"
+  ) {
+    return existingPromise;
+  }
+
   // Guard mobile data plan on Android
   if (!forceAllowCellular && isWifiOnlyDownloadEnabled() && isCellularConnection()) {
     throw new Error("Cellular connection detected. 'Download on Wi-Fi Only' is enabled.");
@@ -1337,8 +1350,9 @@ export async function startEpisodeDownload(
   const controller = new AbortController();
   activeAbortControllers.set(id, controller);
 
-  const isStillOwner = () => activeRunTokens.get(id) === runToken;
-  const isCurrentRun = () => isStillOwner() && !controller.signal.aborted;
+  const runPromise = (async () => {
+    const isStillOwner = () => activeRunTokens.get(id) === runToken;
+    const isCurrentRun = () => isStillOwner() && !controller.signal.aborted;
 
   activeProgress.set(id, {
     id,
@@ -1897,7 +1911,15 @@ export async function startEpisodeDownload(
     notifyProgress(true);
     notifyNativeDownloadCancel(videoId, episode);
     throw err;
+  } finally {
+    if (isStillOwner()) {
+      activeDownloadPromises.delete(id);
+    }
   }
+  })();
+
+  activeDownloadPromises.set(id, runPromise);
+  return runPromise;
 }
 
 async function deleteFromDb(dbName: string, id: string): Promise<void> {

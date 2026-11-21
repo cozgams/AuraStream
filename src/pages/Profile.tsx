@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, APP_VERSION, cover as getCoverUrl, fmtTime, isMobile, platform } from "../api";
 import type { Detail } from "../types";
 import { useStore } from "../store";
-import { Avatar, Empty, Modal } from "../components/ui";
+import { Avatar, Empty, Modal, Toggle } from "../components/ui";
 import { MediaCard } from "../components/cards";
 import ExportSheet from "../components/ExportSheet";
 import { registerOverlayBack } from "../back";
@@ -52,6 +52,10 @@ import {
   subscribeBatchProgress,
   cancelBatchDownload,
   getBatchProgress,
+  isWifiOnlyDownloadEnabled,
+  setWifiOnlyDownloadEnabled,
+  isSmartDownloadEnabled,
+  setSmartDownloadEnabled,
   type OfflineEpisode,
   type ActiveDownloadProgress,
   type DeviceStorageStats,
@@ -158,6 +162,44 @@ export default function Profile({ wide }: { wide: boolean }) {
   const [downloadSearchQuery, setDownloadSearchQuery] = useState("");
   const [episodeOrder, setEpisodeOrder] = useState<"asc" | "desc">("asc");
   const [detailCache, setDetailCache] = useState<Record<number, Detail>>({});
+  const [wifiOnlyDl, setWifiOnlyDl] = useState<boolean>(() => isWifiOnlyDownloadEnabled());
+  const [smartDl, setSmartDl] = useState<boolean>(() => isSmartDownloadEnabled());
+
+  useEffect(() => {
+    const syncConfig = () => {
+      setWifiOnlyDl(isWifiOnlyDownloadEnabled());
+      setSmartDl(isSmartDownloadEnabled());
+    };
+    window.addEventListener("aurastream:storage-config-changed", syncConfig);
+    return () => window.removeEventListener("aurastream:storage-config-changed", syncConfig);
+  }, []);
+
+  const openSeriesBatchDownloader = async (group: DramaGroup) => {
+    const cached = detailCache[group.videoId];
+    const maxDownloadedEp = group.episodes.reduce((m, e) => Math.max(m, e.episode), 1);
+    let totalEpisodes = cached?.episodes?.length || cached?.episode_count || Math.max(10, maxDownloadedEp + 5);
+    setBatchSheet({
+      isOpen: true,
+      videoId: group.videoId,
+      title: formatDramaTitle(group.title),
+      cover: group.cover,
+      totalEpisodes,
+    });
+    if (!cached) {
+      try {
+        const d = await api.video(group.videoId);
+        if (d) {
+          setDetailCache((prev) => ({ ...prev, [d.id]: d }));
+          const resolvedTotal = d.episodes?.length || d.episode_count || totalEpisodes;
+          setBatchSheet((prev) =>
+            prev.isOpen && prev.videoId === group.videoId ? { ...prev, totalEpisodes: resolvedTotal } : prev
+          );
+        }
+      } catch {
+        // fallback to existing estimate
+      }
+    }
+  };
 
   useEffect(() => {
     const needed = history
@@ -541,7 +583,7 @@ export default function Profile({ wide }: { wide: boolean }) {
               type="button"
               onClick={() => push({ kind: "settings" })}
               aria-label={t("settings.title")}
-              className="w-9 h-9 rounded-full bg-white/85 dark:bg-neutral-900/85 border border-white/70 dark:border-white/10 shadow-xs flex items-center justify-center text-[#1e293b] hover:bg-white active:scale-95 transition-all"
+              className="w-9 h-9 rounded-full bg-white/85 dark:bg-neutral-900/85 border border-white/70 dark:border-white/10 shadow-xs flex items-center justify-center text-[#1e293b] dark:text-neutral-200 hover:bg-white dark:hover:bg-neutral-800 active:scale-95 transition-all"
             >
               <ISettings size={18} strokeWidth={2} />
             </button>
@@ -898,7 +940,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                   })}
                 </div>
               ) : (
-                <div className="p-3 rounded-2xl bg-white/70 border border-white/60 dark:border-white/10 text-center flex flex-col items-center justify-center gap-1 shadow-xs">
+                <div className="p-3 rounded-2xl bg-white/70 dark:bg-neutral-900/70 border border-white/60 dark:border-white/10 text-center flex flex-col items-center justify-center gap-1 shadow-xs">
                   <div className="text-[12px] font-semibold text-[#0f172a] dark:text-neutral-100">{t("profile.no_hist")}</div>
                   <div className="text-[10.5px] text-[#64748b] dark:text-neutral-400">{t("profile.no_hist_sub")}</div>
                 </div>
@@ -1005,17 +1047,17 @@ export default function Profile({ wide }: { wide: boolean }) {
               onClick={() => setView("downloads")}
               className={`bg-white/85 dark:bg-neutral-900/85 backdrop-blur-md rounded-2xl border ${
                 activeDownloads.length > 0
-                  ? "border-blue-200/80 shadow-[0_4px_20px_-2px_rgba(37,99,235,0.12)]"
+                  ? "border-blue-200/80 dark:border-blue-500/30 shadow-[0_4px_20px_-2px_rgba(37,99,235,0.12)]"
                   : "border-white/70 dark:border-white/10 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)]"
-              } p-3.5 flex flex-col gap-2.5 cursor-pointer pressable hover:bg-white active:scale-[0.99] transition-all`}
+              } p-3.5 flex flex-col gap-2.5 cursor-pointer pressable hover:bg-white dark:hover:bg-neutral-800/90 active:scale-[0.99] transition-all`}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3 min-w-0 flex-1">
                   <div
                     className={`w-11 h-11 rounded-2xl ${
                       activeDownloads.length > 0
-                        ? "bg-blue-50 text-[#1a73e8] border border-blue-200/60"
-                        : "bg-[#dcfce7] text-[#16a34a]"
+                        ? "bg-blue-50 dark:bg-blue-500/15 text-[#1a73e8] dark:text-blue-400 border border-blue-200/60 dark:border-blue-500/30"
+                        : "bg-[#dcfce7] dark:bg-emerald-500/15 text-[#16a34a] dark:text-emerald-400"
                     } flex items-center justify-center shrink-0 shadow-xs`}
                   >
                     <IDownload size={20} strokeWidth={2.4} />
@@ -1024,7 +1066,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                     <div className="text-[14.5px] font-bold text-[#0f172a] dark:text-neutral-100">Downloads</div>
                     {activeDownloads.length > 0 ? (
                       <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
-                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-blue-50 text-[#1a73e8] border border-blue-200/80 max-w-full">
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-blue-50 dark:bg-blue-500/15 text-[#1a73e8] dark:text-blue-400 border border-blue-200/80 dark:border-blue-500/30 max-w-full">
                           <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse shrink-0" />
                           <span className="truncate">
                             Downloading ({activeDownloads.length}) · {activeDownloadsSpeedFormatted}
@@ -1044,7 +1086,7 @@ export default function Profile({ wide }: { wide: boolean }) {
               {/* Progress / Storage Bar Indicator */}
               {activeDownloads.length > 0 ? (
                 <div className="flex items-center gap-2 pt-0.5">
-                  <div className="flex-1 h-1.5 rounded-full bg-blue-100 overflow-hidden">
+                  <div className="flex-1 h-1.5 rounded-full bg-blue-100 dark:bg-blue-950/60 overflow-hidden">
                     <div
                       className="h-full bg-[#1a73e8] rounded-full transition-all duration-300"
                       style={{
@@ -1052,7 +1094,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                       }}
                     />
                   </div>
-                  <span className="text-[10.5px] font-extrabold text-[#1a73e8] tabular-nums">
+                  <span className="text-[10.5px] font-extrabold text-[#1a73e8] dark:text-blue-400 tabular-nums">
                     {activeDownloadsProgressPercent}%
                   </span>
                 </div>
@@ -1304,7 +1346,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                       className={`px-3.5 py-1.5 rounded-full text-[12px] font-bold flex items-center gap-1.5 pressable transition-all shadow-xs ${
                         downloadFilter === "all"
                           ? "bg-[#1a73e8] text-white"
-                          : "bg-white/80 border border-slate-200 text-[#64748b] dark:text-neutral-400"
+                          : "bg-white/80 dark:bg-neutral-800/90 border border-slate-200 dark:border-white/10 text-[#64748b] dark:text-neutral-300"
                       }`}
                     >
                       <IPlayF size={10} />
@@ -1316,7 +1358,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                       className={`px-3.5 py-1.5 rounded-full text-[12px] font-bold flex items-center gap-1.5 pressable transition-all shadow-xs ${
                         downloadFilter === "series"
                           ? "bg-[#1a73e8] text-white"
-                          : "bg-white/80 border border-slate-200 text-[#64748b] dark:text-neutral-400"
+                          : "bg-white/80 dark:bg-neutral-800/90 border border-slate-200 dark:border-white/10 text-[#64748b] dark:text-neutral-300"
                       }`}
                     >
                       <ILayers size={12} />
@@ -1331,7 +1373,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                   else if (downloadSort === "size") setDownloadSort("title");
                   else setDownloadSort("recent");
                 }}
-                className="flex items-center gap-1 text-[11.5px] font-semibold text-[#475569] bg-white/80 hover:bg-white border border-slate-200 px-2.5 py-1 rounded-full pressable transition-all shadow-2xs"
+                className="flex items-center gap-1 text-[11.5px] font-semibold text-[#475569] dark:text-neutral-300 bg-white/80 dark:bg-neutral-800/90 hover:bg-white dark:hover:bg-neutral-700 border border-slate-200 dark:border-white/10 px-2.5 py-1 rounded-full pressable transition-all shadow-2xs"
               >
                 <span>
                   {downloadSort === "recent"
@@ -1498,7 +1540,7 @@ export default function Profile({ wide }: { wide: boolean }) {
 
                       {/* Mini Episode Thumbnails Row (Collapsible) */}
                       {isExpanded && (
-                        <div className="flex gap-2.5 overflow-x-auto scrollbar-none pt-1 border-t border-slate-100">
+                        <div className="flex gap-2.5 overflow-x-auto scrollbar-none pt-1 border-t border-slate-100 dark:border-white/10">
                           {group.episodes.map((ep) => {
                             const isChecked = selectedKeys.has(`${ep.videoId}_${ep.episode}`);
                             const epMB = (ep.sizeBytes / (1024 * 1024)).toFixed(1);
@@ -1555,7 +1597,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                 })}
 
                 {/* All Downloads Up to Date banner (Image 2 & 3) */}
-                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-50/90 via-white/95 to-blue-50/90 border border-blue-100 flex items-center gap-3.5 shadow-xs mt-1">
+                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-50/90 via-white/95 to-blue-50/90 dark:from-blue-950/40 dark:via-neutral-900/95 dark:to-blue-950/40 border border-blue-100 dark:border-blue-500/20 flex items-center gap-3.5 shadow-xs mt-1">
                   <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#1a73e8] to-[#38bdf8] text-white flex items-center justify-center shrink-0 shadow-xs">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
                       <rect x="3" y="6" width="18" height="14" rx="3" stroke="currentColor" strokeWidth="2" />
@@ -1571,7 +1613,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                 </div>
               </div>
             ) : (
-              <div className="p-8 text-center flex flex-col items-center justify-center gap-2 bg-white/80 rounded-2xl border border-white/60 dark:border-white/10 shadow-xs">
+              <div className="p-8 text-center flex flex-col items-center justify-center gap-2 bg-white/80 dark:bg-neutral-900/80 rounded-2xl border border-white/60 dark:border-white/10 shadow-xs">
                 <div className="text-[14px] font-bold text-[#0f172a] dark:text-neutral-100">
                   {downloadSearchQuery.trim() ? "No matches found" : "No series available"}
                 </div>
@@ -1584,7 +1626,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                   <button
                     type="button"
                     onClick={() => setDownloadSearchQuery("")}
-                    className="mt-2 px-4 py-1.5 rounded-full bg-blue-50 text-[12px] font-bold text-[#1a73e8] pressable hover:bg-blue-100"
+                    className="mt-2 px-4 py-1.5 rounded-full bg-blue-50 dark:bg-blue-500/20 text-[12px] font-bold text-[#1a73e8] dark:text-blue-400 pressable hover:bg-blue-100"
                   >
                     Clear Search
                   </button>
@@ -1674,7 +1716,7 @@ export default function Profile({ wide }: { wide: boolean }) {
             </div>
 
             {/* Action Buttons Row */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5">
               <button
                 type="button"
                 onClick={() => {
@@ -1695,11 +1737,20 @@ export default function Profile({ wide }: { wide: boolean }) {
               </button>
               <button
                 type="button"
+                onClick={() => void openSeriesBatchDownloader(selectedSeriesGroup)}
+                className="flex-1 h-11 rounded-full bg-white/90 dark:bg-neutral-900/90 border border-slate-200 dark:border-white/15 text-[#1a73e8] dark:text-blue-400 font-bold text-[13px] shadow-xs flex items-center justify-center gap-1.5 pressable active:scale-95 transition-all"
+              >
+                <IDownload size={14} />
+                <span>More Eps</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setConfirmDeleteSeriesOpen(true)}
-                className="flex-1 h-11 rounded-full bg-white/90 dark:bg-neutral-900/90 border border-slate-200 text-slate-700 hover:text-red-500 font-bold text-[13px] shadow-xs flex items-center justify-center gap-2 pressable active:scale-95 transition-all"
+                className="h-11 px-4 rounded-full bg-white/90 dark:bg-neutral-900/90 border border-slate-200 dark:border-white/15 text-slate-700 dark:text-neutral-300 hover:text-red-500 font-bold text-[13px] shadow-xs flex items-center justify-center gap-1.5 pressable active:scale-95 transition-all"
+                aria-label="Delete All"
               >
                 <ITrash size={13} />
-                <span>Delete All</span>
+                <span>Delete</span>
               </button>
             </div>
 
@@ -1708,15 +1759,15 @@ export default function Profile({ wide }: { wide: boolean }) {
               role="button"
               tabIndex={0}
               onClick={() => openSingleExport(selectedSeriesGroup.videoId, selectedSeriesGroup.episodes[0]?.episode || 1, selectedSeriesGroup.title)}
-              className="p-3 rounded-2xl bg-white/90 dark:bg-neutral-900/90 border border-slate-200/80 flex items-center justify-between text-[12px] text-[#64748b] dark:text-neutral-400 shadow-xs cursor-pointer pressable hover:bg-white active:scale-[0.99] transition-all"
+              className="p-3 rounded-2xl bg-white/90 dark:bg-neutral-900/90 border border-slate-200/80 dark:border-white/10 flex items-center justify-between text-[12px] text-[#64748b] dark:text-neutral-400 shadow-xs cursor-pointer pressable hover:bg-white dark:hover:bg-neutral-800 active:scale-[0.99] transition-all"
             >
               <div className="flex items-center gap-2.5 font-medium">
-                <div className="w-5 h-5 rounded-md bg-[#1a73e8]/15 text-[#1a73e8] flex items-center justify-center shrink-0">
+                <div className="w-5 h-5 rounded-md bg-[#1a73e8]/15 text-[#1a73e8] dark:text-blue-400 flex items-center justify-center shrink-0">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" />
                   </svg>
                 </div>
-                <span className="text-[#334155] font-semibold">
+                <span className="text-[#334155] dark:text-neutral-200 font-semibold">
                   Downloaded on: {selectedSeriesGroup.episodes[0]?.downloadedAt ? new Date(selectedSeriesGroup.episodes[0].downloadedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Recently"} · {(selectedSeriesGroup.totalBytes / (1024 * 1024 * 1024) >= 1 ? `${(selectedSeriesGroup.totalBytes / (1024 * 1024 * 1024)).toFixed(1)} GB` : `${(selectedSeriesGroup.totalBytes / (1024 * 1024)).toFixed(0)} MB`)}
                 </span>
               </div>
@@ -1774,13 +1825,13 @@ export default function Profile({ wide }: { wide: boolean }) {
                         <span className="w-3.5 h-3.5 rounded-full bg-[#10b981] text-white flex items-center justify-center shrink-0">
                           <ICheck size={8} strokeWidth={3.5} />
                         </span>
-                        <span className="font-semibold text-slate-700 shrink-0">{epMB} MB</span>
+                        <span className="font-semibold text-slate-700 dark:text-neutral-200 shrink-0">{epMB} MB</span>
                         <span className="truncate">· Downloaded</span>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">
-                      <div className="w-8 h-8 rounded-full bg-[#e0edff] text-[#1a73e8] flex items-center justify-center">
+                      <div className="w-8 h-8 rounded-full bg-[#e0edff] dark:bg-blue-500/20 text-[#1a73e8] dark:text-blue-400 flex items-center justify-center">
                         <IPlayF size={10} />
                       </div>
                       <button
@@ -1877,7 +1928,7 @@ export default function Profile({ wide }: { wide: boolean }) {
           ========================================================================= */}
       {selectMode && (
         <div
-          className="fixed inset-x-5 z-[70] bg-white border border-slate-200/90 rounded-full px-5 py-2.5 flex items-center justify-around shadow-[0_12px_36px_rgba(15,23,42,0.18)] a-rise"
+          className="fixed inset-x-5 z-[70] bg-white dark:bg-neutral-900 border border-slate-200/90 dark:border-white/15 rounded-full px-5 py-2.5 flex items-center justify-around shadow-[0_12px_36px_rgba(15,23,42,0.18)] a-rise"
           style={{ bottom: "calc(var(--sab, 0px) + 20px)" }}
         >
           <button
@@ -1886,20 +1937,20 @@ export default function Profile({ wide }: { wide: boolean }) {
             disabled={selectedKeys.size === 0}
             className="flex items-center gap-2 text-[13px] font-bold text-[#0f172a] dark:text-neutral-100 disabled:opacity-40 pressable active:scale-95"
           >
-            <IPlayF size={13} className="text-[#1a73e8]" />
+            <IPlayF size={13} className="text-[#1a73e8] dark:text-blue-400" />
             <span>Play</span>
           </button>
-          <div className="w-[1px] h-4 bg-slate-200" />
+          <div className="w-[1px] h-4 bg-slate-200 dark:bg-white/15" />
           <button
             type="button"
             onClick={deleteSelected}
             disabled={selectedKeys.size === 0}
             className="flex items-center gap-2 text-[13px] font-bold text-[#0f172a] dark:text-neutral-100 hover:text-red-600 disabled:opacity-40 pressable active:scale-95"
           >
-            <ITrash size={14} className="text-slate-600" />
+            <ITrash size={14} className="text-slate-600 dark:text-neutral-300" />
             <span>Delete</span>
           </button>
-          <div className="w-[1px] h-4 bg-slate-200" />
+          <div className="w-[1px] h-4 bg-slate-200 dark:bg-white/15" />
           <button
             type="button"
             onClick={openExportSelected}
@@ -1907,7 +1958,7 @@ export default function Profile({ wide }: { wide: boolean }) {
             className="flex items-center gap-1.5 text-[13px] font-bold text-[#0f172a] dark:text-neutral-100 disabled:opacity-40 pressable active:scale-95"
           >
             <span>More</span>
-            <IChevronDown size={13} className="text-slate-600" />
+            <IChevronDown size={13} className="text-slate-600 dark:text-neutral-300" />
           </button>
         </div>
       )}
@@ -2011,6 +2062,39 @@ export default function Profile({ wide }: { wide: boolean }) {
               {formatBytes(totalDownloadsBytes)} used ({downloads.length} {downloads.length === 1 ? "episode" : "episodes"})
             </p>
           </div>
+          <div className="flex flex-col gap-2 text-left bg-slate-50 dark:bg-neutral-800/70 p-3 rounded-2xl border border-slate-200/70 dark:border-white/10">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[13px] font-bold text-[#0f172a] dark:text-neutral-100">{t("profile.wifi_only")}</div>
+                <div className="text-[11px] text-[#64748b] dark:text-neutral-400 leading-tight">{t("profile.wifi_only_desc")}</div>
+              </div>
+              <Toggle
+                label={t("profile.wifi_only")}
+                on={wifiOnlyDl}
+                onChange={(on) => {
+                  setWifiOnlyDl(on);
+                  setWifiOnlyDownloadEnabled(on);
+                  toast(on ? "Download on Wi-Fi Only enabled" : "Cellular downloads allowed", "info");
+                }}
+              />
+            </div>
+            <div className="h-[1px] bg-slate-200/70 dark:bg-white/10" />
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[13px] font-bold text-[#0f172a] dark:text-neutral-100">{t("profile.auto_dl_next")}</div>
+                <div className="text-[11px] text-[#64748b] dark:text-neutral-400 leading-tight">{t("profile.auto_dl_next_desc")}</div>
+              </div>
+              <Toggle
+                label={t("profile.auto_dl_next")}
+                on={smartDl}
+                onChange={(on) => {
+                  setSmartDl(on);
+                  setSmartDownloadEnabled(on);
+                  toast(on ? "Smart Auto-Download enabled" : "Smart Auto-Download disabled", "info");
+                }}
+              />
+            </div>
+          </div>
           <div className="flex flex-col gap-2 mt-1">
             <button
               type="button"
@@ -2088,6 +2172,19 @@ export default function Profile({ wide }: { wide: boolean }) {
               onClick={() => {
                 setSeriesMenuOpen(false);
                 if (selectedSeriesGroup) {
+                  void openSeriesBatchDownloader(selectedSeriesGroup);
+                }
+              }}
+              className="w-full h-10 rounded-xl bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-[#0f172a] dark:text-neutral-100 text-[13px] font-semibold flex items-center justify-center gap-2 pressable"
+            >
+              <IDownload size={14} />
+              <span>Download More Episodes</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSeriesMenuOpen(false);
+                if (selectedSeriesGroup) {
                   setExportSheetState({
                     isOpen: true,
                     videoId: selectedSeriesGroup.videoId,
@@ -2102,7 +2199,7 @@ export default function Profile({ wide }: { wide: boolean }) {
               }}
               className="w-full h-10 rounded-xl bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-[#0f172a] dark:text-neutral-100 text-[13px] font-semibold flex items-center justify-center gap-2 pressable"
             >
-              <IDownload size={14} />
+              <IExport size={14} />
               <span>Export All Episodes (MP4)</span>
             </button>
             <button
