@@ -290,6 +290,7 @@ type Store = {
       is_finished?: boolean;
     }
   ) => void;
+  removeHistory: (id: number) => void;
   clearHistory: () => void;
   toggleFollowLocal: (uid: number) => boolean;
   mergeCloudUserData: (cloudData: CloudUserData) => void;
@@ -751,6 +752,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     },
     []
   );
+  const removeHistory = useCallback((id: number) => {
+    setP((s) => ({ ...s, history: s.history.filter((x) => x.id !== id) }));
+  }, []);
   const clearHistory = useCallback(() => setP((s) => ({ ...s, history: [] })), []);
   const addSearch = useCallback((q: string) => {
     const t = q.trim();
@@ -799,7 +803,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     isLiked: (id) => p.likes.includes(id),
     isFav: (id) => p.favs.includes(id),
     isWatchLater: (id) => (p.watchLater || []).includes(id),
-    toggleLikeLocal, toggleFavLocal, clearFavs, toggleWatchLaterLocal, clearWatchLater, toggleFollowLocal, addHistory, clearHistory, mergeCloudUserData, hydrateCloudForUid,
+    toggleLikeLocal, toggleFavLocal, clearFavs, toggleWatchLaterLocal, clearWatchLater, toggleFollowLocal, addHistory, removeHistory, clearHistory, mergeCloudUserData, hydrateCloudForUid,
     muted: p.muted, setMuted, volume: p.volume, setVolume, theater, setTheater, fs, setFs, clean, setClean,
     muteOnStartup: p.muteOnStartup, setMuteOnStartup,
     swipeEp: p.swipeEp, setSwipeEp,
@@ -811,7 +815,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     language, setLanguage, t,
     subtitleMode, setSubtitleMode, subtitleSize, setSubtitleSize,
   }), [theme, themePreference, setTheme, accent, setAccent, tab, setTab, stack, push, pop, user, setUser, loginOpen, logout,
-    p, toggleLikeLocal, toggleFavLocal, clearFavs, toggleWatchLaterLocal, clearWatchLater, toggleFollowLocal, addHistory, clearHistory, mergeCloudUserData, hydrateCloudForUid,
+    p, toggleLikeLocal, toggleFavLocal, clearFavs, toggleWatchLaterLocal, clearWatchLater, toggleFollowLocal, addHistory, removeHistory, clearHistory, mergeCloudUserData, hydrateCloudForUid,
     setMuted, setMuteOnStartup, setSwipeEp, setPreferHevc, setVolume, addSearch, removeSearch, clearSearchHist, strictSecurity, strictSecurityReady, securityPending, cliRelaxed, setStrictSecurity,
     toasts, toast, lineEpoch, theater, setTheater, fs, setFs, clean, setClean,
     language, setLanguage, t, subtitleMode, setSubtitleMode, subtitleSize, setSubtitleSize]);

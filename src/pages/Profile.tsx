@@ -122,9 +122,12 @@ export default function Profile({ wide }: { wide: boolean }) {
     setLoginOpen,
     logout,
     history,
+    removeHistory,
     favs,
+    toggleFavLocal,
     clearFavs,
     watchLater,
+    toggleWatchLaterLocal,
     clearWatchLater,
     clearHistory,
     push,
@@ -202,16 +205,20 @@ export default function Profile({ wide }: { wide: boolean }) {
   };
 
   useEffect(() => {
-    const needed = history
+    const histNeeded = history
       .slice(0, 15)
       .filter((h) => !h.cover || !h.title || h.title.startsWith("Drama #"))
-      .map((h) => h.id)
-      .filter((id) => !detailCache[id]);
+      .map((h) => h.id);
+    const dlNeeded =
+      view === "downloads" || view === "seriesDetail"
+        ? Array.from(new Set(downloads.map((d) => d.videoId))).slice(0, 15)
+        : [];
+    const needed = Array.from(new Set([...histNeeded, ...dlNeeded])).filter((id) => !detailCache[id]);
 
     if (!needed.length) return;
 
     let alive = true;
-    Promise.allSettled(needed.slice(0, 10).map((id) => api.video(id)))
+    Promise.allSettled(needed.slice(0, 12).map((id) => api.video(id)))
       .then((rs) => {
         if (!alive) return;
         const newMap: Record<number, Detail> = {};
@@ -228,7 +235,7 @@ export default function Profile({ wide }: { wide: boolean }) {
     return () => {
       alive = false;
     };
-  }, [history]);
+  }, [history, downloads, view]);
 
   const [batchSheet, setBatchSheet] = useState<{
     isOpen: boolean;
@@ -509,7 +516,7 @@ export default function Profile({ wide }: { wide: boolean }) {
 
   const progressOf = (id: number) => (view === "history" ? history.find((h) => h.id === id) : undefined);
 
-  // Fetch full cards when in a dedicated subview
+  // Fetch full cards when in a dedicated subview (with offline fallback to detailCache / history / downloads)
   useEffect(() => {
     let alive = true;
     if (view === "overview" || view === "downloads" || view === "seriesDetail" || !subviewIds.length) {
@@ -523,30 +530,39 @@ export default function Profile({ wide }: { wide: boolean }) {
         const fetched = rs
           .filter((r) => r.status === "fulfilled")
           .map((r) => (r as PromiseFulfilledResult<Detail>).value);
-        if (view === "history") {
-          const map = new Map(fetched.map((c) => [c.id, c]));
-          const combined = subviewIds
-            .slice(0, 32)
-            .map((id) => {
-              if (map.has(id)) return map.get(id)!;
-              const h = history.find((x) => x.id === id);
-              if (h && (h.title || h.cover)) {
-                return {
-                  id: h.id,
-                  title: h.title || `Drama #${h.id}`,
-                  cover: h.cover || "",
-                  tags: h.tags || [],
-                  episode_count: h.episode_count || 1,
-                  is_finished: !!h.is_finished,
-                } as unknown as Detail;
-              }
-              return null;
-            })
-            .filter(Boolean) as Detail[];
-          setCards(combined);
-        } else {
-          setCards(fetched);
-        }
+        const map = new Map(fetched.map((c) => [c.id, c]));
+        const combined = subviewIds
+          .slice(0, 32)
+          .map((id) => {
+            if (map.has(id)) return map.get(id)!;
+            if (detailCache[id]) return detailCache[id];
+            const h = history.find((x) => x.id === id);
+            const dlEps = downloads.filter((x) => x.videoId === id);
+            const dlFirst = dlEps[0];
+            if (h && (h.title || h.cover)) {
+              return {
+                id: h.id,
+                title: h.title || dlFirst?.title || `Drama #${h.id}`,
+                cover: h.cover || dlFirst?.cover || "",
+                tags: h.tags || [],
+                episode_count: h.episode_count || Math.max(1, dlEps.length),
+                is_finished: !!h.is_finished,
+              } as unknown as Detail;
+            }
+            if (dlFirst) {
+              return {
+                id,
+                title: dlFirst.title || `Drama #${id}`,
+                cover: dlFirst.cover || "",
+                tags: [],
+                episode_count: Math.max(1, dlEps.length),
+                is_finished: false,
+              } as unknown as Detail;
+            }
+            return null;
+          })
+          .filter(Boolean) as Detail[];
+        setCards(combined);
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -598,7 +614,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                     setSelectMode(false);
                     setSelectedKeys(new Set());
                   }}
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 active:scale-95 transition-all"
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 active:scale-95 transition-all"
                   aria-label="Exit selection mode"
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
@@ -610,7 +626,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                 <button
                   type="button"
                   onClick={() => setView("overview")}
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 active:scale-95 transition-all"
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 active:scale-95 transition-all"
                   aria-label="Back to overview"
                 >
                   <IBack size={20} strokeWidth={2.4} />
@@ -628,7 +644,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                     type="button"
                     onClick={playSelected}
                     disabled={selectedKeys.size === 0}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#1a73e8] hover:bg-blue-50 disabled:opacity-30 pressable active:scale-95 transition-all"
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#1a73e8] dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/15 disabled:opacity-30 pressable active:scale-95 transition-all"
                     title="Play selected"
                   >
                     <IPlayF size={15} />
@@ -637,7 +653,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                     type="button"
                     onClick={deleteSelected}
                     disabled={selectedKeys.size === 0}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-red-500 hover:bg-red-50 disabled:opacity-30 pressable active:scale-95 transition-all"
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-red-500 hover:bg-red-50 dark:hover:bg-red-500/15 disabled:opacity-30 pressable active:scale-95 transition-all"
                     title="Delete selected"
                   >
                     <ITrash size={15} />
@@ -648,7 +664,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                       if (selectedKeys.size === downloads.length) setSelectedKeys(new Set());
                       else setSelectedKeys(new Set(downloads.map((d) => `${d.videoId}_${d.episode}`)));
                     }}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 pressable font-bold"
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 pressable font-bold"
                     title={selectedKeys.size === downloads.length ? "Deselect All" : "Select All"}
                     aria-label="Select all toggle"
                   >
@@ -666,7 +682,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                       });
                     }}
                     className={`w-8 h-8 rounded-full flex items-center justify-center pressable transition-all ${
-                      downloadSearchOpen ? "bg-blue-100 text-[#1a73e8]" : "text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60"
+                      downloadSearchOpen ? "bg-blue-100 dark:bg-blue-500/20 text-[#1a73e8] dark:text-blue-400" : "text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10"
                     }`}
                     aria-label="Search downloads"
                   >
@@ -676,7 +692,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                     type="button"
                     onClick={() => setSelectMode(true)}
                     disabled={downloads.length === 0}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 pressable font-bold disabled:opacity-40"
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 pressable font-bold disabled:opacity-40"
                     aria-label="Select mode"
                   >
                     <IMore size={16} className="rotate-90" />
@@ -691,7 +707,7 @@ export default function Profile({ wide }: { wide: boolean }) {
               <button
                 type="button"
                 onClick={() => setView("downloads")}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 active:scale-95 transition-all"
+                className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 active:scale-95 transition-all"
                 aria-label="Back to Downloads"
               >
                 <IBack size={20} strokeWidth={2.4} />
@@ -701,7 +717,7 @@ export default function Profile({ wide }: { wide: boolean }) {
             <button
               type="button"
               onClick={() => setSeriesMenuOpen(true)}
-              className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 pressable font-bold"
+              className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 pressable font-bold"
               aria-label="Series options"
             >
               <IMore size={16} className="rotate-90" />
@@ -713,7 +729,7 @@ export default function Profile({ wide }: { wide: boolean }) {
               <button
                 type="button"
                 onClick={() => setView("overview")}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 active:scale-95 transition-all"
+                className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 active:scale-95 transition-all"
                 aria-label="Back to Overview"
               >
                 <IBack size={20} strokeWidth={2.4} />
@@ -803,7 +819,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                   )}
                 </div>
                 <span
-                  className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white shadow-xs ${user ? "bg-[#38bdf8]" : "bg-[#22c55e]"}`}
+                  className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-neutral-900 shadow-xs ${user ? "bg-[#38bdf8]" : "bg-[#22c55e]"}`}
                   title={user ? "Firebase Cloud Sync Active" : "Local Active"}
                 />
               </div>
@@ -836,7 +852,7 @@ export default function Profile({ wide }: { wide: boolean }) {
             <div className="flex flex-col gap-1 mt-0.5">
               <div className="flex items-center justify-between px-1">
                 <div className="flex items-center gap-2">
-                  <div className="w-5 h-5 rounded-full bg-blue-100/70 text-[#1a73e8] flex items-center justify-center shrink-0">
+                  <div className="w-5 h-5 rounded-full bg-blue-100/70 dark:bg-blue-500/20 text-[#1a73e8] dark:text-blue-400 flex items-center justify-center shrink-0">
                     <IHist size={12} strokeWidth={2.4} />
                   </div>
                   <span className="text-[14.5px] font-bold text-[#0f172a] dark:text-neutral-100 tracking-tight">
@@ -847,7 +863,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                   <button
                     type="button"
                     onClick={() => setView("history")}
-                    className="text-[11.5px] font-bold text-[#1a73e8] hover:text-[#1557b0] flex items-center gap-0.5 pressable"
+                    className="text-[11.5px] font-bold text-[#1a73e8] dark:text-blue-400 hover:text-[#1557b0] dark:hover:text-blue-300 flex items-center gap-0.5 pressable"
                   >
                     <span>View all</span>
                     <IChevR size={12} strokeWidth={2.6} />
@@ -886,9 +902,9 @@ export default function Profile({ wide }: { wide: boolean }) {
                             startTime: h.t,
                           })
                         }
-                        className="w-28 shrink-0 flex flex-col cursor-pointer pressable active:scale-[0.98] transition-transform"
+                        className="group w-28 shrink-0 flex flex-col cursor-pointer pressable active:scale-[0.98] transition-transform relative"
                       >
-                        <div className="w-full h-[80px] rounded-xl overflow-hidden relative shadow-xs border border-slate-200/60 bg-slate-900">
+                        <div className="w-full h-[80px] rounded-xl overflow-hidden relative shadow-xs border border-slate-200/60 dark:border-white/10 bg-slate-900">
                           {coverUrl ? (
                             <img
                               src={getCoverUrl(coverUrl, 240)}
@@ -923,6 +939,20 @@ export default function Profile({ wide }: { wide: boolean }) {
                             </div>
                           )}
 
+                          {/* Top-Left Remove History Item Button */}
+                          <button
+                            type="button"
+                            aria-label={`Remove ${dramaTitle} from history`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeHistory(h.id);
+                              toast("Removed from watch history", "info");
+                            }}
+                            className="absolute top-1 left-1 w-4 h-4 rounded-full bg-black/60 hover:bg-red-500/90 text-white/90 flex items-center justify-center shadow-xs transition-colors"
+                          >
+                            <IClose size={9} />
+                          </button>
+
                           {/* Top-Right Duration Pill */}
                           <div className="absolute top-1 right-1 px-1.5 py-0.5 rounded-full bg-black/60 backdrop-blur-xs text-[8.5px] font-bold text-white shadow-xs">
                             Ep. {h.ep}{h.t > 0 ? ` · ${fmtTime(h.t)}` : ""}
@@ -951,7 +981,7 @@ export default function Profile({ wide }: { wide: boolean }) {
             <div className="flex flex-col gap-1 mt-0.5">
               <div className="flex items-center justify-between px-1">
                 <div className="flex items-center gap-2">
-                  <div className="w-5 h-5 rounded-full bg-blue-100/70 text-[#1a73e8] flex items-center justify-center shrink-0">
+                  <div className="w-5 h-5 rounded-full bg-blue-100/70 dark:bg-blue-500/20 text-[#1a73e8] dark:text-blue-400 flex items-center justify-center shrink-0">
                     <IStarF size={12} />
                   </div>
                   <span className="text-[14.5px] font-bold text-[#0f172a] dark:text-neutral-100 tracking-tight">Playlists</span>
@@ -959,7 +989,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                 <button
                   type="button"
                   onClick={() => setView("favs")}
-                  className="text-[11.5px] font-bold text-[#1a73e8] hover:text-[#1557b0] flex items-center gap-0.5 pressable"
+                  className="text-[11.5px] font-bold text-[#1a73e8] dark:text-blue-400 hover:text-[#1557b0] dark:hover:text-blue-300 flex items-center gap-0.5 pressable"
                 >
                   <span>View all</span>
                   <IChevR size={12} strokeWidth={2.6} />
@@ -1154,7 +1184,7 @@ export default function Profile({ wide }: { wide: boolean }) {
           <div className="flex flex-col gap-3.5 a-rise">
             {/* Search Input Bar (when search is toggled in top bar) */}
             {downloadSearchOpen && (
-              <div className="relative flex items-center bg-white/95 dark:bg-neutral-900/95 border border-blue-200/90 rounded-full px-3.5 py-2 shadow-xs a-fade-in">
+              <div className="relative flex items-center bg-white/95 dark:bg-neutral-900/95 border border-blue-200/90 dark:border-blue-500/30 rounded-full px-3.5 py-2 shadow-xs a-fade-in">
                 <ISearch size={15} className="text-slate-400 shrink-0 mr-2" />
                 <input
                   type="text"
@@ -1168,7 +1198,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                   <button
                     type="button"
                     onClick={() => setDownloadSearchQuery("")}
-                    className="w-5 h-5 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center pressable"
+                    className="w-5 h-5 rounded-full bg-slate-200 dark:bg-neutral-800 text-slate-500 dark:text-neutral-300 flex items-center justify-center pressable"
                     aria-label="Clear search"
                   >
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -1188,24 +1218,35 @@ export default function Profile({ wide }: { wide: boolean }) {
                     <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
                     <span>Downloading ({activeDownloads.length})</span>
                   </div>
-                  {activeDownloads.some((d) => d.status === "downloading") && (
-                    <button
-                      type="button"
-                      onClick={() => pauseAllDownloads()}
-                      className="text-[11.5px] font-bold text-[#1a73e8] hover:text-[#1557b0] pressable"
-                    >
-                      Pause All
-                    </button>
-                  )}
+                  <div className="flex items-center gap-3">
+                    {activeDownloads.some((d) => d.status === "paused" || d.status === "error") && (
+                      <button
+                        type="button"
+                        onClick={() => void resumeAllDownloads()}
+                        className="text-[11.5px] font-bold text-[#16a34a] dark:text-emerald-400 hover:underline pressable"
+                      >
+                        Resume All
+                      </button>
+                    )}
+                    {activeDownloads.some((d) => d.status === "downloading") && (
+                      <button
+                        type="button"
+                        onClick={() => pauseAllDownloads()}
+                        className="text-[11.5px] font-bold text-[#1a73e8] dark:text-blue-400 hover:text-[#1557b0] pressable"
+                      >
+                        Pause All
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {activeDownloads.map((item) => (
                   <div
                     key={item.id}
-                    className="bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md rounded-2xl border border-blue-100 shadow-[0_4px_20px_-2px_rgba(37,99,235,0.08)] p-3 flex flex-col gap-2.5"
+                    className="bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md rounded-2xl border border-blue-100 dark:border-blue-500/25 shadow-[0_4px_20px_-2px_rgba(37,99,235,0.08)] p-3 flex flex-col gap-2.5"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-12 aspect-[3/4] rounded-xl overflow-hidden shrink-0 shadow-xs border border-black/5 bg-slate-100 relative">
+                      <div className="w-12 aspect-[3/4] rounded-xl overflow-hidden shrink-0 shadow-xs border border-black/5 dark:border-white/10 bg-slate-100 dark:bg-neutral-800 relative">
                         <img
                           src={getCoverUrl(item.cover || "", 160)}
                           alt=""
@@ -1222,7 +1263,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                         <div className="text-[11px] text-[#64748b] dark:text-neutral-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
                           <span>Episode {item.episode}</span>
                           <span>·</span>
-                          <span className="font-semibold text-blue-600">
+                          <span className="font-semibold text-blue-600 dark:text-blue-400">
                             {item.speedFormatted || "Connecting..."}
                           </span>
                           {item.etaFormatted && item.etaFormatted !== "--" && (
@@ -1241,7 +1282,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                           <button
                             type="button"
                             onClick={() => pauseDownload(item.id)}
-                            className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center pressable"
+                            className="w-8 h-8 rounded-full bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-700 dark:text-neutral-200 flex items-center justify-center pressable"
                             title="Pause"
                           >
                             <IPauseF size={12} />
@@ -1259,7 +1300,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                           <button
                             type="button"
                             onClick={() => void resumeDownload(item.id, true)}
-                            className="px-2.5 py-1 rounded-full bg-red-50 text-red-600 text-[11px] font-bold hover:bg-red-100 pressable"
+                            className="px-2.5 py-1 rounded-full bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-400 text-[11px] font-bold hover:bg-red-100 pressable"
                           >
                             Retry
                           </button>
@@ -1267,7 +1308,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                         <button
                           type="button"
                           onClick={() => cancelDownload(item.id)}
-                          className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center pressable"
+                          className="w-8 h-8 rounded-full bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-500 dark:text-neutral-300 flex items-center justify-center pressable"
                           title="Cancel"
                         >
                           <IClose size={13} strokeWidth={2.4} />
@@ -1276,7 +1317,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                     </div>
 
                     {/* Live Progress Bar */}
-                    <div className="w-full h-1.5 rounded-full bg-blue-100 overflow-hidden">
+                    <div className="w-full h-1.5 rounded-full bg-blue-100 dark:bg-blue-950/60 overflow-hidden">
                       <div
                         className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-300"
                         style={{ width: `${Math.max(2, item.progress)}%` }}
@@ -1428,14 +1469,14 @@ export default function Profile({ wide }: { wide: boolean }) {
                                 <span className="text-[12px] font-black leading-none">-</span>
                               </div>
                             ) : (
-                              <div className="w-5 h-5 rounded-full border-2 border-slate-300 bg-white" />
+                              <div className="w-5 h-5 rounded-full border-2 border-slate-300 dark:border-neutral-600 bg-white dark:bg-neutral-800" />
                             )}
                           </button>
                         ) : (
                           <button
                             type="button"
                             onClick={() => toggleDramaCollapse(group.videoId)}
-                            className="text-slate-400 hover:text-slate-600 pressable p-1 shrink-0"
+                            className="text-slate-400 hover:text-slate-600 dark:hover:text-neutral-200 pressable p-1 shrink-0"
                           >
                             {isExpanded ? <IChevronUp size={16} /> : <IChevronDown size={16} />}
                           </button>
@@ -1459,7 +1500,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                               setView("seriesDetail");
                             }
                           }}
-                          className="w-14 aspect-[3/4] rounded-xl overflow-hidden shrink-0 shadow-xs border border-black/5 bg-slate-100 cursor-pointer pressable relative p-0 border-0 text-left block"
+                          className="w-14 aspect-[3/4] rounded-xl overflow-hidden shrink-0 shadow-xs border border-black/5 dark:border-white/10 bg-slate-100 dark:bg-neutral-800 cursor-pointer pressable relative p-0 border-0 text-left block"
                         >
                           <img
                             src={getCoverUrl(group.cover, 200)}
@@ -1499,10 +1540,16 @@ export default function Profile({ wide }: { wide: boolean }) {
                             {group.episodes.length} {group.episodes.length === 1 ? "episode" : "episodes"} · {totalMB} MB
                           </div>
                           <div className="flex items-center gap-1.5 mt-1">
-                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#16a34a]">
-                              <ICheck size={11} strokeWidth={3} />
-                              <span>All Downloaded</span>
-                            </span>
+                            {(() => {
+                              const totalKnown = detailCache[group.videoId]?.episodes?.length || detailCache[group.videoId]?.episode_count || 0;
+                              const isPartial = totalKnown > 0 && group.episodes.length < totalKnown;
+                              return (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#16a34a] dark:text-emerald-400">
+                                  <ICheck size={11} strokeWidth={3} />
+                                  <span>{isPartial ? `${group.episodes.length} of ${totalKnown} Saved` : "All Downloaded"}</span>
+                                </span>
+                              );
+                            })()}
                           </div>
                         </button>
 
@@ -1520,7 +1567,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                                 });
                               }
                             }}
-                            className="w-8 h-8 rounded-full bg-[#e0edff] text-[#1a73e8] hover:bg-[#d0e4ff] flex items-center justify-center pressable active:scale-95 shadow-xs transition-all"
+                            className="w-8 h-8 rounded-full bg-[#e0edff] dark:bg-blue-500/20 text-[#1a73e8] dark:text-blue-400 hover:bg-[#d0e4ff] dark:hover:bg-blue-500/30 flex items-center justify-center pressable active:scale-95 shadow-xs transition-all"
                             title="Play Show"
                           >
                             <IPlayF size={11} />
@@ -1692,7 +1739,7 @@ export default function Profile({ wide }: { wide: boolean }) {
           <div className="flex flex-col gap-4 a-rise">
             {/* Top Showcase Hero */}
             <div className="flex items-center gap-3.5 px-0.5">
-              <div className="w-16 h-16 rounded-2xl overflow-hidden shrink-0 shadow-md border border-black/5 bg-slate-100">
+              <div className="w-16 h-16 rounded-2xl overflow-hidden shrink-0 shadow-md border border-black/5 dark:border-white/10 bg-slate-100 dark:bg-neutral-800">
                 <img
                   src={getCoverUrl(selectedSeriesGroup.cover, 240)}
                   alt=""
@@ -1707,10 +1754,16 @@ export default function Profile({ wide }: { wide: boolean }) {
                   {selectedSeriesGroup.episodes.length} {selectedSeriesGroup.episodes.length === 1 ? "episode" : "episodes"} · {(selectedSeriesGroup.totalBytes / (1024 * 1024 * 1024) >= 1 ? `${(selectedSeriesGroup.totalBytes / (1024 * 1024 * 1024)).toFixed(1)} GB` : `${(selectedSeriesGroup.totalBytes / (1024 * 1024)).toFixed(0)} MB`)}
                 </div>
                 <div className="flex items-center gap-1.5 mt-1">
-                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#16a34a]">
-                    <ICheck size={12} strokeWidth={3} />
-                    <span>All Downloaded</span>
-                  </span>
+                  {(() => {
+                    const totalKnown = detailCache[selectedSeriesGroup.videoId]?.episodes?.length || detailCache[selectedSeriesGroup.videoId]?.episode_count || 0;
+                    const isPartial = totalKnown > 0 && selectedSeriesGroup.episodes.length < totalKnown;
+                    return (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#16a34a] dark:text-emerald-400">
+                        <ICheck size={12} strokeWidth={3} />
+                        <span>{isPartial ? `${selectedSeriesGroup.episodes.length} of ${totalKnown} Saved Offline` : "All Downloaded"}</span>
+                      </span>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -1864,30 +1917,51 @@ export default function Profile({ wide }: { wide: boolean }) {
               {cards.map((c) => {
                 const progress = progressOf(c.id);
                 return (
-                  <MediaCard
-                    key={c.id}
-                    title={c.title}
-                    cover={c.cover}
-                    score={c.score}
-                    badge={c.is_finished ? "Ended" : `${c.episode_count} eps`}
-                    subtitle={c.tags?.slice(0, 2).map(formatDramaTag).join(" · ")}
-                    progress={progress ? `Ep. ${progress.ep} · ${fmtTime(progress.t)}` : undefined}
-                    onOpen={() =>
-                      push({
-                        kind: "feed",
-                        videoIds: cards.map((x) => x.id),
-                        index: cards.findIndex((x) => x.id === c.id),
-                        title:
-                          view === "favs"
-                            ? t("profile.favorites")
-                            : view === "watchlater"
-                            ? t("profile.watch_later")
-                            : t("profile.history"),
-                        startEp: progress?.ep,
-                        startTime: progress?.t,
-                      })
-                    }
-                  />
+                  <div key={c.id} className="relative group">
+                    <MediaCard
+                      title={c.title}
+                      cover={c.cover}
+                      score={c.score}
+                      badge={c.is_finished ? "Ended" : `${c.episode_count} eps`}
+                      subtitle={c.tags?.slice(0, 2).map(formatDramaTag).join(" · ")}
+                      progress={progress ? `Ep. ${progress.ep} · ${fmtTime(progress.t)}` : undefined}
+                      onOpen={() =>
+                        push({
+                          kind: "feed",
+                          videoIds: cards.map((x) => x.id),
+                          index: cards.findIndex((x) => x.id === c.id),
+                          title:
+                            view === "favs"
+                              ? t("profile.favorites")
+                              : view === "watchlater"
+                              ? t("profile.watch_later")
+                              : t("profile.history"),
+                          startEp: progress?.ep,
+                          startTime: progress?.t,
+                        })
+                      }
+                    />
+                    <button
+                      type="button"
+                      aria-label={`Remove ${formatDramaTitle(c.title)}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (view === "favs") {
+                          toggleFavLocal(c.id);
+                          toast("Removed from favorites", "info");
+                        } else if (view === "watchlater") {
+                          toggleWatchLaterLocal(c.id);
+                          toast("Removed from Watch Later", "info");
+                        } else if (view === "history") {
+                          removeHistory(c.id);
+                          toast("Removed from watch history", "info");
+                        }
+                      }}
+                      className="absolute top-2.5 right-2.5 z-10 w-6 h-6 rounded-full bg-black/65 hover:bg-red-500/90 text-white flex items-center justify-center shadow-sm pressable transition-colors"
+                    >
+                      <IClose size={11} />
+                    </button>
+                  </div>
                 );
               })}
             </div>

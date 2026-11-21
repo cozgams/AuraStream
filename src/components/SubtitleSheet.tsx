@@ -152,7 +152,7 @@ export default function SubtitleSheet({
 
   return (
     <Sheet open={open} onClose={onClose} label={t("captions.title")}>
-      <div className="p-4 sm:p-5 pb-[calc(var(--sab,48px)+16px)] flex flex-col gap-3.5 text-on max-h-[82dvh] overflow-y-auto">
+      <div className="p-4 sm:p-5 pb-4 flex flex-col gap-3.5 text-on max-h-[82dvh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-border">
           <div className="flex items-center gap-2.5">

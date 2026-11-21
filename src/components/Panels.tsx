@@ -272,7 +272,6 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
   const send = async () => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    if (!user) { setLoginOpen(true); return; }
     setSending(true);
     try {
       if (isUpstreamUser && kind === "video") {
@@ -284,10 +283,10 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
       }
       const newComment: Comment = {
         id: Date.now(),
-        user_id: user.id || 10001,
-        nickname: user.nickname || user.username || "Viewer",
-        avatar: user.avatar || "",
-        avatar_color: user.avatar_color || "#1a73e8",
+        user_id: user?.id || 10001,
+        nickname: user?.nickname || user?.username || "My Library",
+        avatar: user?.avatar || "",
+        avatar_color: user?.avatar_color || "#1a73e8",
         text: trimmed,
         time: "Just now",
         like_count: 0,
@@ -313,10 +312,19 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="shrink-0 flex items-center gap-2 px-4 h-12">
+      <div className="shrink-0 flex items-center gap-2 px-4 h-12 border-b border-edge/30">
         <span className="text-[14px] font-bold text-on">{t("player.comments")}</span>
         <span className="text-[12px] text-mut">{fmt(displayTotal)} · {t("player.episode_num", { num: ep })}</span>
-        <Button onClick={onClose} aria-label={t("common.close")} className="ml-auto w-7 h-7 rounded-full bg-s3 flex items-center justify-center text-mut pressable">
+        {!user && (
+          <button
+            type="button"
+            onClick={() => setLoginOpen(true)}
+            className="ml-auto mr-1 text-[11.5px] font-semibold text-primary hover:underline pressable"
+          >
+            Sign in
+          </button>
+        )}
+        <Button onClick={onClose} aria-label={t("common.close")} className={`${user ? "ml-auto" : ""} w-7 h-7 rounded-full bg-s3 flex items-center justify-center text-mut pressable`}>
           <IClose size={13} />
         </Button>
       </div>
@@ -376,23 +384,14 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
         )}
       </div>
 
-      <Form className="shrink-0 flex items-center gap-2 px-3 pt-2.5 pb-[calc(var(--sab,48px)+12px)] bg-s2/70 border-t border-s3/40" onSubmit={(e) => { e.preventDefault(); void send(); }}>
-        <Avatar size={30} src={user?.avatar} name={user?.nickname || "Me"} hue={322} />
+      <Form className="ios-comment-form shrink-0 flex items-center gap-2.5 px-3.5 pt-2.5 pb-3 bg-s2/90 border-t border-edge/40" onSubmit={(e) => { e.preventDefault(); void send(); }}>
+        <Avatar size={32} src={user?.avatar} name={user?.nickname || "My Library"} hue={322} />
         <Input ref={inputRef} value={text} onChange={(e) => setText(e.target.value)}
-          readOnly={!user}
-          onClick={() => {
-            if (!user) setLoginOpen(true);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !user) {
-              event.preventDefault();
-              setLoginOpen(true);
-            }
-          }}
-          placeholder={!user ? "Sign in to comment" : "Add a comment..."}
-          className="flex-1 min-w-0 h-9 rounded-(--r-ctl) bg-s4 px-3.5 text-[14px] text-on placeholder-dim outline-none focus:bg-s3" />
-        <Button type="submit" disabled={!user || !text.trim() || sending}
-          className={`w-9 h-9 rounded-full flex items-center justify-center pressable ${user && text.trim() ? "brand-grad glow-neon" : "bg-s3 text-dim"}`}>
+          placeholder={user ? `Comment as ${user.nickname || user.username}...` : "Add a comment..."}
+          className="flex-1 min-w-0 !min-h-0 h-10 !py-0 !px-3.5 !rounded-full bg-s3 border border-edge/60 text-[13.5px] text-on placeholder-dim outline-none focus:border-primary transition-colors" />
+        <Button type="submit" disabled={!text.trim() || sending}
+          aria-label="Send comment"
+          className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 pressable ${text.trim() ? "brand-grad glow-neon" : "bg-s3 text-dim"}`}>
           {sending ? <Loader className="w-4 h-4 spinner" /> : <ISendF size={16} />}
         </Button>
       </Form>

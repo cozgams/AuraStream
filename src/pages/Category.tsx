@@ -101,7 +101,7 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
         <div className="px-4 mb-2.5">
           <Button
             onClick={() => push({ kind: "ranks" })}
-            className="w-full flex items-center justify-between p-3.5 rounded-(--r) bg-card border border-black/5 dark:border-white/10 shadow-sm hover:border-black/10 dark:hover:border-white/20 pressable group transition-all"
+            className="ios-collection-link w-full flex items-center justify-between p-3.5 text-left pressable group transition-all"
           >
             <div className="flex items-center gap-3">
               <span className="w-10 h-10 rounded-(--r-sm) bg-pc text-on-pc flex items-center justify-center shrink-0">

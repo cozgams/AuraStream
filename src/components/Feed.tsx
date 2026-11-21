@@ -1812,7 +1812,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     </div>
                   )}
 
-                  {duration > 20 && duration - time <= 5.5 && duration - time > 0.4 && !paused && !cancelAutoNext && episodes.some((e) => e.ep_num === curEp + 1) && (
+                  {duration > 20 && duration - time <= 8 && duration - time > 0.4 && !paused && !cancelAutoNext && dismissNextEp !== curEp && episodes.some((e) => e.ep_num === curEp + 1) && (
                     <div className="px-4 pb-2 pointer-events-auto max-w-[320px]">
                       <div className="flex items-center justify-between gap-3 px-3.5 py-2 rounded-2xl bg-black/85 backdrop-blur-xl border border-amber-400/35 text-white shadow-[0_8px_32px_rgba(0,0,0,0.65)] a-pop">
                         <div className="flex items-center gap-2 min-w-0">
@@ -1828,6 +1828,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                             onClick={() => {
                               setCancelAutoNext(true);
                               cancelAutoNextRef.current = true;
+                              setDismissNextEp(curEp);
                               toast("Auto-play next episode cancelled", "info");
                             }}
                             className="h-6 px-2 rounded-lg bg-white/10 hover:bg-white/15 text-white/90 text-[11px] font-medium pressable"
@@ -1837,7 +1838,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                           <Button
                             type="button"
                             onClick={() => pickEp(curEp + 1)}
-                            className="h-6 px-2.5 rounded-lg bg-primary text-black font-bold text-[11px] flex items-center gap-1 shadow-md pressable"
+                            className="h-6 px-2.5 rounded-lg bg-primary text-on-primary font-bold text-[11px] flex items-center gap-1 shadow-md pressable"
                           >
                             <IPlayF size={9} />
                             <span>Play Now</span>
@@ -1947,8 +1948,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 </div>
               )}
 
-              {/* Next Episode Outro Floating Countdown Pill */}
-              {isActive && !paused && !waiting && !clean && !controlsLocked && episodes.some((e) => e.ep_num === curEp + 1) && duration > 20 && duration - time <= 15 && duration - time >= 0.6 && dismissNextEp !== curEp && (
+              {/* Next Episode Outro Floating Countdown Pill (Desktop & Fullscreen) */}
+              {isActive && (isDesktop || fs) && !paused && !waiting && !clean && !controlsLocked && !cancelAutoNext && episodes.some((e) => e.ep_num === curEp + 1) && duration > 20 && duration - time <= 15 && duration - time >= 0.6 && dismissNextEp !== curEp && (
                 <div
                   className="absolute z-30 pointer-events-auto transition-all duration-300 animate-in fade-in slide-in-from-bottom-2"
                   style={{
@@ -2364,7 +2365,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               </div>
 
               {/* Scrollable Content */}
-              <div className="flex flex-col max-h-[calc(85dvh-52px)] scroll-y px-4 pt-2 pb-[calc(var(--sab,16px)+20px)] gap-2.5">
+              <div className="flex flex-col max-h-[calc(85dvh-52px)] scroll-y px-4 pt-2 pb-5 gap-2.5">
                 {/* 1. Quick Access Action Grid */}
                 <div className="grid grid-cols-4 gap-2">
                   <Button
@@ -2375,7 +2376,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     }}
                     className="flex flex-col items-center justify-center py-2 px-1 rounded-xl bg-s2 hover:bg-s3 border border-border text-center pressable transition-all"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-purple-500/15 text-purple-600 flex items-center justify-center">
+                    <div className="w-8 h-8 rounded-lg bg-purple-500/15 text-purple-600 dark:text-purple-400 flex items-center justify-center">
                       <IList size={16} />
                     </div>
                     <span className="text-[11px] font-bold text-on mt-1 leading-tight">Episodes</span>
@@ -2392,7 +2393,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     className="flex flex-col items-center justify-center py-2 px-1 rounded-xl bg-s2 hover:bg-s3 border border-border text-center pressable transition-all"
                   >
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                      isDownloaded ? "bg-emerald-500/15 text-emerald-600" : isDownloadingCurrent ? "bg-amber-500/20 text-amber-600" : "bg-amber-500/15 text-amber-600"
+                      isDownloaded ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : isDownloadingCurrent ? "bg-amber-500/20 text-amber-600 dark:text-amber-400" : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
                     }`}>
                       {isDownloaded ? <ICheck size={16} strokeWidth={2.6} /> : isDownloadingCurrent ? <Loader className="w-3.5 h-3.5 spinner" /> : <IDownload size={16} />}
                     </div>
@@ -2410,7 +2411,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     className="flex flex-col items-center justify-center py-2 px-1 rounded-xl bg-s2 hover:bg-s3 border border-border text-center pressable transition-all"
                   >
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                      store.isWatchLater(curId) ? "bg-amber-500/20 text-amber-600" : "bg-s3 text-mut"
+                      store.isWatchLater(curId) ? "bg-amber-500/20 text-amber-600 dark:text-amber-400" : "bg-s3 text-mut"
                     }`}>
                       <IClock size={16} />
                     </div>
@@ -2428,7 +2429,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     }}
                     className="flex flex-col items-center justify-center py-2 px-1 rounded-xl bg-s2 hover:bg-s3 border border-border text-center pressable transition-all"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-sky-500/15 text-sky-600 flex items-center justify-center">
+                    <div className="w-8 h-8 rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400 flex items-center justify-center">
                       <IEye size={16} />
                     </div>
                     <span className="text-[11px] font-bold text-on mt-1 leading-tight">Clean View</span>

@@ -18,7 +18,7 @@
   --control-shadow:0 2px 8px rgb(0 0 0 / .28),inset 0 1px 0 rgb(255 255 255 / .1);
   --surface-shadow:0 8px 24px rgb(0 0 0 / .32),inset 0 1px 0 rgb(255 255 255 / .06);
   --ios-page-inset:clamp(18px,2.5vw,36px);
-  --r-xs:8px; --r-sm:16px; --r-md:22px; --r-lg:30px; --r-ctl:999px;
+  --r:var(--r-md); --r-xs:8px; --r-sm:16px; --r-md:22px; --r-lg:30px; --r-ctl:999px;
   --nav-h:76px;
   --ios-spring:cubic-bezier(.22,1.35,.36,1);
   --control-radius:var(--r-ctl);
@@ -118,10 +118,10 @@ html.theme-light[data-accent="violet"] {
 .ios-input::placeholder { color:var(--p-dim); opacity:1; }
 .ios-input[aria-invalid=true] { border-color:var(--p-danger); }
 .ios-textarea { min-height:100px; resize:vertical; }
-.ios-form.flex:not(.ios-auth-form) { min-height:48px; border-radius:999px; background:var(--p-s3); border:1px solid transparent; }
-.ios-form.flex:not(.ios-auth-form)>.ios-input { min-height:0; background:transparent; padding:0; border:0; box-shadow:none; border-radius:0; }
-.ios-form.flex:not(.ios-auth-form)>.ios-input:focus-visible { outline:none; }
-.ios-form.flex:not(.ios-auth-form):focus-within { border-color:var(--p-primary); box-shadow:0 0 0 3px var(--p-tint); }
+.ios-form.flex:not(.ios-auth-form):not(.ios-comment-form) { min-height:48px; border-radius:999px; background:var(--p-s3); border:1px solid transparent; }
+.ios-form.flex:not(.ios-auth-form):not(.ios-comment-form)>.ios-input { min-height:0; background:transparent; padding:0; border:0; box-shadow:none; border-radius:0; }
+.ios-form.flex:not(.ios-auth-form):not(.ios-comment-form)>.ios-input:focus-visible { outline:none; }
+.ios-form.flex:not(.ios-auth-form):not(.ios-comment-form):focus-within { border-color:var(--p-primary); box-shadow:0 0 0 3px var(--p-tint); }
 .ios-form.flex>.ios-button { min-width:36px; flex-shrink:0; }
 .ios-range { accent-color:var(--p-primary); }
 .ios-surface { background:var(--p-s1); border-radius:var(--r-md); box-shadow:0 2px 8px rgb(0 0 0 / .025); }
@@ -490,6 +490,13 @@ html:not(.theme-light) .ios-mobile-nav:not([data-over-video=true]) .hg-drop>.ios
   background: #1a73e8 !important;
   border-radius: 999px !important;
   box-shadow: 0 4px 14px rgba(26, 115, 232, 0.45) !important;
+}
+html[data-accent] .ios-mobile-nav:not([data-over-video=true]) .hg-drop>.ios-liquid-fill {
+  background: var(--p-primary) !important;
+  box-shadow: 0 4px 14px var(--p-glow) !important;
+}
+html:not(.theme-light)[data-accent] .ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item[aria-current=page] {
+  color: var(--p-on-primary) !important;
 }
 
 .ios-dialog { border-radius:32px; background:var(--glass-bg); border-color:var(--glass-edge); box-shadow:var(--ios-shadow); backdrop-filter:blur(28px) saturate(150%); -webkit-backdrop-filter:blur(28px) saturate(150%); }
