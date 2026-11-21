@@ -1,11 +1,26 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Sheet } from "./ios/overlays";
 import { Button } from "./ios/controls";
-import { IBan, ICheck, IClose, ICaptionsF, IFileText, ILangEn, IPalette, ISparkles, IRefresh } from "../icons";
-import type { SubtitleMode, SubtitlePosition, SubtitleSize, SubtitleStyleConfig } from "../subtitles/types";
+import { IBan, ICheck, IClose, ICaptionsF, IFileText, ILangEn, IRefresh, ISparkles, ITrash } from "../icons";
+import type {
+  AICaptionConfig,
+  SubtitleMode,
+  SubtitlePosition,
+  SubtitleSize,
+  SubtitleStyleConfig,
+  SubtitleTrackStatus,
+} from "../subtitles/types";
 import { useStore } from "../store";
 import { processSubtitleExport } from "../offline/exportService";
-import { getSubtitleStyleConfig, setSubtitleStyleConfig } from "../subtitles/aiSubtitleService";
+import {
+  getAICaptionConfig,
+  getSubtitleStyleConfig,
+  importSubtitleTextForEpisode,
+  removeSubtitleTrackForEpisode,
+  setAICaptionConfig,
+  setSubtitleStyleConfig,
+  transcribeEpisodeWithAI,
+} from "../subtitles/aiSubtitleService";
 
 type Props = {
   open: boolean;
@@ -17,6 +32,8 @@ type Props = {
   videoId?: number;
   episode?: number;
   title?: string;
+  streamUrl?: string;
+  trackInfo?: SubtitleTrackStatus;
 };
 
 export default function SubtitleSheet({
@@ -29,23 +46,30 @@ export default function SubtitleSheet({
   videoId,
   episode,
   title,
+  streamUrl,
+  trackInfo,
 }: Props) {
   const { t, toast } = useStore();
   const [styleConfig, setStyleConfig] = useState<SubtitleStyleConfig>(() => getSubtitleStyleConfig());
-  const [exporting, setExporting] = useState(false);
+  const [aiConfig, setAiConfig] = useState<AICaptionConfig>(() => getAICaptionConfig());
+  const [aiExpanded, setAiExpanded] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [transcribeStatus, setTranscribeStatus] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) {
       setStyleConfig(getSubtitleStyleConfig());
+      setAiConfig(getAICaptionConfig());
     }
   }, [open]);
 
   const applyPreset = (preset: "yellow" | "white" | "cyan" | "green" | "solid") => {
     let updated: SubtitleStyleConfig;
     if (preset === "yellow") {
-      updated = { ...styleConfig, color: "yellow", edgeStyle: "drop_shadow", font: "sans", bgStyle: "translucent", bgOpacity: 80 };
+      updated = { ...styleConfig, color: "yellow", edgeStyle: "drop_shadow", font: "sans", bgStyle: "translucent", bgOpacity: 75 };
     } else if (preset === "white") {
-      updated = { ...styleConfig, color: "white", edgeStyle: "drop_shadow", font: "sans", bgStyle: "translucent", bgOpacity: 80 };
+      updated = { ...styleConfig, color: "white", edgeStyle: "drop_shadow", font: "sans", bgStyle: "translucent", bgOpacity: 75 };
     } else if (preset === "cyan") {
       updated = { ...styleConfig, color: "cyan", edgeStyle: "uniform", font: "sans", bgStyle: "translucent", bgOpacity: 85 };
     } else if (preset === "green") {
@@ -78,26 +102,96 @@ export default function SubtitleSheet({
     setSubtitleStyleConfig(updated);
   };
 
+  const updateOffsetSec = (nextOffset: number) => {
+    const clamped = Math.max(-5, Math.min(5, Math.round(nextOffset * 100) / 100));
+    const updated: SubtitleStyleConfig = {
+      ...styleConfig,
+      offsetSec: clamped,
+    };
+    setStyleConfig(updated);
+    setSubtitleStyleConfig(updated);
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || videoId == null || episode == null) return;
+    try {
+      const rawText = await file.text();
+      const imported = importSubtitleTextForEpisode(videoId, episode, rawText, file.name);
+      if (mode === "off") onModeChange("en");
+      toast(`Loaded ${imported.cues.length} subtitle lines from ${file.name}`, "ok");
+    } catch (err) {
+      toast((err as Error)?.message || "Failed to parse subtitle file", "info");
+    }
+  };
+
+  const handleAiTranscribe = async () => {
+    if (videoId == null || episode == null) return;
+    setAiConfig(aiConfig);
+    setAICaptionConfig(aiConfig);
+    setTranscribing(true);
+    setTranscribeStatus("Preparing episode stream...");
+    try {
+      const track = await transcribeEpisodeWithAI(videoId, episode, streamUrl || "", setTranscribeStatus);
+      if (mode === "off") onModeChange("en");
+      toast(`Generated ${track.cues.length} synced subtitle lines`, "ok");
+      setTranscribeStatus("");
+    } catch (err) {
+      toast((err as Error)?.message || "AI transcription failed", "info");
+      setTranscribeStatus("");
+    } finally {
+      setTranscribing(false);
+    }
+  };
+
+  const hasRealTrack = Boolean(trackInfo?.hasTrack && trackInfo.cueCount > 0 && trackInfo.source !== "none");
+  const trackSourceLabel = (() => {
+    switch (trackInfo?.source) {
+      case "local_import":
+        return "Imported File";
+      case "upstream_vtt":
+      case "native_track":
+      case "offline_download":
+        return "Embedded Stream CC";
+      case "ai_gemini":
+        return "Gemini AI Track";
+      case "ai_whisper":
+        return "Whisper AI Track";
+      case "cache":
+        return "Cached Track";
+      default:
+        return "No Embedded Subtitles";
+    }
+  })();
+
+  const canRemoveTrack =
+    hasRealTrack &&
+    (trackInfo?.source === "local_import" ||
+      trackInfo?.source === "ai_gemini" ||
+      trackInfo?.source === "ai_whisper" ||
+      trackInfo?.source === "cache");
+
   const modes: Array<{ id: SubtitleMode; label: string; desc: string; icon: React.ReactNode }> = [
     {
       id: "en",
-      label: "English Subtitles",
-      desc: "Synchronized English closed captions (CC)",
+      label: "Captions On",
+      desc: "Show real or imported English captions",
       icon: <ILangEn size={22} className="text-amber-500" />,
     },
     {
       id: "off",
-      label: "Subtitles Off",
+      label: "Captions Off",
       desc: "Hide all overlay captions during playback",
       icon: <IBan size={20} className="text-mut" />,
     },
   ];
 
   const sizes: Array<{ id: SubtitleSize; label: string; px: string }> = [
-    { id: "sm", label: "Small", px: "10.5px" },
-    { id: "md", label: "Standard", px: "11.5px" },
-    { id: "lg", label: "Medium", px: "12.5px" },
-    { id: "xl", label: "Large", px: "13.5px" },
+    { id: "sm", label: "Small", px: "13px" },
+    { id: "md", label: "Standard", px: "15px" },
+    { id: "lg", label: "Large", px: "17px" },
+    { id: "xl", label: "XL", px: "20px" },
   ];
 
   const positions: Array<{ id: SubtitlePosition; label: string; desc: string; defaultPct: number }> = [
@@ -107,7 +201,6 @@ export default function SubtitleSheet({
     { id: "top", label: "Top", desc: "Upper screen third", defaultPct: 85 },
   ];
 
-  // Preview styling helpers
   const colorMap = {
     white: "#FFFFFF",
     yellow: "#FFE600",
@@ -116,7 +209,7 @@ export default function SubtitleSheet({
   };
   const previewTextColor = colorMap[styleConfig.color] || "#FFFFFF";
   const edgeShadowMap = {
-    drop_shadow: "0 1px 2px rgba(0,0,0,0.9), 0 0 1px #000",
+    drop_shadow: "0 1px 3px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.9)",
     raised: "1px 1px 0px #000",
     depressed: "-1px -1px 0px #000",
     uniform: "-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000",
@@ -128,14 +221,14 @@ export default function SubtitleSheet({
       ? "#000000"
       : styleConfig.bgStyle === "none"
       ? "transparent"
-      : `rgba(0, 0, 0, ${(styleConfig.bgOpacity ?? 80) / 100})`;
+      : `rgba(10, 10, 12, ${(styleConfig.bgOpacity ?? 75) / 100})`;
 
   const previewFontSize = {
-    sm: "text-[10.5px]",
-    md: "text-[11.5px]",
-    lg: "text-[12.5px]",
-    xl: "text-[13.5px]",
-  }[size] || "text-[11.5px]";
+    sm: "text-[13px]",
+    md: "text-[15px]",
+    lg: "text-[17px]",
+    xl: "text-[19px]",
+  }[size] || "text-[15px]";
 
   const currentPosition = styleConfig.position || "bottom";
   const rawPercent =
@@ -149,6 +242,7 @@ export default function SubtitleSheet({
       ? 32
       : 12;
   const currentPercent = Math.max(5, Math.min(90, Math.round(rawPercent)));
+  const currentOffsetSec = styleConfig.offsetSec || 0;
 
   return (
     <Sheet open={open} onClose={onClose} label={t("captions.title")}>
@@ -161,7 +255,7 @@ export default function SubtitleSheet({
             </div>
             <div>
               <h2 className="text-[17px] font-bold leading-tight text-on">Closed Captions (CC)</h2>
-              <p className="text-[12px] text-mut">Synchronized real-time English subtitles</p>
+              <p className="text-[12px] text-mut">Stream tracks, .SRT / .VTT files & AI captions</p>
             </div>
           </div>
           <Button
@@ -173,21 +267,159 @@ export default function SubtitleSheet({
           </Button>
         </div>
 
+        {/* Active Track Status & Import Card */}
+        {videoId != null && episode != null && (
+          <div
+            className={`p-3 rounded-2xl border flex flex-col gap-2.5 ${
+              hasRealTrack
+                ? "bg-emerald-500/10 border-emerald-500/30"
+                : "bg-s2 border-border"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className={`w-2 h-2 rounded-full shrink-0 ${
+                      hasRealTrack ? "bg-emerald-500" : "bg-amber-500"
+                    }`}
+                  />
+                  <span className="text-[13px] font-bold text-on">{trackSourceLabel}</span>
+                  {hasRealTrack && (
+                    <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                      · {trackInfo?.cueCount} lines
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11.5px] text-mut mt-0.5 leading-snug truncate">
+                  {hasRealTrack
+                    ? trackInfo?.fileName || `Episode ${episode} active subtitle track`
+                    : "This video has no embedded subtitle track. Load an .SRT / .VTT file or transcribe below."}
+                </p>
+              </div>
+              {canRemoveTrack && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    removeSubtitleTrackForEpisode(videoId, episode);
+                    toast("Subtitle track removed", "info");
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 text-[11px] font-bold flex items-center gap-1 shrink-0 pressable"
+                >
+                  <ITrash size={12} />
+                  <span>Remove</span>
+                </button>
+              )}
+            </div>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".srt,.vtt,text/vtt,application/x-subrip,text/plain"
+              className="hidden"
+              onChange={handleImportFile}
+            />
+
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="h-9 px-3 rounded-xl bg-white dark:bg-neutral-800 border border-border text-[12px] font-bold text-on flex items-center justify-center gap-1.5 pressable shadow-xs"
+              >
+                <IFileText size={14} className="text-amber-500" />
+                <span>Load .SRT / .VTT</span>
+              </Button>
+              <Button
+                type="button"
+                onClick={() => setAiExpanded((v) => !v)}
+                className="h-9 px-3 rounded-xl bg-white dark:bg-neutral-800 border border-border text-[12px] font-bold text-on flex items-center justify-center gap-1.5 pressable shadow-xs"
+              >
+                <ISparkles size={14} className="text-primary" />
+                <span>{aiExpanded ? "Hide AI Setup" : "AI Transcribe"}</span>
+              </Button>
+            </div>
+
+            {aiExpanded && (
+              <div className="pt-2 border-t border-border/60 flex flex-col gap-2">
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(
+                    [
+                      ["gemini", "Gemini 2.5 Flash"],
+                      ["whisper", "OpenAI Whisper"],
+                    ] as const
+                  ).map(([prov, label]) => {
+                    const selected = aiConfig.provider === prov || (aiConfig.provider === "none" && prov === "gemini");
+                    return (
+                      <button
+                        key={prov}
+                        type="button"
+                        onClick={() => {
+                          const next = { ...aiConfig, provider: prov };
+                          setAiConfig(next);
+                          setAICaptionConfig(next);
+                        }}
+                        className={`h-8 rounded-lg border text-[11.5px] font-bold transition-all ${
+                          selected
+                            ? "bg-primary/15 border-primary text-primary"
+                            : "bg-s3 border-border text-mut"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <input
+                  type="password"
+                  value={
+                    aiConfig.provider === "whisper"
+                      ? aiConfig.whisperKey || ""
+                      : aiConfig.geminiKey || ""
+                  }
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const activeProv = aiConfig.provider === "whisper" ? "whisper" : "gemini";
+                    const next: AICaptionConfig =
+                      activeProv === "whisper"
+                        ? { ...aiConfig, provider: "whisper", whisperKey: val }
+                        : { ...aiConfig, provider: "gemini", geminiKey: val };
+                    setAiConfig(next);
+                    setAICaptionConfig(next);
+                  }}
+                  placeholder={
+                    aiConfig.provider === "whisper"
+                      ? "Paste OpenAI API key (sk-...)"
+                      : "Paste Google Gemini API key (AIza...)"
+                  }
+                  className="h-9 px-3 rounded-xl bg-bg border border-border text-[12px] text-on placeholder:text-mut outline-none focus:border-primary"
+                />
+                <Button
+                  type="button"
+                  disabled={transcribing}
+                  onClick={() => void handleAiTranscribe()}
+                  className="h-9 rounded-xl bg-primary text-on-primary text-[12px] font-bold flex items-center justify-center gap-1.5 pressable disabled:opacity-60"
+                >
+                  <ISparkles size={13} />
+                  <span>{transcribing ? (transcribeStatus || "Transcribing...") : "Transcribe Current Episode"}</span>
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Live Interactive Preview Box */}
         {mode !== "off" && (
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-mut">
-              <span>Interactive Position Preview</span>
+              <span>Live Caption Preview</span>
               <span className="text-amber-500 font-semibold lowercase">
                 {currentPosition} ({currentPercent}%) · {size}
               </span>
             </div>
             <div className="h-28 rounded-2xl bg-gradient-to-br from-neutral-900 to-black flex flex-col justify-end p-2.5 relative overflow-hidden shadow-inner border border-white/10 select-none">
-              <div className="absolute inset-0 bg-cover bg-center opacity-25" style={{ filter: "blur(4px)" }} />
-              {/* Screen guide markers */}
               <div className="absolute top-2 inset-x-3 flex justify-between text-[8px] text-white/30 font-mono">
                 <span>TOP (85%)</span>
-                <span>SCREEN BOUNDS</span>
+                <span>SAFE FRAME</span>
               </div>
               <div className="absolute inset-x-3 border-b border-dashed border-white/10" style={{ top: "50%" }}>
                 <span className="text-[8px] text-white/20 font-mono">MIDDLE (50%)</span>
@@ -196,7 +428,6 @@ export default function SubtitleSheet({
                 <span>DOWNSIDE (12%)</span>
                 <span>CONTROLS</span>
               </div>
-              {/* Dynamic Subtitle Element */}
               <div
                 className="absolute inset-x-0 flex items-center justify-center px-4 transition-all duration-150 pointer-events-none"
                 style={{
@@ -205,24 +436,24 @@ export default function SubtitleSheet({
                 }}
               >
                 <div
-                  className={`font-medium text-center px-2 py-0.5 rounded-[3px] shadow-[0_1px_3px_rgba(0,0,0,0.85)] transition-all leading-snug max-w-[85%] ${previewFontSize}`}
+                  className={`font-semibold text-center px-3 py-1 rounded-md shadow-[0_2px_8px_rgba(0,0,0,0.85)] transition-all leading-snug max-w-[85%] ${previewFontSize}`}
                   style={{
                     color: previewTextColor,
                     textShadow: previewShadow,
                     backgroundColor: previewBg,
                   }}
                 >
-                  "I never thought we would meet again..."
+                  "Never let go of what matters most."
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* Subtitle Language Mode Selection */}
+        {/* Subtitle Mode Selection */}
         <div className="flex flex-col gap-1.5">
           <span className="text-[11px] font-bold uppercase tracking-wider text-mut">
-            Caption Status
+            Caption Display
           </span>
           <div className="grid grid-cols-2 gap-2">
             {modes.map((item) => {
@@ -256,6 +487,40 @@ export default function SubtitleSheet({
           </div>
         </div>
 
+        {/* Timing Sync Offset */}
+        {mode !== "off" && (
+          <div className="flex items-center justify-between p-3 rounded-2xl bg-s2 border border-border gap-2">
+            <div>
+              <div className="text-[12.5px] font-bold text-on">Timing Sync Offset</div>
+              <div className="text-[10.5px] text-mut">Adjust if dialogue leads or lags captions</div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => updateOffsetSec(currentOffsetSec - 0.25)}
+                className="px-2 py-1 rounded-lg bg-s3 border border-border text-[11px] font-bold text-on pressable"
+              >
+                -0.25s
+              </button>
+              <button
+                type="button"
+                onClick={() => updateOffsetSec(0)}
+                className="px-2 py-1 rounded-lg bg-white dark:bg-neutral-900 border border-border text-[11px] font-mono font-bold text-amber-500 min-w-[54px] text-center pressable"
+                title="Reset offset to 0.00s"
+              >
+                {currentOffsetSec > 0 ? `+${currentOffsetSec.toFixed(2)}s` : `${currentOffsetSec.toFixed(2)}s`}
+              </button>
+              <button
+                type="button"
+                onClick={() => updateOffsetSec(currentOffsetSec + 0.25)}
+                className="px-2 py-1 rounded-lg bg-s3 border border-border text-[11px] font-bold text-on pressable"
+              >
+                +0.25s
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Vertical Position Selection & Fine-Tuning Slider */}
         {mode !== "off" && (
           <div className="flex flex-col gap-2 pt-0.5">
@@ -268,7 +533,6 @@ export default function SubtitleSheet({
               </span>
             </div>
 
-            {/* Quick 4-Position Presets */}
             <div className="grid grid-cols-4 gap-1.5">
               {positions.map((p) => {
                 const active = currentPosition === p.id;
@@ -292,7 +556,6 @@ export default function SubtitleSheet({
               })}
             </div>
 
-            {/* Continuous Vertical Height Slider */}
             <div className="p-3 rounded-2xl bg-s2 border border-border flex flex-col gap-2">
               <div className="flex items-center justify-between text-[12px]">
                 <span className="font-semibold text-on flex items-center gap-1.5">
@@ -347,7 +610,7 @@ export default function SubtitleSheet({
                     data-card={true}
                     style={{ borderRadius: 12 }}
                     onClick={() => onSizeChange(s.id)}
-                    className={`h-9 rounded-[12px] border text-[12.5px] font-bold flex items-center justify-center gap-1 pressable transition-all ${
+                    className={`h-9 rounded-[12px] border text-[12px] font-bold flex items-center justify-center gap-1 pressable transition-all ${
                       active
                         ? "bg-white dark:bg-neutral-900 text-on border-amber-500/60 shadow-xs ring-1 ring-amber-500/30"
                         : "bg-s2 border-border text-on/80 hover:bg-s3 font-semibold"
@@ -398,9 +661,9 @@ export default function SubtitleSheet({
             </span>
             <div className="grid grid-cols-4 gap-1.5">
               {[
-                { label: "Transparent", opacity: 0, bgStyle: "none" as const },
+                { label: "None (0%)", opacity: 0, bgStyle: "none" as const },
                 { label: "Subtle (50%)", opacity: 50, bgStyle: "translucent" as const },
-                { label: "Standard (80%)", opacity: 80, bgStyle: "translucent" as const },
+                { label: "Standard (75%)", opacity: 75, bgStyle: "translucent" as const },
                 { label: "Solid (100%)", opacity: 100, bgStyle: "solid" as const },
               ].map((op) => {
                 const active =
@@ -436,12 +699,18 @@ export default function SubtitleSheet({
         {/* Subtitle (.SRT / .VTT) Export */}
         {videoId != null && episode != null && (
           <div className="flex flex-col gap-1.5 pt-0.5">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-mut">
-              Export Subtitles
-            </span>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-mut">
+                Export Subtitles
+              </span>
+              {!hasRealTrack && (
+                <span className="text-[10.5px] text-mut">Load a subtitle track to export</span>
+              )}
+            </div>
             <div className="grid grid-cols-2 gap-2">
               <Button
                 type="button"
+                disabled={!hasRealTrack}
                 onClick={async () => {
                   const res = await processSubtitleExport(videoId, episode, "srt", title || "Episode");
                   if (res.success) {
@@ -450,13 +719,14 @@ export default function SubtitleSheet({
                     toast(res.error || "Failed to export SRT", "info");
                   }
                 }}
-                className="h-9 px-3 rounded-xl bg-s2 hover:bg-s3 border border-border text-[12.5px] font-semibold text-on flex items-center justify-center gap-1.5 pressable"
+                className="h-9 px-3 rounded-xl bg-s2 hover:bg-s3 border border-border text-[12.5px] font-semibold text-on flex items-center justify-center gap-1.5 pressable disabled:opacity-45"
               >
                 <IFileText size={14} className="text-amber-500" />
                 <span>Export .SRT</span>
               </Button>
               <Button
                 type="button"
+                disabled={!hasRealTrack}
                 onClick={async () => {
                   const res = await processSubtitleExport(videoId, episode, "vtt", title || "Episode");
                   if (res.success) {
@@ -465,7 +735,7 @@ export default function SubtitleSheet({
                     toast(res.error || "Failed to export VTT", "info");
                   }
                 }}
-                className="h-9 px-3 rounded-xl bg-s2 hover:bg-s3 border border-border text-[12.5px] font-semibold text-on flex items-center justify-center gap-1.5 pressable"
+                className="h-9 px-3 rounded-xl bg-s2 hover:bg-s3 border border-border text-[12.5px] font-semibold text-on flex items-center justify-center gap-1.5 pressable disabled:opacity-45"
               >
                 <IFileText size={14} className="text-amber-500" />
                 <span>Export .VTT</span>

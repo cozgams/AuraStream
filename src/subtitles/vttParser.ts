@@ -108,34 +108,34 @@ export function parseVtt(content: string): SubtitleCue[] {
 
     const textLines = lines
       .slice(timeLineIdx + 1)
-      .map((l) => decodeHtmlEntities(l.replace(/<[^>]+>/g, "").trim()))
+      .map((l) => decodeHtmlEntities(l.replace(/\{\\[^}]+\}/g, "").replace(/<[^>]+>/g, "").trim()))
       .filter(Boolean);
     if (!textLines.length) continue;
 
-    let en = "";
-    let zh = "";
+    const enLines: string[] = [];
+    const zhLines: string[] = [];
 
-    // Check if dual format [EN] / [ZH]
+    // Preserve multi-line cues cleanly instead of treating line 2 as a second language
     for (const line of textLines) {
-      if (line.startsWith("[EN]") || line.startsWith("EN:")) {
-        en = line.replace(/^(\[EN\]|EN:)\s*/i, "");
-      } else if (line.startsWith("[ZH]") || line.startsWith("ZH:")) {
-        zh = line.replace(/^(\[ZH\]|ZH:)\s*/i, "");
+      if (/^(\[EN\]|EN:)/i.test(line)) {
+        const cleaned = line.replace(/^(\[EN\]|EN:)\s*/i, "").trim();
+        if (cleaned) enLines.push(cleaned);
+      } else if (/^(\[ZH\]|ZH:)/i.test(line)) {
+        const cleaned = line.replace(/^(\[ZH\]|ZH:)\s*/i, "").trim();
+        if (cleaned) zhLines.push(cleaned);
       } else {
-        // Fallback: check character range
         const hasChinese = /[\u4e00-\u9fa5]/.test(line);
-        if (hasChinese && !zh) {
-          zh = line;
-        } else if (!hasChinese && !en) {
-          en = line;
+        if (hasChinese) {
+          zhLines.push(line);
         } else {
-          if (!en) en = line;
-          else if (!zh) zh = line;
+          enLines.push(line);
         }
       }
     }
 
-    const englishCue = formatSubtitleText(en || zh);
+    const joinedEn = enLines.join("\n");
+    const joinedZh = zhLines.join("\n");
+    const englishCue = formatSubtitleText(joinedEn || joinedZh);
     if (!englishCue) continue;
 
     cues.push({
@@ -143,9 +143,55 @@ export function parseVtt(content: string): SubtitleCue[] {
       start,
       end,
       en: englishCue,
-      zh: zh || englishCue,
+      zh: joinedZh || englishCue,
     });
   }
 
   return cues;
+}
+
+/**
+ * Balances caption text into at most two clean lines (Netflix/YouTube mobile caption guidelines).
+ */
+export function formatBalancedCaptionLines(text: string, maxCharsPerLine = 42): string {
+  const rawLines = text
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((l) => l.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  if (rawLines.length === 0) return "";
+  if (rawLines.length >= 2) {
+    const first = rawLines[0];
+    const rest = rawLines.slice(1).join(" ").trim();
+    return rest ? `${first}\n${rest}` : first;
+  }
+
+  const single = rawLines[0];
+  if (single.length <= maxCharsPerLine) return single;
+
+  const words = single.split(" ");
+  if (words.length <= 2) return single;
+
+  const targetMid = Math.floor(single.length / 2);
+  let bestSplitIdx = -1;
+  let bestScore = Number.POSITIVE_INFINITY;
+  let runningLen = 0;
+
+  for (let i = 0; i < words.length - 1; i++) {
+    runningLen += (i > 0 ? 1 : 0) + words[i].length;
+    const line1Len = runningLen;
+    const line2Len = single.length - runningLen - 1;
+    const penalty = line1Len > maxCharsPerLine || line2Len > maxCharsPerLine ? 100 : 0;
+    const score = Math.abs(line1Len - targetMid) + penalty;
+    if (score < bestScore) {
+      bestScore = score;
+      bestSplitIdx = i;
+    }
+  }
+
+  if (bestSplitIdx >= 0) {
+    return `${words.slice(0, bestSplitIdx + 1).join(" ")}\n${words.slice(bestSplitIdx + 1).join(" ")}`;
+  }
+  return single;
 }

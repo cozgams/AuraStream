@@ -19,6 +19,7 @@ import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.MediaStore
+import android.provider.Settings
 import android.util.Base64
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
@@ -28,6 +29,8 @@ import androidx.core.content.FileProvider
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : TauriActivity() {
   private val exportLock = Any()
@@ -40,8 +43,6 @@ class MainActivity : TauriActivity() {
   var activeDownloadCount: Int = 0
   @Volatile
   var isAppInForeground: Boolean = true
-  @Volatile
-  var serviceStartRequested: Boolean = false
 
   private val stateLock = Any()
   private val stateDiskLock = Any()
@@ -237,12 +238,17 @@ class MainActivity : TauriActivity() {
 
   companion object {
     const val DOWNLOAD_CHANNEL_ID = "aurastream_downloads"
+    @Volatile
+    var isForegroundGlobal: Boolean = true
+    @Volatile
+    var serviceStartRequested: Boolean = false
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     android.util.Log.i("AuraStream", "MainActivity.onCreate called")
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    isForegroundGlobal = true
     cleanupExportsDir(0L)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       try {
@@ -256,20 +262,23 @@ class MainActivity : TauriActivity() {
   override fun onResume() {
     super.onResume()
     isAppInForeground = true
-    try {
-      // Clear non-ongoing download notifications while actively inside the app
-      val notificationManager = androidx.core.app.NotificationManagerCompat.from(this)
-      notificationManager.cancelAll()
-    } catch (_: Exception) {}
+    isForegroundGlobal = true
     try {
       currentWebView?.onResume()
       currentWebView?.resumeTimers()
+      currentWebView?.post {
+        currentWebView?.evaluateJavascript(
+          "window.dispatchEvent(new CustomEvent('aurastream:app-resumed'));",
+          null
+        )
+      }
     } catch (_: Exception) {}
   }
 
   override fun onPause() {
     super.onPause()
     isAppInForeground = false
+    isForegroundGlobal = false
     try {
       // If downloads are in progress, keep WebView active and timers running in background
       if (activeDownloadCount > 0) {
@@ -283,6 +292,7 @@ class MainActivity : TauriActivity() {
   override fun onStop() {
     super.onStop()
     isAppInForeground = false
+    isForegroundGlobal = false
     try {
       // Keep WebView execution alive if background downloads are running
       if (activeDownloadCount > 0) {
@@ -294,13 +304,27 @@ class MainActivity : TauriActivity() {
     flushAppStateAsync()
   }
 
+  override fun onRequestPermissionsResult(
+    requestCode: Int,
+    permissions: Array<out String>,
+    grantResults: IntArray
+  ) {
+    super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    runOnUiThread {
+      currentWebView?.evaluateJavascript(
+        "window.dispatchEvent(new CustomEvent('aurastream:permissions-changed'));",
+        null
+      )
+    }
+  }
+
   override fun onDestroy() {
     super.onDestroy()
     releaseWakeLock()
     closeCurrentExportStream()
     flushAppStateSync()
     quitStateHandlerThread()
-    if (!isChangingConfigurations) {
+    if (!isChangingConfigurations && activeDownloadCount <= 0 && !AuraDownloadService.hasActiveDiskDownloads(this)) {
       stopDownloadService()
     }
   }
@@ -414,14 +438,14 @@ class MainActivity : TauriActivity() {
         activity.activeDownloadCount = maxOf(0, count)
         if (activity.activeDownloadCount > 0) {
           activity.acquireWakeLock()
-          if (!AuraDownloadService.isRunning && !activity.serviceStartRequested) {
+          if (!AuraDownloadService.isRunning && !MainActivity.serviceStartRequested) {
             activity.startDownloadService("Episode", "Downloading offline...", activity.activeDownloadCount)
           } else {
             AuraDownloadService.instance?.refreshNotification(activity.activeDownloadCount)
           }
           activity.currentWebView?.onResume()
           activity.currentWebView?.resumeTimers()
-        } else if (prev > 0 || AuraDownloadService.isRunning || activity.serviceStartRequested) {
+        } else if (prev > 0 || AuraDownloadService.isRunning || MainActivity.serviceStartRequested) {
           AuraDownloadService.clearDownloads()
           activity.stopDownloadService()
           activity.releaseWakeLock()
@@ -691,6 +715,86 @@ class MainActivity : TauriActivity() {
       }
     }
 
+    private fun handleExportedFile(file: File, fileName: String, dramaTitle: String, action: String): String {
+      return when (action) {
+        "save", "save_movies" -> {
+          val safeName = if (fileName.contains(".")) fileName else "$fileName.mp4"
+          val savedUri = saveToMediaStore(file, safeName, "Movies/AuraStream")
+          if (savedUri != null) {
+            activity.lastExportedUri = savedUri
+            try { file.delete() } catch (_: Exception) {}
+            "SUCCESS:Movies/AuraStream/$safeName"
+          } else {
+            "SAVED_LOCAL:${file.absolutePath}"
+          }
+        }
+        "save_downloads" -> {
+          val safeName = if (fileName.contains(".")) fileName else "$fileName.mp4"
+          val savedUri = saveToDownloads(file, safeName)
+          if (savedUri != null) {
+            activity.lastExportedUri = savedUri
+            try { file.delete() } catch (_: Exception) {}
+            "SUCCESS:Download/AuraStream/$safeName"
+          } else {
+            "SAVED_LOCAL:${file.absolutePath}"
+          }
+        }
+        "save_sdcard" -> {
+          val safeName = if (fileName.contains(".")) fileName else "$fileName.mp4"
+          val sdFile = saveToSdCard(file, safeName)
+          if (sdFile != null) {
+            try {
+              activity.lastExportedUri = FileProvider.getUriForFile(
+                activity,
+                "${activity.packageName}.fileprovider",
+                sdFile
+              )
+            } catch (_: Exception) {
+              activity.lastExportedUri = Uri.fromFile(sdFile)
+            }
+            try { file.delete() } catch (_: Exception) {}
+            "SUCCESS:SDCard/AuraStream/$safeName"
+          } else {
+            val fallbackUri = saveToDownloads(file, safeName)
+            if (fallbackUri != null) {
+              activity.lastExportedUri = fallbackUri
+              try { file.delete() } catch (_: Exception) {}
+              "SUCCESS:Download/AuraStream/$safeName"
+            } else {
+              "SAVED_LOCAL:${file.absolutePath}"
+            }
+          }
+        }
+        "share" -> {
+          try {
+            activity.lastExportedUri = FileProvider.getUriForFile(
+              activity,
+              "${activity.packageName}.fileprovider",
+              file
+            )
+          } catch (_: Exception) {}
+          activity.runOnUiThread {
+            shareVideoFile(file, dramaTitle)
+          }
+          "SHARED:${file.name}"
+        }
+        "open" -> {
+          try {
+            activity.lastExportedUri = FileProvider.getUriForFile(
+              activity,
+              "${activity.packageName}.fileprovider",
+              file
+            )
+          } catch (_: Exception) {}
+          activity.runOnUiThread {
+            openInExternalPlayer(file)
+          }
+          "OPENED:${file.name}"
+        }
+        else -> "UNKNOWN_ACTION"
+      }
+    }
+
     @JavascriptInterface
     fun finishExport(fileName: String, dramaTitle: String, action: String): String {
       return synchronized(activity.exportLock) {
@@ -707,84 +811,24 @@ class MainActivity : TauriActivity() {
 
           val file = activity.currentExportFile ?: return@synchronized "ERROR: No active file"
           activity.currentExportFile = null
+          handleExportedFile(file, fileName, dramaTitle, action)
+        } catch (e: Exception) {
+          e.printStackTrace()
+          "ERROR:${e.message}"
+        }
+      }
+    }
 
-          when (action) {
-            "save", "save_movies" -> {
-              val safeName = if (fileName.contains(".")) fileName else "$fileName.mp4"
-              val savedUri = saveToMediaStore(file, safeName, "Movies/AuraStream")
-              if (savedUri != null) {
-                activity.lastExportedUri = savedUri
-                try { file.delete() } catch (_: Exception) {}
-                "SUCCESS:Movies/AuraStream/$safeName"
-              } else {
-                "SAVED_LOCAL:${file.absolutePath}"
-              }
-            }
-            "save_downloads" -> {
-              val safeName = if (fileName.contains(".")) fileName else "$fileName.mp4"
-              val savedUri = saveToDownloads(file, safeName)
-              if (savedUri != null) {
-                activity.lastExportedUri = savedUri
-                try { file.delete() } catch (_: Exception) {}
-                "SUCCESS:Download/AuraStream/$safeName"
-              } else {
-                "SAVED_LOCAL:${file.absolutePath}"
-              }
-            }
-            "save_sdcard" -> {
-              val safeName = if (fileName.contains(".")) fileName else "$fileName.mp4"
-              val sdFile = saveToSdCard(file, safeName)
-              if (sdFile != null) {
-                try {
-                  activity.lastExportedUri = FileProvider.getUriForFile(
-                    activity,
-                    "${activity.packageName}.fileprovider",
-                    sdFile
-                  )
-                } catch (_: Exception) {
-                  activity.lastExportedUri = Uri.fromFile(sdFile)
-                }
-                try { file.delete() } catch (_: Exception) {}
-                "SUCCESS:SDCard/AuraStream/$safeName"
-              } else {
-                val fallbackUri = saveToDownloads(file, safeName)
-                if (fallbackUri != null) {
-                  activity.lastExportedUri = fallbackUri
-                  try { file.delete() } catch (_: Exception) {}
-                  "SUCCESS:Download/AuraStream/$safeName"
-                } else {
-                  "SAVED_LOCAL:${file.absolutePath}"
-                }
-              }
-            }
-            "share" -> {
-              try {
-                activity.lastExportedUri = FileProvider.getUriForFile(
-                  activity,
-                  "${activity.packageName}.fileprovider",
-                  file
-                )
-              } catch (_: Exception) {}
-              activity.runOnUiThread {
-                shareVideoFile(file, dramaTitle)
-              }
-              "SHARED:${file.name}"
-            }
-            "open" -> {
-              try {
-                activity.lastExportedUri = FileProvider.getUriForFile(
-                  activity,
-                  "${activity.packageName}.fileprovider",
-                  file
-                )
-              } catch (_: Exception) {}
-              activity.runOnUiThread {
-                openInExternalPlayer(file)
-              }
-              "OPENED:${file.name}"
-            }
-            else -> "UNKNOWN_ACTION"
+    @JavascriptInterface
+    fun exportLocalFile(sourcePath: String, fileName: String, dramaTitle: String, action: String): String {
+      return synchronized(activity.exportLock) {
+        try {
+          val exportsDir = File(activity.cacheDir, "exports").canonicalFile
+          val file = File(sourcePath).canonicalFile
+          if (!file.path.startsWith(exportsDir.path + File.separator) || !file.exists() || !file.isFile) {
+            return@synchronized "ERROR:Prepared export file not found"
           }
+          handleExportedFile(file, fileName, dramaTitle, action)
         } catch (e: Exception) {
           e.printStackTrace()
           "ERROR:${e.message}"
@@ -996,6 +1040,469 @@ class MainActivity : TauriActivity() {
         activity.startActivity(chooser)
       } catch (e: Exception) {
         e.printStackTrace()
+      }
+    }
+
+    @Volatile
+    private var otaCancelled: Boolean = false
+
+    @Volatile
+    private var otaActiveConnection: HttpURLConnection? = null
+
+    @Volatile
+    private var otaDownloadToken: Long = 0L
+
+    private fun dispatchOtaEvent(payload: JSONObject) {
+      val jsPayload = payload.toString()
+      activity.runOnUiThread {
+        activity.currentWebView?.evaluateJavascript(
+          "window.dispatchEvent(new CustomEvent('aurastream:ota-progress',{detail:$jsPayload}));",
+          null
+        )
+      }
+    }
+
+    private fun isAllowedOtaUrl(rawUrl: String): Boolean {
+      val uri = try { Uri.parse(rawUrl) } catch (_: Exception) { return false }
+      if (!uri.scheme.equals("https", ignoreCase = true)) return false
+      val host = (uri.host ?: "").lowercase()
+      if (host == "github.com") {
+        val path = uri.path ?: ""
+        return path.startsWith("/cozgams/AuraStream/")
+      }
+      return host == "objects.githubusercontent.com" ||
+        host == "release-assets.githubusercontent.com" ||
+        host == "github-releases.githubusercontent.com"
+    }
+
+    @JavascriptInterface
+    fun getDeviceAbi(): String {
+      val abis = Build.SUPPORTED_ABIS ?: emptyArray()
+      for (abi in abis) {
+        when (abi.lowercase()) {
+          "arm64-v8a" -> return "arm64"
+          "x86_64" -> return "x86_64"
+          "armeabi-v7a", "armeabi" -> return "arm"
+        }
+      }
+      return "arm64"
+    }
+
+    @JavascriptInterface
+    fun canInstallPackages(): Boolean {
+      return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        try {
+          activity.packageManager.canRequestPackageInstalls()
+        } catch (_: Exception) {
+          false
+        }
+      } else {
+        true
+      }
+    }
+
+    @JavascriptInterface
+    fun openInstallPermissionSettings(): Boolean {
+      return try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          val intent = Intent(
+            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+            Uri.parse("package:${activity.packageName}")
+          ).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          }
+          activity.startActivity(intent)
+        }
+        true
+      } catch (e: Exception) {
+        e.printStackTrace()
+        false
+      }
+    }
+
+    @JavascriptInterface
+    fun cancelOtaDownload(): Boolean {
+      otaCancelled = true
+      otaDownloadToken++
+      try {
+        otaActiveConnection?.disconnect()
+      } catch (_: Exception) {}
+      otaActiveConnection = null
+      return true
+    }
+
+    @JavascriptInterface
+    fun startOtaDownload(url: String, fileName: String): Boolean {
+      if (!isAllowedOtaUrl(url)) {
+        dispatchOtaEvent(JSONObject().apply {
+          put("status", "error")
+          put("error", "Blocked untrusted update download URL")
+        })
+        return false
+      }
+
+      cancelOtaDownload()
+      val myToken = ++otaDownloadToken
+      otaCancelled = false
+
+      val cleanName = fileName.replace("[^a-zA-Z0-9._-]".toRegex(), "_").trim('_').let {
+        when {
+          it.isEmpty() -> "AuraStream_update.apk"
+          it.endsWith(".apk", ignoreCase = true) -> it
+          else -> "$it.apk"
+        }
+      }
+
+      Thread {
+        var partFile: File? = null
+        try {
+          val updatesDir = File(activity.cacheDir, "updates")
+          if (!updatesDir.exists()) updatesDir.mkdirs()
+          updatesDir.listFiles()?.forEach { oldFile ->
+            if (oldFile.isFile) {
+              try { oldFile.delete() } catch (_: Exception) {}
+            }
+          }
+
+          val apkFile = File(updatesDir, cleanName)
+          partFile = File(updatesDir, "$cleanName.part")
+
+          dispatchOtaEvent(JSONObject().apply {
+            put("status", "downloading")
+            put("progress", 0)
+            put("downloadedBytes", 0L)
+            put("totalBytes", 0L)
+            put("speedBytesPerSec", 0L)
+          })
+
+          var currentUrl = url
+          var conn: HttpURLConnection? = null
+          for (hop in 0..6) {
+            if (otaCancelled || otaDownloadToken != myToken) {
+              dispatchOtaEvent(JSONObject().apply { put("status", "cancelled") })
+              return@Thread
+            }
+            if (!isAllowedOtaUrl(currentUrl)) {
+              throw SecurityException("Redirected to untrusted update host")
+            }
+            val nextConn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+              instanceFollowRedirects = false
+              connectTimeout = 20_000
+              readTimeout = 30_000
+              setRequestProperty("User-Agent", "AuraStream-Android-OTA")
+              setRequestProperty("Accept", "application/octet-stream, application/vnd.android.package-archive")
+            }
+            otaActiveConnection = nextConn
+            val code = nextConn.responseCode
+            if (code in listOf(301, 302, 303, 307, 308)) {
+              val loc = nextConn.getHeaderField("Location") ?: throw IllegalStateException("Redirect missing Location")
+              nextConn.disconnect()
+              currentUrl = URL(URL(currentUrl), loc).toString()
+              continue
+            }
+            conn = nextConn
+            break
+          }
+
+          val finalConn = conn ?: throw IllegalStateException("Too many redirects while fetching update")
+          val responseCode = finalConn.responseCode
+          if (responseCode != HttpURLConnection.HTTP_OK) {
+            throw IllegalStateException("Update server returned HTTP $responseCode")
+          }
+
+          val totalBytes = finalConn.contentLengthLong.coerceAtLeast(0L)
+          var downloadedBytes = 0L
+          var lastEmitMs = 0L
+          var lastPct = -1
+          var sampleStartMs = System.currentTimeMillis()
+          var sampleStartBytes = 0L
+          var currentSpeedBps = 0L
+
+          finalConn.inputStream.use { input ->
+            FileOutputStream(partFile).use { output ->
+              val buffer = ByteArray(32 * 1024)
+              while (true) {
+                if (otaCancelled || otaDownloadToken != myToken) {
+                  throw InterruptedException("cancelled")
+                }
+                val read = input.read(buffer)
+                if (read == -1) break
+                output.write(buffer, 0, read)
+                downloadedBytes += read
+
+                val now = System.currentTimeMillis()
+                val speedElapsedMs = now - sampleStartMs
+                if (speedElapsedMs >= 450L) {
+                  val bytesDelta = (downloadedBytes - sampleStartBytes).coerceAtLeast(0L)
+                  val instantSpeed = (bytesDelta * 1000L) / speedElapsedMs.coerceAtLeast(1L)
+                  currentSpeedBps = if (currentSpeedBps > 0L) {
+                    (currentSpeedBps * 6L + instantSpeed * 4L) / 10L
+                  } else {
+                    instantSpeed
+                  }
+                  sampleStartMs = now
+                  sampleStartBytes = downloadedBytes
+                }
+
+                val pct = if (totalBytes > 0L) {
+                  ((downloadedBytes * 100L) / totalBytes).toInt().coerceIn(0, 99)
+                } else {
+                  0
+                }
+                if (pct != lastPct || now - lastEmitMs >= 250L) {
+                  lastPct = pct
+                  lastEmitMs = now
+                  dispatchOtaEvent(JSONObject().apply {
+                    put("status", "downloading")
+                    put("progress", pct)
+                    put("downloadedBytes", downloadedBytes)
+                    put("totalBytes", totalBytes)
+                    put("speedBytesPerSec", currentSpeedBps)
+                  })
+                }
+              }
+            }
+          }
+          finalConn.disconnect()
+          otaActiveConnection = null
+
+          if (otaCancelled || otaDownloadToken != myToken) {
+            try { partFile.delete() } catch (_: Exception) {}
+            dispatchOtaEvent(JSONObject().apply { put("status", "cancelled") })
+            return@Thread
+          }
+
+          if (!partFile.exists() || partFile.length() < 1_000_000L) {
+            throw IllegalStateException("Downloaded APK appears incomplete (${partFile.length()} bytes)")
+          }
+
+          // Verify ZIP/APK magic bytes PK\x03\x04
+          val header = ByteArray(4)
+          val headerRead = partFile.inputStream().use { it.read(header) }
+          val validZip = headerRead == 4 &&
+            header[0] == 0x50.toByte() &&
+            header[1] == 0x4B.toByte() &&
+            header[2] == 0x03.toByte() &&
+            header[3] == 0x04.toByte()
+          if (!validZip) {
+            throw IllegalStateException("Downloaded file is not a valid APK package")
+          }
+
+          if (apkFile.exists()) apkFile.delete()
+          if (!partFile.renameTo(apkFile)) {
+            partFile.copyTo(apkFile, overwrite = true)
+            partFile.delete()
+          }
+
+          dispatchOtaEvent(JSONObject().apply {
+            put("status", "downloaded")
+            put("progress", 100)
+            put("downloadedBytes", apkFile.length())
+            put("totalBytes", if (totalBytes > 0L) totalBytes else apkFile.length())
+            put("speedBytesPerSec", 0L)
+            put("filePath", apkFile.absolutePath)
+          })
+        } catch (ie: InterruptedException) {
+          try { partFile?.delete() } catch (_: Exception) {}
+          dispatchOtaEvent(JSONObject().apply { put("status", "cancelled") })
+        } catch (e: Exception) {
+          try { partFile?.delete() } catch (_: Exception) {}
+          if (otaCancelled || otaDownloadToken != myToken) {
+            dispatchOtaEvent(JSONObject().apply { put("status", "cancelled") })
+          } else {
+            dispatchOtaEvent(JSONObject().apply {
+              put("status", "error")
+              put("error", e.message ?: "Failed to download update")
+            })
+          }
+        } finally {
+          otaActiveConnection = null
+        }
+      }.apply {
+        name = "AuraOtaDownloader"
+        start()
+      }
+      return true
+    }
+
+    @JavascriptInterface
+    fun installDownloadedApk(filePath: String): String {
+      return try {
+        val updatesDir = File(activity.cacheDir, "updates").canonicalFile
+        val apkFile = File(filePath).canonicalFile
+        if (!apkFile.path.startsWith(updatesDir.path + File.separator) || !apkFile.exists() || !apkFile.isFile) {
+          return "ERROR:Downloaded update file not found"
+        }
+        if (!canInstallPackages()) {
+          return "NEED_PERMISSION"
+        }
+        val uri = FileProvider.getUriForFile(
+          activity,
+          "${activity.packageName}.fileprovider",
+          apkFile
+        )
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+          setDataAndType(uri, "application/vnd.android.package-archive")
+          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        activity.startActivity(intent)
+        "STARTED"
+      } catch (e: Exception) {
+        e.printStackTrace()
+        "ERROR:${e.message ?: "Failed to launch installer"}"
+      }
+    }
+
+    @JavascriptInterface
+    fun getPermissionsStatus(): String {
+      val notifsEnabled = try {
+        val enabledByOs = androidx.core.app.NotificationManagerCompat.from(activity).areNotificationsEnabled()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+          enabledByOs && activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        } else {
+          enabledByOs
+        }
+      } catch (_: Exception) {
+        false
+      }
+
+      val batteryIgnored = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+          val pm = activity.getSystemService(Context.POWER_SERVICE) as? PowerManager
+          pm?.isIgnoringBatteryOptimizations(activity.packageName) == true
+        } else {
+          true
+        }
+      } catch (_: Exception) {
+        false
+      }
+
+      val storageGranted = try {
+        when {
+          Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> true
+          Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
+            activity.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+          }
+          else -> {
+            activity.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+          }
+        }
+      } catch (_: Exception) {
+        true
+      }
+
+      return JSONObject().apply {
+        put("notificationsGranted", notifsEnabled)
+        put("batteryOptimizationIgnored", batteryIgnored)
+        put("canInstallPackages", canInstallPackages())
+        put("storageGranted", storageGranted)
+        put("androidSdk", Build.VERSION.SDK_INT)
+        put("manufacturer", Build.MANUFACTURER ?: "")
+      }.toString()
+    }
+
+    @JavascriptInterface
+    fun requestNotificationPermissionNow(): Boolean {
+      return try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+          val granted = activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+          val prefs = activity.getSharedPreferences("aurastream_perms", Context.MODE_PRIVATE)
+          val askedBefore = prefs.getBoolean("asked_notif", false)
+          if (!granted && (!askedBefore || activity.shouldShowRequestPermissionRationale(android.Manifest.permission.POST_NOTIFICATIONS))) {
+            prefs.edit().putBoolean("asked_notif", true).apply()
+            activity.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
+            return true
+          }
+        }
+        val intent = Intent().apply {
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            action = Settings.ACTION_APP_NOTIFICATION_SETTINGS
+            putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
+          } else {
+            action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+            data = Uri.parse("package:${activity.packageName}")
+          }
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        activity.startActivity(intent)
+        true
+      } catch (e: Exception) {
+        e.printStackTrace()
+        false
+      }
+    }
+
+    @JavascriptInterface
+    fun requestIgnoreBatteryOptimizations(): Boolean {
+      return try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+          val pm = activity.getSystemService(Context.POWER_SERVICE) as? PowerManager
+          if (pm?.isIgnoringBatteryOptimizations(activity.packageName) == true) {
+            return true
+          }
+          try {
+            val intent = Intent(
+              Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+              Uri.parse("package:${activity.packageName}")
+            ).apply {
+              addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            activity.startActivity(intent)
+            return true
+          } catch (_: Exception) {
+            val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+              addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            activity.startActivity(fallback)
+            return true
+          }
+        }
+        true
+      } catch (e: Exception) {
+        e.printStackTrace()
+        false
+      }
+    }
+
+    @JavascriptInterface
+    fun requestLegacyStoragePermission(): Boolean {
+      return try {
+        when {
+          Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> true
+          Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
+            if (activity.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+              activity.requestPermissions(arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE), 102)
+            }
+            true
+          }
+          else -> {
+            if (activity.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+              activity.requestPermissions(arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE, android.Manifest.permission.READ_EXTERNAL_STORAGE), 102)
+            }
+            true
+          }
+        }
+      } catch (e: Exception) {
+        e.printStackTrace()
+        false
+      }
+    }
+
+    @JavascriptInterface
+    fun openAppSettings(): Boolean {
+      return try {
+        val intent = Intent(
+          Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+          Uri.parse("package:${activity.packageName}")
+        ).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        activity.startActivity(intent)
+        true
+      } catch (e: Exception) {
+        e.printStackTrace()
+        false
       }
     }
   }

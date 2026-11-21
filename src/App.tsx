@@ -2,7 +2,7 @@ import { LiquidIndicator } from "./components/ios/effects";
 import { Button } from "./components/ios/controls";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore, type Page, type Tab } from "./store";
-import { isMobile, selfTest } from "./api";
+import { api, isMobile, selfTest, type UpdateInfo } from "./api";
 import { addPluginListener, invoke } from "@tauri-apps/api/core";
 import { runBack } from "./back";
 import Home from "./pages/Home";
@@ -15,6 +15,8 @@ import { PostsPage, PostDetail } from "./pages/Posts";
 import { TopicsPage, TopicPage, TagsPage, TagPage } from "./pages/Discover";
 import { FollowingPage, UserPage } from "./pages/User";
 import LoginModal from "./components/LoginModal";
+import UpdateModal from "./components/UpdateModal";
+import { getSkippedUpdateVersion, isAndroidNativeOtaSupported, isAutoUpdateCheckEnabled } from "./otaUpdater";
 import { ToastHost } from "./components/ui";
 import { DesktopRail, DesktopTitleBar } from "./components/DesktopChrome";
 import ResizeHandles from "./components/ResizeHandles";
@@ -57,6 +59,7 @@ function StackPage({ page, onBack, wide, top, bottomInset }: {
     return (
       <Feed videoIds={page.videoIds} startIndex={page.index} title={page.title} kind={page.feedKind || "video"}
         startEp={page.startEp} startTime={page.startTime}
+        offlineOnly={page.source === "offline"}
         mode="context" active={top} bottomInset={bottomInset} onBack={onBack} />
     );
   }
@@ -235,6 +238,7 @@ function MobileShell() {
 /* ============ Application Entrypoint ============ */
 export default function App() {
   const { platform, loginOpen, setLoginOpen, tab, setTab, stack, pop, fs, setFs, toast } = useStore();
+  const [startupUpdate, setStartupUpdate] = useState<UpdateInfo | null>(null);
   const lastBackPressRef = useRef<number>(0);
   useEffect(() => {
     tracePlayback("navigation.change", { tab, stack: stack.map(p => ({ page: p.kind, key: p.key })), login_open: loginOpen });
@@ -323,10 +327,37 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, []);
 
+  // Guarded GitHub OTA startup check (never runs in /tests/, fixture mode, or Vite dev without native shell)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.location?.pathname?.startsWith("/tests/")) return;
+    if ((window as unknown as { mobileLayoutFixture?: unknown }).mobileLayoutFixture) return;
+    if (!isAutoUpdateCheckEnabled()) return;
+    const hasTauri = Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
+    if (!isAndroidNativeOtaSupported() && (import.meta.env.DEV || !hasTauri)) return;
+
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      if (!alive || (typeof navigator !== "undefined" && navigator.onLine === false)) return;
+      api.checkUpdate()
+        .then((info) => {
+          if (!alive || !info?.has_update || !info.latest) return;
+          if (info.latest === getSkippedUpdateVersion()) return;
+          setStartupUpdate(info);
+        })
+        .catch(() => {});
+    }, 3500);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, []);
+
   return (
     <>
       {isMobile ? <MobileShell /> : <DesktopShell />}
       <LoginModal />
+      <UpdateModal info={startupUpdate} onClose={() => setStartupUpdate(null)} showSkip />
       <ToastHost />
       {/* Login modal backdrop */}
       {loginOpen && <div className="hidden" onClick={() => setLoginOpen(false)} />}

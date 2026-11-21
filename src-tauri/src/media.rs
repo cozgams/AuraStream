@@ -477,10 +477,116 @@ fn segment_response(
     )
 }
 
-/// Unified protocol handler entry: `<LOCAL_ORIGIN>/img?u=`, `/hls?u=`, `/seg?u=`
+fn rewrite_offline_playlist(id: &str, text: &str, origin: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 256);
+    let prefix = format!("{origin}/offline/{id}");
+    for raw in text.trim_start_matches('\u{feff}').lines() {
+        let line = raw.trim_end();
+        if line.is_empty() {
+            out.push('\n');
+            continue;
+        }
+        if line.starts_with('#') {
+            if line.contains("URI=\"") || line.contains("uri=\"") {
+                let mut valid = true;
+                let rewritten = map_uri_attributes(line, |uri| {
+                    let clean = uri.trim_start_matches("./");
+                    if clean.starts_with("http://")
+                        || clean.starts_with("https://")
+                        || clean.starts_with("//")
+                        || !crate::downloader::is_safe_segment(clean)
+                    {
+                        valid = false;
+                        return String::new();
+                    }
+                    format!("{prefix}/{clean}")
+                });
+                if valid {
+                    let lower_rewritten = rewritten.to_ascii_lowercase();
+                    if !lower_rewritten.contains("http://") || rewritten.contains(&prefix) {
+                        // Drop any tag that still contains external non-local URLs (e.g. X-ASSET-LIST)
+                        let has_external = lower_rewritten.contains("x-asset-list");
+                        if !has_external {
+                            out.push_str(&rewritten);
+                            out.push('\n');
+                        }
+                    }
+                }
+                continue;
+            }
+            let lower_line = line.to_ascii_lowercase();
+            if lower_line.contains("http://")
+                || lower_line.contains("https://")
+                || lower_line.contains("x-asset-list")
+            {
+                continue;
+            }
+            out.push_str(line);
+        } else {
+            let clean = line.trim_start_matches("./");
+            if clean.starts_with("http://")
+                || clean.starts_with("https://")
+                || clean.starts_with("//")
+                || !crate::downloader::is_safe_segment(clean)
+            {
+                continue;
+            }
+            out.push_str(&format!("{prefix}/{clean}"));
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn handle_offline_asset(path: &str, origin: &str, range: Option<&str>) -> Response<Vec<u8>> {
+    let Some(rest) = path.strip_prefix("/offline/") else {
+        return respond(404, "text/plain", b"not found".to_vec(), "no-store");
+    };
+    let Some((id, file_name)) = rest.split_once('/') else {
+        return respond(400, "text/plain", b"invalid offline asset path".to_vec(), "no-store");
+    };
+    let Some(file_path) = crate::downloader::offline_file_path(id, file_name) else {
+        return respond(403, "text/plain", b"forbidden".to_vec(), "no-store");
+    };
+    let Ok(bytes) = std::fs::read(&file_path) else {
+        return respond(404, "text/plain", b"offline file not found".to_vec(), "no-store");
+    };
+    let lower = file_name.to_ascii_lowercase();
+    let resp = if lower.ends_with(".m3u8") {
+        match std::str::from_utf8(&bytes) {
+            Ok(text) => respond(
+                200,
+                "application/vnd.apple.mpegurl",
+                rewrite_offline_playlist(id, text, origin).into_bytes(),
+                "no-store",
+            ),
+            Err(_) => respond(500, "text/plain", b"invalid offline playlist".to_vec(), "no-store"),
+        }
+    } else if lower.ends_with(".ts") {
+        respond(200, "video/mp2t", bytes, "private, max-age=86400")
+    } else if lower.ends_with(".mp4") || lower.ends_with(".m4s") {
+        respond(200, "video/mp4", bytes, "private, max-age=86400")
+    } else if lower == "cover.img"
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".png")
+        || lower.ends_with(".webp")
+    {
+        let kind = image_kind(&bytes).unwrap_or("image/jpeg");
+        respond(200, kind, bytes, "private, max-age=86400")
+    } else {
+        respond(200, "application/octet-stream", bytes, "private, max-age=86400")
+    };
+    apply_byte_range(resp, range)
+}
+
+/// Unified protocol handler entry: `<LOCAL_ORIGIN>/img?u=`, `/hls?u=`, `/seg?u=`, `/offline/{id}/{file}`
 ///
 /// `origin` is the base custom protocol URI used to rewrite m3u8 segment and key URLs.
 pub async fn handle(path: &str, query: &str, origin: &str, range: Option<&str>) -> Response<Vec<u8>> {
+    if path.starts_with("/offline/") {
+        return handle_offline_asset(path, origin, range);
+    }
     let target = query
         .split('&')
         .find_map(|kv| kv.strip_prefix("u="))
@@ -700,6 +806,21 @@ mod tests {
             "key uri not rewritten: {body}"
         );
         assert!(!body.contains("URI=\"key.bin"), "key uri left relative");
+    }
+
+    #[test]
+    fn offline_playlist_rewrite_is_strictly_local() {
+        let text = "#EXTM3U\n\
+            #EXT-X-KEY:METHOD=AES-128,URI=\"key_0.key\",IV=0x01\n\
+            #EXT-X-DATERANGE:ID=\"ad\",X-ASSET-LIST=\"https://evil.invalid/ad\"\n\
+            #EXT-X-PRELOAD-HINT:TYPE=PART,URI=\"https://evil.invalid/part.m4s\"\n\
+            #EXTINF:4.0,\n\
+            seg_00000.ts\n\
+            https://evil.invalid/leak.ts\n";
+        let out = rewrite_offline_playlist("101_1", text, LOCAL_ORIGIN);
+        assert!(out.contains(&format!("URI=\"{LOCAL_ORIGIN}/offline/101_1/key_0.key\"")));
+        assert!(out.contains(&format!("{LOCAL_ORIGIN}/offline/101_1/seg_00000.ts")));
+        assert!(!out.contains("evil.invalid"), "external URL leaked into offline playlist: {out}");
     }
 
     /// Offline regression test with known plaintext.

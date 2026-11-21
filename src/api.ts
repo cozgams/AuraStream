@@ -323,10 +323,11 @@ export const api = {
 
 export type UpdateInfo = {
   /** Platform-specific update asset */
-  asset?: { name: string; url: string } | null;
+  asset?: { name: string; url: string; size?: number | null } | null;
   current: string;
   latest: string;
   tag?: string;
+  arch?: string;
   has_update: boolean;
   url: string;
   name?: string;

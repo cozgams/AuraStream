@@ -1,14 +1,22 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { SubtitleCue, SubtitleMode, SubtitleSize, SubtitleStyleConfig } from "../subtitles/types";
+import type {
+  SubtitleCue,
+  SubtitleMode,
+  SubtitleSize,
+  SubtitleStyleConfig,
+  SubtitleTrack,
+  SubtitleTrackStatus,
+} from "../subtitles/types";
 import { getSubtitlesForEpisode, getSubtitleStyleConfig } from "../subtitles/aiSubtitleService";
 import type { PlaybackClock } from "../playbackClock";
 import { formatSubtitleText } from "../subtitles/dramaTranslator";
-import { speakActiveCue, cancelVoiceDub, isVoiceDubEnabled } from "../subtitles/voiceDubService";
+import { formatBalancedCaptionLines } from "../subtitles/vttParser";
 
 type Props = {
   videoId: number;
   episode: number;
   title?: string;
+  streamUrl?: string;
   mode: SubtitleMode;
   size?: SubtitleSize;
   time?: number;
@@ -18,12 +26,14 @@ type Props = {
   fs?: boolean;
   bottomOffset?: number;
   videoEl?: HTMLVideoElement | null;
+  onTrackStatus?: (info: SubtitleTrackStatus) => void;
 };
 
 export default function SubtitleOverlay({
   videoId,
   episode,
   title,
+  streamUrl,
   mode,
   size = "md",
   time: propTime,
@@ -33,12 +43,17 @@ export default function SubtitleOverlay({
   fs = false,
   bottomOffset,
   videoEl,
+  onTrackStatus,
 }: Props) {
   const [cues, setCues] = useState<SubtitleCue[]>([]);
+  const [trackSource, setTrackSource] = useState<SubtitleTrack["source"]>("none");
+  const [trackFileName, setTrackFileName] = useState<string | undefined>(undefined);
+  const [nativeCues, setNativeCues] = useState<SubtitleCue[]>([]);
   const [styleConfig, setStyleConfig] = useState<SubtitleStyleConfig>(() => getSubtitleStyleConfig());
   const [videoFrameBottom, setVideoFrameBottom] = useState<number | null>(null);
-  const [voiceDubEnabled, setVoiceDubEnabled] = useState<boolean>(() => isVoiceDubEnabled());
   const prevEpisodeKeyRef = useRef<string>("");
+  const onTrackStatusRef = useRef(onTrackStatus);
+  onTrackStatusRef.current = onTrackStatus;
 
   // Listen to live style updates from Settings & SubtitleSheet
   useEffect(() => {
@@ -54,16 +69,6 @@ export default function SubtitleOverlay({
     return () => window.removeEventListener("aurastream:subtitlestyle-changed", onStyleChange);
   }, []);
 
-  // Listen to voice dub toggle updates
-  useEffect(() => {
-    const onVoiceDubChange = (e: Event) => {
-      const detail = (e as CustomEvent<{ enabled?: boolean }>).detail;
-      setVoiceDubEnabled(typeof detail?.enabled === "boolean" ? detail.enabled : isVoiceDubEnabled());
-    };
-    window.addEventListener("aurastream:voice-dub-changed", onVoiceDubChange);
-    return () => window.removeEventListener("aurastream:voice-dub-changed", onVoiceDubChange);
-  }, []);
-
   // Frame-accurate video rect calculation for letterboxed / aspect-ratio playback
   useEffect(() => {
     if (!videoEl) {
@@ -76,7 +81,6 @@ export default function SubtitleOverlay({
         if (rect.width > 0 && rect.height > 0 && videoEl.videoWidth > 0 && videoEl.videoHeight > 0) {
           const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
           const containerRatio = rect.width / rect.height;
-          // Letterboxed video (horizontal video on vertical phone screen)
           if (videoRatio > containerRatio) {
             const actualRenderedHeight = rect.width / videoRatio;
             const actualBottom = rect.top + (rect.height + actualRenderedHeight) / 2;
@@ -117,163 +121,222 @@ export default function SubtitleOverlay({
 
   // Direct video element time listener for sub-frame subtitle sync
   const [videoTime, setVideoTime] = useState<number>(() => (videoEl ? videoEl.currentTime : 0));
-  const [isPlaying, setIsPlaying] = useState<boolean>(() => Boolean(videoEl && !videoEl.paused));
   useEffect(() => {
     if (!videoEl) {
       setVideoTime(0);
-      setIsPlaying(false);
       return;
     }
     const onTime = () => setVideoTime(videoEl.currentTime);
-    const onPlayState = () => setIsPlaying(!videoEl.paused);
     setVideoTime(videoEl.currentTime);
-    setIsPlaying(!videoEl.paused);
     videoEl.addEventListener("timeupdate", onTime);
     videoEl.addEventListener("seeking", onTime);
     videoEl.addEventListener("seeked", onTime);
     videoEl.addEventListener("play", onTime);
-    videoEl.addEventListener("play", onPlayState);
-    videoEl.addEventListener("playing", onPlayState);
-    videoEl.addEventListener("pause", onPlayState);
-    videoEl.addEventListener("ended", onPlayState);
     return () => {
       videoEl.removeEventListener("timeupdate", onTime);
       videoEl.removeEventListener("seeking", onTime);
       videoEl.removeEventListener("seeked", onTime);
       videoEl.removeEventListener("play", onTime);
-      videoEl.removeEventListener("play", onPlayState);
-      videoEl.removeEventListener("playing", onPlayState);
-      videoEl.removeEventListener("pause", onPlayState);
-      videoEl.removeEventListener("ended", onPlayState);
     };
   }, [videoEl]);
 
-  const currentTime = videoEl ? videoTime : (playbackClock ? clockTime : (propTime ?? 0));
+  // Native HTMLMediaElement TextTracks listener (embedded HLS / WebVTT tracks)
+  useEffect(() => {
+    if (!videoEl || !videoEl.textTracks) {
+      setNativeCues([]);
+      return;
+    }
 
-  // Load subtitles when videoId or episode changes
+    const trackList = videoEl.textTracks;
+    let activeTrack: TextTrack | null = null;
+
+    const readNativeCues = () => {
+      const tracks = Array.from(trackList);
+      const chosen =
+        tracks.find((tr) => (tr.kind === "subtitles" || tr.kind === "captions") && /^en/i.test(tr.language || "")) ||
+        tracks.find((tr) => tr.kind === "subtitles" || tr.kind === "captions") ||
+        null;
+
+      if (!chosen) {
+        setNativeCues([]);
+        return;
+      }
+
+      const desiredMode: TextTrackMode = cues.length === 0 && mode !== "off" ? "hidden" : "disabled";
+      if (chosen.mode !== desiredMode) {
+        try {
+          chosen.mode = desiredMode;
+        } catch {
+          // ignore read-only textTrack mode
+        }
+      }
+
+      if (activeTrack !== chosen) {
+        if (activeTrack) activeTrack.removeEventListener("cuechange", readNativeCues);
+        activeTrack = chosen;
+        chosen.addEventListener("cuechange", readNativeCues);
+      }
+
+      const cueList = chosen.cues ? Array.from(chosen.cues) : [];
+      const extracted: SubtitleCue[] = [];
+      let idx = 1;
+      for (const c of cueList) {
+        const text = formatSubtitleText(((c as VTTCue).text || "").replace(/<[^>]+>/g, ""));
+        if (!text) continue;
+        extracted.push({
+          id: idx++,
+          start: c.startTime,
+          end: c.endTime > c.startTime ? c.endTime : c.startTime + 1.0,
+          en: text,
+          zh: text,
+        });
+      }
+      setNativeCues(extracted);
+    };
+
+    readNativeCues();
+    trackList.addEventListener("addtrack", readNativeCues);
+    trackList.addEventListener("change", readNativeCues);
+    return () => {
+      trackList.removeEventListener("addtrack", readNativeCues);
+      trackList.removeEventListener("change", readNativeCues);
+      if (activeTrack) {
+        activeTrack.removeEventListener("cuechange", readNativeCues);
+      }
+    };
+  }, [videoEl, cues.length, mode]);
+
+  // Load real subtitles when videoId, episode, or streamUrl changes
   useEffect(() => {
     let canceled = false;
     const episodeKey = `${videoId}:${episode}`;
     if (prevEpisodeKeyRef.current !== episodeKey) {
       prevEpisodeKeyRef.current = episodeKey;
       setCues([]);
+      setTrackSource("none");
+      setTrackFileName(undefined);
     }
-    getSubtitlesForEpisode(videoId, episode, title)
+
+    getSubtitlesForEpisode(videoId, episode, title, undefined, streamUrl)
       .then((track) => {
-        if (!canceled) {
-          setCues(track?.cues || []);
-        }
+        if (canceled) return;
+        setCues(track?.cues || []);
+        setTrackSource(track?.cues?.length ? track.source : "none");
+        setTrackFileName(track?.fileName);
       })
       .catch(() => {
-        if (!canceled) {
-          setCues([]);
-        }
+        if (canceled) return;
+        setCues([]);
+        setTrackSource("none");
+        setTrackFileName(undefined);
       });
+
     return () => {
       canceled = true;
     };
-  }, [videoId, episode, title]);
+  }, [videoId, episode, title, streamUrl]);
+
+  // Listen for immediate imports / AI transcription / removals for this episode
+  useEffect(() => {
+    const onTrackUpdated = (e: Event) => {
+      const detail = (e as CustomEvent<{ videoId?: number; episode?: number; track?: SubtitleTrack }>).detail;
+      if (!detail || detail.videoId !== videoId || detail.episode !== episode || !detail.track) return;
+      const nextTrack = detail.track;
+      setCues(nextTrack.cues || []);
+      setTrackSource(nextTrack.cues?.length ? nextTrack.source : "none");
+      setTrackFileName(nextTrack.fileName);
+    };
+    window.addEventListener("aurastream:subtitle-track-updated", onTrackUpdated);
+    return () => window.removeEventListener("aurastream:subtitle-track-updated", onTrackUpdated);
+  }, [videoId, episode]);
+
+  const effectiveCues = cues.length > 0 ? cues : nativeCues;
+  const effectiveSource: SubtitleTrack["source"] =
+    cues.length > 0 ? trackSource : nativeCues.length > 0 ? "native_track" : "none";
+
+  // Inform Feed / SubtitleSheet of genuine track availability
+  useEffect(() => {
+    onTrackStatusRef.current?.({
+      hasTrack: effectiveCues.length > 0 && effectiveSource !== "none",
+      source: effectiveSource,
+      cueCount: effectiveCues.length,
+      fileName: cues.length > 0 ? trackFileName : undefined,
+    });
+  }, [effectiveCues.length, effectiveSource, trackFileName]);
+
+  const rawTime = videoEl ? videoTime : (playbackClock ? clockTime : (propTime ?? 0));
+  const currentTime = Math.max(0, rawTime + (styleConfig.offsetSec || 0));
 
   // Find active cue
-  const activeCue = cues.find((c) => currentTime >= c.start && currentTime <= c.end);
-  const trackKey = `${videoId}:${episode}`;
-  const cueKey = activeCue ? `${trackKey}:${activeCue.id}` : "";
+  const activeCue = effectiveCues.find((c) => currentTime >= c.start && currentTime <= c.end);
 
-  // Synchronized Voice Dubbing Prototype
-  useEffect(() => {
-    if (activeCue && voiceDubEnabled) {
-      speakActiveCue(activeCue, videoEl, trackKey);
-    }
-  }, [cueKey, videoEl, voiceDubEnabled, isPlaying]);
-
-  useEffect(() => {
-    return () => {
-      cancelVoiceDub(videoEl);
-    };
-  }, [videoId, episode, videoEl]);
-
-  if ((mode === "off" && !voiceDubEnabled) || !cues.length) {
+  if (mode === "off" || !effectiveCues.length || effectiveSource === "none") {
     return null;
   }
 
-  // English-only captions per user requirement
-  const englishText = activeCue ? formatSubtitleText(activeCue.en || activeCue.zh) : "";
-  const isVisible = Boolean(activeCue && englishText && mode !== "off");
+  const rawEnglish = activeCue ? formatSubtitleText(activeCue.en || activeCue.zh) : "";
+  const balancedCaption = rawEnglish ? formatBalancedCaptionLines(rawEnglish, 42) : "";
+  const isVisible = Boolean(activeCue && balancedCaption);
 
-  // Authentic YouTube Caption Typography & Sizing (Small, Clean, Legible)
+  // Professional Netflix / YouTube / Viki mobile caption typography
   const sizeConfig = {
     sm: {
-      primary: "text-[10px] sm:text-[10.5px]",
-      secondary: "text-[8px] sm:text-[8.5px]",
-      padding: "px-1.5 py-[2px]",
+      primary: "text-[13px] sm:text-[14px]",
+      padding: "px-2.5 py-1",
     },
     md: {
-      primary: "text-[11px] sm:text-[11.5px]",
-      secondary: "text-[8.5px] sm:text-[9px]",
-      padding: "px-2 py-[2.5px]",
-    },
-    lg: {
-      primary: "text-[12px] sm:text-[12.5px]",
-      secondary: "text-[9px] sm:text-[9.5px]",
-      padding: "px-2.5 py-[3px]",
-    },
-    xl: {
-      primary: "text-[13px] sm:text-[13.5px]",
-      secondary: "text-[10px] sm:text-[10.5px]",
+      primary: "text-[15px] sm:text-[16px]",
       padding: "px-3 py-1",
     },
+    lg: {
+      primary: "text-[17px] sm:text-[18.5px]",
+      padding: "px-3.5 py-1.5",
+    },
+    xl: {
+      primary: "text-[20px] sm:text-[22px]",
+      padding: "px-4 py-1.5",
+    },
   }[size] || {
-    primary: "text-[11px] sm:text-[11.5px]",
-    secondary: "text-[8.5px] sm:text-[9px]",
-    padding: "px-2 py-[2.5px]",
+    primary: "text-[15px] sm:text-[16px]",
+    padding: "px-3 py-1",
   };
 
-  // Color Mapping - Defaults to YouTube Crisp White
   const colorMap = {
-    white: "#FFFFFF", // Clean YouTube White
+    white: "#FFFFFF",
     yellow: "#FFE600",
     cyan: "#00E5FF",
     green: "#76FF03",
   };
   const primaryTextColor = colorMap[styleConfig.color] || "#FFFFFF";
 
-  // Edge Shadow
   const edgeShadowMap = {
-    drop_shadow: "0 1px 2px rgba(0,0,0,0.9), 0 0 1px #000",
-    raised: "1px 1px 0px #000",
-    depressed: "-1px -1px 0px #000",
-    uniform: "-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000",
+    drop_shadow: "0 1px 3px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.9)",
+    raised: "1px 1px 0px #000, 0 1px 2px rgba(0,0,0,0.85)",
+    depressed: "-1px -1px 0px #000, 0 1px 2px rgba(0,0,0,0.85)",
+    uniform: "-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 1px 3px rgba(0,0,0,0.8)",
     none: "none",
   };
   const textShadow = edgeShadowMap[styleConfig.edgeStyle] || edgeShadowMap.drop_shadow;
 
-  // Font Family
   const fontMap = {
     sans: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-    rounded: '"SF Pro Rounded", ui-rounded, "Comic Sans MS", cursive, sans-serif',
+    rounded: '"SF Pro Rounded", ui-rounded, sans-serif',
     serif: 'Georgia, Cambria, "Times New Roman", Times, serif',
     mono: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
   };
   const fontFamily = fontMap[styleConfig.font] || fontMap.sans;
 
-  // Background style: Classic YouTube translucent black box
-  let backgroundColor = `rgba(0, 0, 0, ${(styleConfig.bgOpacity ?? 80) / 100})`;
+  let backgroundColor = `rgba(10, 10, 12, ${(styleConfig.bgOpacity ?? 75) / 100})`;
   if (styleConfig.bgStyle === "solid") backgroundColor = "#000000";
   if (styleConfig.bgStyle === "none") backgroundColor = "transparent";
 
-  // Position style computation:
-  // "custom" -> Fine-tuned percentage height
-  // "middle" -> Vertical center of screen
-  // "top" -> Upper third
-  // "above_title" -> Clear above metadata
-  // "bottom" -> Anchored on the downside (bottom of active video frame, never colliding with title)
   const position = styleConfig.position || "bottom";
   let positionStyle: React.CSSProperties = {};
 
   if (position === "custom" && typeof styleConfig.customOffsetPercent === "number") {
     const pct = Math.max(5, Math.min(92, styleConfig.customOffsetPercent));
     positionStyle = {
-      bottom: `calc(var(--sab, 48px) + ${pct}%)`,
+      bottom: `calc(var(--sab, 24px) + ${pct}%)`,
     };
   } else if (position === "middle") {
     positionStyle = {
@@ -283,28 +346,27 @@ export default function SubtitleOverlay({
     };
   } else if (position === "top") {
     positionStyle = {
-      top: isDesktop ? "64px" : "calc(max(var(--sat, 12px), 28px) + 54px)",
+      top: isDesktop ? "64px" : "calc(max(var(--sat, 12px), 28px) + 56px)",
       bottom: "auto",
     };
   } else if (position === "above_title") {
     positionStyle = {
       bottom: isDesktop
-        ? "80px"
-        : `calc(var(--sab, 48px) + ${(bottomOffset !== undefined ? bottomOffset : 124) + 140}px)`,
+        ? "84px"
+        : `calc(var(--sab, 48px) + ${(bottomOffset !== undefined ? bottomOffset : 124) + 148}px)`,
     };
   } else {
-    // "bottom" -> Anchored on the downside (lower portion of active video frame, non-overlapping with metadata)
     if (isDesktop) {
-      positionStyle = { bottom: "48px" };
+      positionStyle = { bottom: "56px" };
     } else if (clean || fs) {
       positionStyle = {
         bottom: videoFrameBottom !== null
-          ? `calc(max(var(--sab, 48px), ${videoFrameBottom}px) + 20px)`
-          : "calc(var(--sab, 48px) + 24px)",
+          ? `calc(max(var(--sab, 24px), ${videoFrameBottom}px) + 18px)`
+          : "calc(var(--sab, 24px) + 28px)",
       };
     } else {
       const baseOffset = bottomOffset !== undefined ? bottomOffset : 54;
-      const minClearance = `calc(var(--sab, 48px) + ${baseOffset + 146}px)`;
+      const minClearance = `calc(var(--sab, 48px) + ${baseOffset + 148}px)`;
       positionStyle = {
         bottom: videoFrameBottom !== null
           ? `max(${videoFrameBottom}px, ${minClearance})`
@@ -319,36 +381,37 @@ export default function SubtitleOverlay({
     fontFamily,
     boxDecorationBreak: "clone",
     WebkitBoxDecorationBreak: "clone",
-    lineHeight: "1.25",
+    lineHeight: "1.38",
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
+    textWrap: "balance",
   };
 
   const isRightRailVisible = !clean && !fs && !isDesktop;
 
   return (
     <div
-      className={`absolute left-0 right-0 z-20 pointer-events-none flex flex-col items-center px-3 ${
-        isRightRailVisible ? "pr-16 pl-3" : ""
+      className={`absolute left-0 right-0 z-20 pointer-events-none flex flex-col items-center transition-all duration-150 ${
+        isRightRailVisible ? "pr-14 pl-4" : "px-4"
       }`}
       style={positionStyle}
       aria-live="polite"
     >
       <div
         className={`flex flex-col items-center text-center ${
-          isRightRailVisible ? "max-w-[72%] sm:max-w-[70%]" : "max-w-[85%] sm:max-w-[75%]"
-        } gap-0.5 select-none transition-all duration-200 ease-out ${
-          isVisible ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
+          isRightRailVisible ? "max-w-[80%] sm:max-w-[74%]" : "max-w-[90%] sm:max-w-[76%]"
+        } gap-0.5 select-none transition-opacity duration-150 ease-out ${
+          isVisible ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
       >
         <span
-          className={`inline-block font-medium tracking-normal rounded-[2px] shadow-[0_1px_3px_rgba(0,0,0,0.85)] transition-all duration-150 ${sizeConfig.primary} ${sizeConfig.padding}`}
+          className={`inline-block font-semibold tracking-normal rounded-md shadow-[0_2px_8px_rgba(0,0,0,0.75)] ${sizeConfig.primary} ${sizeConfig.padding}`}
           style={{
             ...commonStyle,
             color: primaryTextColor,
           }}
         >
-          {englishText}
+          {balancedCaption}
         </span>
       </div>
     </div>

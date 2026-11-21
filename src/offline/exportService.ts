@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
+import { LOCAL } from "../api";
 import { formatDramaTitle } from "../subtitles/dramaTranslator";
 import { getOfflineEpisodes } from "./downloadService";
 import { exportToSrt, exportToVtt, getSubtitlesForEpisode } from "../subtitles/aiSubtitleService";
@@ -7,6 +9,15 @@ export interface StorageInfo {
   sdCardPath: string;
   sdFreeBytes: number;
   primaryFreeBytes: number;
+}
+
+export interface AndroidPermissionsStatus {
+  notificationsGranted: boolean;
+  batteryOptimizationIgnored: boolean;
+  canInstallPackages: boolean;
+  storageGranted: boolean;
+  androidSdk: number;
+  manufacturer: string;
 }
 
 export interface NativeExportBridge {
@@ -38,6 +49,7 @@ export interface NativeExportBridge {
   beginExport(fileName: string): boolean;
   writeChunk(base64Chunk: string): boolean;
   finishExport(fileName: string, dramaTitle: string, action: string): string;
+  exportLocalFile?(sourcePath: string, fileName: string, dramaTitle: string, action: string): string;
   exportSubtitleText?(fileName: string, content: string, action: string): string;
   getLastExportedUri?(): string;
   openInGallery?(pathOrUri?: string): boolean;
@@ -45,6 +57,17 @@ export interface NativeExportBridge {
   enterPictureInPicture?(): boolean;
   enterPictureInPictureWithAspect?(num: number, den: number): boolean;
   setAutoPip?(enabled: boolean): void;
+  getDeviceAbi?(): string;
+  canInstallPackages?(): boolean;
+  openInstallPermissionSettings?(): boolean;
+  startOtaDownload?(url: string, fileName: string): boolean;
+  cancelOtaDownload?(): boolean;
+  installDownloadedApk?(filePath: string): string;
+  getPermissionsStatus?(): string;
+  requestNotificationPermissionNow?(): boolean;
+  requestIgnoreBatteryOptimizations?(): boolean;
+  requestLegacyStoragePermission?(): boolean;
+  openAppSettings?(): boolean;
 }
 
 declare global {
@@ -81,6 +104,9 @@ export async function processSubtitleExport(
     const safeTitle = sanitizeFileName(cleanTitle);
     const ext = format === "srt" ? "srt" : "vtt";
     const fileName = `${safeTitle}_Ep${episode}.${ext}`;
+    if (!track?.cues?.length) {
+      return { success: false, fileName, error: "No subtitle track available for this episode" };
+    }
     const content = format === "srt" ? exportToSrt(track, lang) : exportToVtt(track, lang);
 
     if (isNativeExportSupported() && typeof window.AuraNativeExport?.exportSubtitleText === "function") {
@@ -132,6 +158,27 @@ export function getDeviceStorageInfo(): StorageInfo {
     }
   }
   return { hasSdCard: false, sdCardPath: "", sdFreeBytes: 0, primaryFreeBytes: 0 };
+}
+
+export function getAndroidPermissionsStatus(): AndroidPermissionsStatus | null {
+  if (typeof window === "undefined") return null;
+  const bridge = window.AuraNativeExport;
+  if (!bridge || typeof bridge.getPermissionsStatus !== "function") return null;
+  try {
+    const raw = bridge.getPermissionsStatus();
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<AndroidPermissionsStatus>;
+    return {
+      notificationsGranted: Boolean(parsed.notificationsGranted),
+      batteryOptimizationIgnored: Boolean(parsed.batteryOptimizationIgnored),
+      canInstallPackages: Boolean(parsed.canInstallPackages),
+      storageGranted: parsed.storageGranted !== false,
+      androidSdk: Number(parsed.androidSdk) || 0,
+      manufacturer: String(parsed.manufacturer || ""),
+    };
+  } catch {
+    return null;
+  }
 }
 
 const DB_NAME = "AuraStreamOfflineDB";
@@ -496,29 +543,101 @@ async function buildHlsExportBlob(record: any, episode: number): Promise<Blob> {
 
 async function getEpisodeBlob(videoId: number, episode: number): Promise<{ blob: Blob; fileName: string; title: string }> {
   const id = `${videoId}_${episode}`;
+  const meta = getOfflineEpisodes().find((it) => it.id === id);
   let record = await getRecordFromDB(DB_NAME, id);
   if (!record) {
     record = await getRecordFromDB(LEGACY_DB_NAME, id);
   }
 
-  if (!record) {
+  let blob: Blob;
+  if (record) {
+    if (record.isHls && record.segments && record.segments.length > 0) {
+      blob = await buildHlsExportBlob(record, episode);
+    } else if (record.blob) {
+      blob = record.blob instanceof Blob ? record.blob : new Blob([await toArrayBuffer(record.blob)], { type: "video/mp4" });
+      if (blob.size <= 0) {
+        throw new Error(`Stored video for episode ${episode} is empty (0 bytes)`);
+      }
+    } else {
+      throw new Error(`No video data stored for episode ${episode}`);
+    }
+  } else if (meta?.storage === "native") {
+    // Native-stored episode fallback (e.g. desktop Tauri without Android exportLocalFile bridge)
+    if (!meta.isHls) {
+      const res = await fetch(`${LOCAL}/offline/${id}/video.mp4`);
+      if (!res.ok) {
+        throw new Error(`Offline video fetch failed: HTTP ${res.status}`);
+      }
+      blob = await res.blob();
+      if (blob.size <= 0) {
+        throw new Error(`Stored video for episode ${episode} is empty (0 bytes)`);
+      }
+    } else {
+      const plRes = await fetch(`${LOCAL}/offline/${id}/index.m3u8`);
+      if (!plRes.ok) {
+        throw new Error(`Offline playlist fetch failed: HTTP ${plRes.status}`);
+      }
+      const playlistText = await plRes.text();
+      const lines = playlistText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      const segUris = lines.filter((l) => !l.startsWith("#"));
+      if (segUris.length === 0) {
+        throw new Error(`No video segments stored for episode ${episode}`);
+      }
+      const resolveNativeFile = (rawUri: string) =>
+        rawUri.startsWith("http://") || rawUri.startsWith("https://")
+          ? rawUri
+          : `${LOCAL}/offline/${id}/${rawUri.replace(/^\/+/, "")}`;
+
+      const keyBuffers: Record<string, ArrayBuffer> = {};
+      let firstKeyBuf: ArrayBuffer | undefined;
+      for (const line of lines) {
+        if (line.startsWith("#EXT-X-KEY:")) {
+          const parsed = parseExtXKey(line);
+          if (parsed.method === "AES-128" && parsed.uri && !keyBuffers[parsed.uri]) {
+            const kRes = await fetch(resolveNativeFile(parsed.uri));
+            if (!kRes.ok) throw new Error(`Failed loading decryption key (${kRes.status})`);
+            const kBuf = await kRes.arrayBuffer();
+            keyBuffers[parsed.uri] = kBuf;
+            if (!firstKeyBuf) firstKeyBuf = kBuf;
+          }
+        }
+      }
+
+      let initSegment: ArrayBuffer | undefined;
+      for (const line of lines) {
+        if (line.startsWith("#EXT-X-MAP:")) {
+          const parsed = parseExtXKey(line);
+          if (parsed.uri) {
+            const mRes = await fetch(resolveNativeFile(parsed.uri));
+            if (mRes.ok) initSegment = await mRes.arrayBuffer();
+          }
+          break;
+        }
+      }
+
+      const segments: Blob[] = [];
+      for (const seg of segUris) {
+        const sRes = await fetch(resolveNativeFile(seg));
+        if (!sRes.ok) throw new Error(`Failed reading offline segment (${sRes.status})`);
+        segments.push(await sRes.blob());
+      }
+      blob = await buildHlsExportBlob(
+        {
+          isHls: true,
+          playlistText,
+          segments,
+          initSegment,
+          keyBuffer: firstKeyBuf,
+          keyBuffers,
+        },
+        episode
+      );
+    }
+  } else {
     throw new Error(`Episode ${episode} not found in offline storage`);
   }
 
-  let blob: Blob;
-  if (record.isHls && record.segments && record.segments.length > 0) {
-    blob = await buildHlsExportBlob(record, episode);
-  } else if (record.blob) {
-    blob = record.blob instanceof Blob ? record.blob : new Blob([await toArrayBuffer(record.blob)], { type: "video/mp4" });
-    if (blob.size <= 0) {
-      throw new Error(`Stored video for episode ${episode} is empty (0 bytes)`);
-    }
-  } else {
-    throw new Error(`No video data stored for episode ${episode}`);
-  }
-
-  const meta = getOfflineEpisodes().find((it) => it.id === id);
-  const rawTitle = meta?.title || record.title || `Episode_${episode}`;
+  const rawTitle = meta?.title || record?.title || `Episode_${episode}`;
   const cleanTitle = formatDramaTitle(rawTitle);
   const safeTitle = sanitizeFileName(cleanTitle);
   const fileName = `${safeTitle}_Ep${episode}.mp4`;
@@ -537,6 +656,30 @@ export interface ExportResult {
   cancelled?: boolean;
 }
 
+function parseNativeExportResult(
+  result: string,
+  fileName: string,
+  action: ExportAction
+): { ok: true; savedPath: string } | { ok: false; error: string } {
+  if (result.startsWith("ERROR:")) {
+    return { ok: false, error: result.replace("ERROR:", "") };
+  }
+  if (result === "UNKNOWN_ACTION") {
+    return { ok: false, error: "Unsupported export action" };
+  }
+  let savedPath = fileName;
+  if (result.startsWith("SUCCESS:")) {
+    savedPath = result.replace("SUCCESS:", "");
+  } else if (result.startsWith("SAVED_LOCAL:")) {
+    savedPath = result.replace("SAVED_LOCAL:", "");
+  } else if (result.startsWith("SHARED:")) {
+    savedPath = result.replace("SHARED:", "") || fileName;
+  } else if (result.startsWith("OPENED:")) {
+    savedPath = result.replace("OPENED:", "") || fileName;
+  }
+  return { ok: true, savedPath };
+}
+
 export async function processEpisodeExport(
   videoId: number,
   episode: number,
@@ -549,15 +692,64 @@ export async function processEpisodeExport(
     throw new DOMException("Export cancelled", "AbortError");
   }
 
+  const id = `${videoId}_${episode}`;
+  const meta = getOfflineEpisodes().find((it) => it.id === id);
+  const shouldBundleSubtitles =
+    Boolean(options?.includeSubtitles) &&
+    (action === "save" || action === "save_movies" || action === "save_downloads" || action === "save_sdcard");
+
+  // Fast zero-Base64-copy native path for episodes stored by Rust downloader on Android
+  if (
+    meta?.storage === "native" &&
+    isNativeExportSupported() &&
+    typeof window.AuraNativeExport?.exportLocalFile === "function"
+  ) {
+    const cleanTitle = formatDramaTitle(meta.title || `Episode_${episode}`);
+    const safeTitle = sanitizeFileName(cleanTitle);
+    const fileName = `${safeTitle}_Ep${episode}.mp4`;
+
+    onProgress?.(15);
+    const preparedPath = await invoke<string>("native_offline_prepare_export", { id, fileName });
+    if (signal?.aborted) {
+      throw new DOMException("Export cancelled", "AbortError");
+    }
+    onProgress?.(65);
+    const result = window.AuraNativeExport.exportLocalFile(preparedPath, fileName, cleanTitle, action);
+    onProgress?.(100);
+
+    const parsed = parseNativeExportResult(result, fileName, action);
+    if (!parsed.ok) {
+      return { success: false, fileName, action, error: parsed.error };
+    }
+
+    if (shouldBundleSubtitles) {
+      try {
+        await processSubtitleExport(
+          videoId,
+          episode,
+          options?.subtitleFormat || "srt",
+          cleanTitle,
+          "en",
+          "save_downloads"
+        );
+      } catch {
+        // non-fatal
+      }
+    }
+
+    return {
+      success: true,
+      fileName,
+      action,
+      savedPath: parsed.savedPath,
+    };
+  }
+
   const { blob, fileName, title } = await getEpisodeBlob(videoId, episode);
 
   if (signal?.aborted) {
     throw new DOMException("Export cancelled", "AbortError");
   }
-
-  const shouldBundleSubtitles =
-    Boolean(options?.includeSubtitles) &&
-    (action === "save" || action === "save_movies" || action === "save_downloads" || action === "save_sdcard");
 
   if (
     isNativeExportSupported() &&
@@ -608,22 +800,9 @@ export async function processEpisodeExport(
     const result = bridge.finishExport(fileName, title, action);
     onProgress?.(100);
 
-    if (result.startsWith("ERROR:")) {
-      return { success: false, fileName, action, error: result.replace("ERROR:", "") };
-    }
-    if (result === "UNKNOWN_ACTION") {
-      return { success: false, fileName, action, error: "Unsupported export action" };
-    }
-
-    let savedPath = fileName;
-    if (result.startsWith("SUCCESS:")) {
-      savedPath = result.replace("SUCCESS:", "");
-    } else if (result.startsWith("SAVED_LOCAL:")) {
-      savedPath = result.replace("SAVED_LOCAL:", "");
-    } else if (result.startsWith("SHARED:")) {
-      savedPath = result.replace("SHARED:", "") || fileName;
-    } else if (result.startsWith("OPENED:")) {
-      savedPath = result.replace("OPENED:", "") || fileName;
+    const parsed = parseNativeExportResult(result, fileName, action);
+    if (!parsed.ok) {
+      return { success: false, fileName, action, error: parsed.error };
     }
 
     if (shouldBundleSubtitles) {
@@ -645,7 +824,7 @@ export async function processEpisodeExport(
       success: true,
       fileName,
       action,
-      savedPath,
+      savedPath: parsed.savedPath,
     };
   }
 

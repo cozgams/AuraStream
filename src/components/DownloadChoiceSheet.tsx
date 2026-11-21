@@ -117,6 +117,7 @@ export default function DownloadChoiceSheet({
   const targetActiveProg = activeMap.get(targetKey);
   const isTargetDownloaded =
     (targetEpisode === currentEpisode && propIsDownloaded) || isEpisodeDownloaded(videoId, targetEpisode);
+  const isTargetQueued = !isTargetDownloaded && targetActiveProg?.status === "queued";
   const isTargetDownloading =
     Boolean(targetActiveProg && targetActiveProg.status === "downloading") ||
     (!targetActiveProg && (targetEpisode === currentEpisode ? propIsDownloading : isEpisodeDownloading(videoId, targetEpisode)));
@@ -137,11 +138,11 @@ export default function DownloadChoiceSheet({
       onOpenExport?.(targetEpisode);
       return;
     }
-    if (isTargetDownloading) {
+    if (isTargetDownloading || isTargetQueued) {
       onClose();
       return;
     }
-    if (isTargetPaused && targetActiveProg?.streamUrl) {
+    if (isTargetPaused && targetActiveProg) {
       if (isCellular && wifiOnly) {
         toast("Cellular connection detected. 'Download on Wi-Fi Only' is enabled.", "info");
         return;
@@ -288,6 +289,8 @@ export default function DownloadChoiceSheet({
                   <span>
                     {isTargetDownloaded
                       ? `Episode ${targetEpisode} Saved`
+                      : isTargetQueued
+                      ? `Queued Ep. ${targetEpisode}`
                       : isTargetDownloading
                       ? `Downloading Ep. ${targetEpisode}`
                       : isTargetPaused
@@ -311,6 +314,8 @@ export default function DownloadChoiceSheet({
                 <div className="text-[12px] text-mut mt-0.5 leading-snug">
                   {isTargetDownloaded
                     ? "Saved permanently · Tap to export MP4 to gallery"
+                    : isTargetQueued
+                    ? "Waiting in background queue · Tap pause or cancel"
                     : isTargetDownloading
                     ? targetActiveProg && targetActiveProg.downloadedBytes > 0
                       ? `Downloading · ${targetProgress}% (${formatBytes(targetActiveProg.downloadedBytes)}${
@@ -337,10 +342,10 @@ export default function DownloadChoiceSheet({
                 <div className="px-3.5 py-2 rounded-xl bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[12.5px] font-bold flex items-center gap-1.5 shadow-xs whitespace-nowrap">
                   <IExport size={14} /> Export
                 </div>
-              ) : isTargetDownloading ? (
+              ) : isTargetDownloading || isTargetQueued ? (
                 <>
                   <div className="text-amber-600 text-[13px] font-bold tabular-nums whitespace-nowrap bg-amber-500/15 px-2.5 py-1.5 rounded-xl">
-                    {targetActiveProg && targetActiveProg.downloadedBytes > 0 ? `${targetProgress}%` : "..."}
+                    {isTargetQueued ? "Queued" : targetActiveProg && targetActiveProg.downloadedBytes > 0 ? `${targetProgress}%` : "..."}
                   </div>
                   <button
                     type="button"

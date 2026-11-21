@@ -5,7 +5,7 @@
 export type SubtitleMode = "off" | "en";
 export type SubtitleSize = "sm" | "md" | "lg" | "xl";
 export type SubtitlePosition = "bottom" | "above_title" | "middle" | "top" | "custom";
-export type AICaptionProvider = "procedural" | "gemini" | "whisper" | "custom";
+export type AICaptionProvider = "none" | "gemini" | "whisper" | "custom";
 
 export type SubtitleColor = "white" | "yellow" | "cyan" | "green";
 export type SubtitleEdgeStyle = "drop_shadow" | "raised" | "depressed" | "uniform" | "none";
@@ -20,6 +20,7 @@ export interface SubtitleStyleConfig {
   bgOpacity: number; // 0 to 100
   position?: SubtitlePosition;
   customOffsetPercent?: number; // 5 to 90 (%)
+  offsetSec?: number; // -5.0 to +5.0 seconds
 }
 
 export interface AICaptionConfig {
@@ -42,6 +43,22 @@ export interface SubtitleTrack {
   videoId: number;
   episode: number;
   cues: SubtitleCue[];
-  source: "ai_whisper" | "ai_gemini" | "upstream_vtt" | "procedural" | "cache" | "offline_download";
+  source:
+    | "local_import"
+    | "ai_whisper"
+    | "ai_gemini"
+    | "upstream_vtt"
+    | "native_track"
+    | "cache"
+    | "offline_download"
+    | "none";
   generatedAt?: number;
+  fileName?: string;
+}
+
+export interface SubtitleTrackStatus {
+  hasTrack: boolean;
+  source: SubtitleTrack["source"];
+  cueCount: number;
+  fileName?: string;
 }

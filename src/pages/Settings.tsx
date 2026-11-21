@@ -9,7 +9,10 @@ import { autoLineEnabled, setAutoLine } from "../autoLine";
 import { copyPlaybackLog, initPlaybackLog, setPlaybackLog, tracePlayback, usePlaybackLog } from "../playbackDiagnostics";
 import { formatNetDiag, shortVerdict } from "../netDiagReport";
 import { copyText } from "../clipboard";
-import { IBack, IBoltF, IBroom, ICaptionsF, ICheck, IChevR, IClock, IDownload, IHeart, IInfo, ILink, ILockF, IMoon, IPalette, IRefresh, ISun, IVolMute } from "../icons";
+import { IBack, IBoltF, IBroom, ICaptionsF, ICheck, IChevR, IDownload, IHeart, IInfo, ILink, ILockF, IMoon, IPalette, IRefresh, ISun, IVolMute } from "../icons";
+import UpdateModal from "../components/UpdateModal";
+import { isAutoUpdateCheckEnabled, setAutoUpdateCheckEnabled, isAndroidNativeOtaSupported } from "../otaUpdater";
+import { getAndroidPermissionsStatus, type AndroidPermissionsStatus } from "../offline/exportService";
 import { getSubtitleStyleConfig, setSubtitleStyleConfig } from "../subtitles/aiSubtitleService";
 import type { SubtitleStyleConfig } from "../subtitles/types";
 import {
@@ -71,7 +74,8 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
   const [clearing, setClearing] = useState(false);
   const [checking, setChecking] = useState(false);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
-  const [updating, setUpdating] = useState("");
+  const [autoUpdateOn, setAutoUpdateOn] = useState(() => isAutoUpdateCheckEnabled());
+  const [androidPerms, setAndroidPerms] = useState<AndroidPermissionsStatus | null>(() => getAndroidPermissionsStatus());
   const playbackLog = usePlaybackLog();
   const [copyingLog, setCopyingLog] = useState(false);
   const [diagnosing, setDiagnosing] = useState(false);
@@ -96,11 +100,24 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
       setFullPreCache(isFullEpisodePreCacheEnabled());
       setNextPreload(isNextEpisodePreloadEnabled());
     };
+    const syncOtaCfg = () => setAutoUpdateOn(isAutoUpdateCheckEnabled());
+    const refreshPerms = () => setAndroidPerms(getAndroidPermissionsStatus());
+    const onVis = () => {
+      if (document.visibilityState === "visible") refreshPerms();
+    };
     window.addEventListener("aurastream:storage-config-changed", syncStorageCfg);
     window.addEventListener("aurastream:playback-config-changed", syncPlaybackCfg);
+    window.addEventListener("aurastream:ota-config-changed", syncOtaCfg);
+    window.addEventListener("aurastream:app-resumed", refreshPerms);
+    window.addEventListener("aurastream:permissions-changed", refreshPerms);
+    document.addEventListener("visibilitychange", onVis);
     return () => {
       window.removeEventListener("aurastream:storage-config-changed", syncStorageCfg);
       window.removeEventListener("aurastream:playback-config-changed", syncPlaybackCfg);
+      window.removeEventListener("aurastream:ota-config-changed", syncOtaCfg);
+      window.removeEventListener("aurastream:app-resumed", refreshPerms);
+      window.removeEventListener("aurastream:permissions-changed", refreshPerms);
+      document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
 
@@ -146,20 +163,6 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
       toast(errorMessage(e, "Failed to check for updates"), "info");
     } finally {
       setChecking(false);
-    }
-  };
-
-  const doUpdate = async () => {
-    if (!update) return;
-    setUpdating("Opening...");
-    try {
-      await api.openUrl(update.url);
-    } catch (e) {
-      await copyText(update.url)
-        .then(() => toast("Download link copied to clipboard", "ok"))
-        .catch((err) => toast(errorMessage(err, "Failed to open link"), "info"));
-    } finally {
-      setUpdating("");
     }
   };
 
@@ -504,6 +507,117 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
             </div>
           </Section>
 
+          {/* Android Permissions & Background Execution */}
+          {androidPerms !== null && (
+            <Section title="Permissions & Background">
+              <Button
+                onClick={() => {
+                  window.AuraNativeExport?.requestIgnoreBatteryOptimizations?.();
+                  window.setTimeout(() => setAndroidPerms(getAndroidPermissionsStatus()), 400);
+                }}
+                className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable"
+              >
+                <span className="ios-setting-icon"><IBoltF size={16} /></span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] text-on">Unrestricted Background Downloads</div>
+                  <div className="text-[12px] text-mut">Prevents Android from pausing downloads when you leave the app</div>
+                </div>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0 ${
+                    androidPerms.batteryOptimizationIgnored
+                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                      : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                  }`}
+                >
+                  {androidPerms.batteryOptimizationIgnored ? "Granted" : "Action Needed"}
+                </span>
+              </Button>
+              <Button
+                onClick={() => {
+                  window.AuraNativeExport?.requestNotificationPermissionNow?.();
+                  window.setTimeout(() => setAndroidPerms(getAndroidPermissionsStatus()), 400);
+                }}
+                className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable"
+              >
+                <span className="ios-setting-icon"><IDownload size={16} /></span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] text-on">Download Notifications</div>
+                  <div className="text-[12px] text-mut">Live speed, progress bar, and Pause/Cancel controls in notification shade</div>
+                </div>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0 ${
+                    androidPerms.notificationsGranted
+                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                      : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                  }`}
+                >
+                  {androidPerms.notificationsGranted ? "Granted" : "Action Needed"}
+                </span>
+              </Button>
+              <Button
+                onClick={() => {
+                  window.AuraNativeExport?.openInstallPermissionSettings?.();
+                  window.setTimeout(() => setAndroidPerms(getAndroidPermissionsStatus()), 400);
+                }}
+                className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable"
+              >
+                <span className="ios-setting-icon"><IRefresh size={16} /></span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] text-on">In-App Updates (Install APKs)</div>
+                  <div className="text-[12px] text-mut">Required on Android to install GitHub OTA updates inside the app</div>
+                </div>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0 ${
+                    androidPerms.canInstallPackages
+                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                      : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                  }`}
+                >
+                  {androidPerms.canInstallPackages ? "Granted" : "Action Needed"}
+                </span>
+              </Button>
+              <Button
+                onClick={() => {
+                  if (androidPerms.storageGranted) {
+                    toast("Media & Downloads export permission is active", "ok");
+                    return;
+                  }
+                  window.AuraNativeExport?.requestLegacyStoragePermission?.();
+                  window.setTimeout(() => setAndroidPerms(getAndroidPermissionsStatus()), 400);
+                }}
+                className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable"
+              >
+                <span className="ios-setting-icon"><IInfo size={16} /></span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] text-on">Storage & Gallery Export</div>
+                  <div className="text-[12px] text-mut">Save offline episodes to Movies/AuraStream or Download/AuraStream</div>
+                </div>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0 ${
+                    androidPerms.storageGranted
+                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                      : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                  }`}
+                >
+                  {androidPerms.storageGranted ? "Granted" : "Action Needed"}
+                </span>
+              </Button>
+              <Button
+                onClick={() => {
+                  window.AuraNativeExport?.openAppSettings?.();
+                }}
+                className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable"
+              >
+                <span className="ios-setting-icon"><ILockF size={16} /></span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] text-on">Open Android App Settings</div>
+                  <div className="text-[12px] text-mut">Inspect Battery, Notifications, and App permissions in system settings</div>
+                </div>
+                <IChevR size={15} className="text-mut" />
+              </Button>
+            </Section>
+          )}
+
           {/* Storage & Data */}
           <Section title="Storage & Data">
             <div className="flex items-center gap-3 px-3.5 py-3">
@@ -698,11 +812,33 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
 
           {/* About & Updates Section */}
           <Section title="About">
+            <div className="flex items-center gap-3 px-3.5 py-3">
+              <span className="ios-setting-icon"><IRefresh size={16} /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[14px] text-on">Auto-Check for Updates</div>
+                <div className="text-[12px] text-mut">Check GitHub Releases on launch when online</div>
+              </div>
+              <Toggle
+                label="Auto-Check for Updates"
+                on={autoUpdateOn}
+                onChange={(on) => {
+                  setAutoUpdateOn(on);
+                  setAutoUpdateCheckEnabled(on);
+                  toast(on ? "Auto-check for updates enabled" : "Auto-check for updates disabled", "info");
+                }}
+              />
+            </div>
             <Button onClick={checkUpdate} disabled={checking} className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable disabled:opacity-60">
               <span className="ios-setting-icon"><IRefresh size={16} /></span>
               <div className="flex-1">
                 <div className="text-[14px] text-on">Check for Updates</div>
-                <div className="text-[12px] text-mut">{checking ? "Checking..." : `Current v${APP_VERSION} · Compare with GitHub Release`}</div>
+                <div className="text-[12px] text-mut">
+                  {checking
+                    ? "Checking..."
+                    : isAndroidNativeOtaSupported()
+                    ? `Current v${APP_VERSION} · In-app GitHub OTA`
+                    : `Current v${APP_VERSION} · Compare with GitHub Release`}
+                </div>
               </div>
               <IChevR size={15} className="text-mut" />
             </Button>
@@ -843,38 +979,8 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
         </div>
       </Modal>
 
-      {/* Update Modal */}
-      <Modal open={!!update?.has_update} onClose={() => setUpdate(null)} width={392} label="New Version Available">
-        <div className="p-5">
-          <div className="text-[16px] font-bold text-on">New Version Available</div>
-          <p className="text-[12px] text-mut mt-1.5">
-            v{update?.current} → <b className="text-on">v{update?.latest}</b>
-            {update?.published_at ? ` · ${update.published_at.slice(0, 10)}` : ""}
-          </p>
-          {!!update?.notes && (
-            <Surface className="mt-3 max-h-[180px] scroll-y rounded-(--r-sm) bg-s2 p-3 text-[12px] text-mut whitespace-pre-wrap leading-relaxed">
-              {update.notes}
-            </Surface>
-          )}
-          <div className="flex gap-2 mt-4">
-            <Button
-              onClick={() => setUpdate(null)}
-              disabled={!!updating}
-              className="flex-1 h-9 rounded-(--r-ctl) bg-s3 text-[14px] text-on/80 pressable disabled:opacity-60"
-            >
-              Later
-            </Button>
-            <Button
-              onClick={() => void doUpdate()}
-              disabled={!!updating}
-              className="flex-1 h-9 rounded-(--r-ctl) bg-primary text-[14px] font-semibold text-on-primary pressable disabled:opacity-60"
-            >
-              {updating || "Download"}
-            </Button>
-          </div>
-          <div className="text-[12px] text-dim mt-2.5 break-all">{update?.url}</div>
-        </div>
-      </Modal>
+      {/* GitHub OTA Update Modal */}
+      <UpdateModal info={update} onClose={() => setUpdate(null)} />
     </div>
   );
 }

@@ -8,6 +8,7 @@ import type { SubtitleMode, SubtitleSize } from "./subtitles/types";
 import {
   auth,
   fetchCloudUserData,
+  getCurrentAuthUid,
   saveUserDataToCloud,
   subscribeAuthState,
   logOutFirebase,
@@ -169,7 +170,11 @@ function loadLocalUser(): User | null {
     const raw = readStorage(STORAGE_KEYS.localUser);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<User> | null;
-    if (parsed && typeof parsed.id === "number" && parsed.user_type === "offline") {
+    if (
+      parsed &&
+      typeof parsed.id === "number" &&
+      (parsed.user_type === "offline" || parsed.user_type === "firebase")
+    ) {
       return parsed as User;
     }
     return null;
@@ -206,9 +211,9 @@ function readSubtitleSizePreference(): SubtitleSize {
   try {
     const saved = readStorage(STORAGE_KEYS.subtitleSize);
     if (saved === "sm" || saved === "md" || saved === "lg" || saved === "xl") return saved;
-    return "sm";
+    return "md";
   } catch {
-    return "sm";
+    return "md";
   }
 }
 
@@ -338,7 +343,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const setUser = useCallback((next: User | null) => {
     setUserState(next);
-    if (next?.user_type === "offline") {
+    if (next?.user_type === "offline" || next?.user_type === "firebase") {
       writeStorage(STORAGE_KEYS.localUser, JSON.stringify(next));
     } else {
       removeStorage(STORAGE_KEYS.localUser);
@@ -431,17 +436,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     writeStorage(LS, JSON.stringify(p));
   }, [p]);
 
-  // Cloud sync to Firestore for authenticated Firebase users
+  // Cloud sync to Firestore / Account Vault for authenticated users
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-    const uid = auth?.currentUser?.uid;
+    const uid = getCurrentAuthUid();
     if (!uid || user?.user_type !== "firebase" || cloudHydratedUid !== uid) {
       return;
     }
     syncTimeoutRef.current = setTimeout(() => {
       try {
-        const activeUid = auth?.currentUser?.uid;
+        const activeUid = getCurrentAuthUid();
         if (activeUid && user?.user_type === "firebase" && cloudHydratedUid === activeUid) {
           void saveUserDataToCloud(activeUid, {
             favorites: p.favs,

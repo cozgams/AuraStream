@@ -510,10 +510,10 @@ export function formatCommentText(rawText: string | undefined): string {
     .trim() || "Great episode!";
 }
 
-export function formatSubtitleText(rawText: string | undefined): string {
-  if (!rawText) return "";
-  const text = rawText.trim();
-  if (!/[\u4e00-\u9fff]/.test(text)) return text;
+function formatSingleSubtitleLine(line: string): string {
+  const text = line.trim();
+  if (!text) return "";
+  if (!/[\u4e00-\u9fff]/.test(text)) return text.replace(/\s+/g, " ").trim();
 
   let translated = text;
   for (const [pattern, replacement] of KEYWORD_MAP) {
@@ -535,4 +535,14 @@ export function formatSubtitleText(rawText: string | undefined): string {
     .replace(/\s*[;；]+\s*/g, "; ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+export function formatSubtitleText(rawText: string | undefined): string {
+  if (!rawText) return "";
+  const lines = rawText
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map(formatSingleSubtitleLine)
+    .filter(Boolean);
+  return lines.join("\n");
 }

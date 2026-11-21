@@ -34,6 +34,8 @@ interface BatchDownloadSheetProps {
   title: string;
   cover: string;
   totalEpisodes: number;
+  episodeNumbers?: number[];
+  preselectAll?: boolean;
   isOpen: boolean;
   onClose: () => void;
 }
@@ -43,6 +45,8 @@ export default function BatchDownloadSheet({
   title,
   cover,
   totalEpisodes,
+  episodeNumbers,
+  preselectAll = false,
   isOpen,
   onClose,
 }: BatchDownloadSheetProps) {
@@ -70,9 +74,14 @@ export default function BatchDownloadSheet({
   const wifiOnly = isWifiOnlyDownloadEnabled();
   const cellularBlocked = isCellular && wifiOnly && !allowCellular;
 
-  // Initialize all episode numbers safely
-  const epCount = Math.max(1, totalEpisodes || 1);
-  const allEpisodes = Array.from({ length: epCount }, (_, i) => i + 1);
+  // Initialize episode numbers accurately from episode list when provided
+  const sortedExplicitEps = Array.isArray(episodeNumbers) && episodeNumbers.length > 0
+    ? Array.from(new Set(episodeNumbers.filter((n) => Number.isFinite(n) && n > 0))).sort((a, b) => a - b)
+    : [];
+  const epCount = Math.max(1, totalEpisodes || sortedExplicitEps.length || 1);
+  const allEpisodes = sortedExplicitEps.length > 0
+    ? sortedExplicitEps
+    : Array.from({ length: epCount }, (_, i) => i + 1);
   const downloadedSet = new Set(
     allEpisodes.filter((ep) => isEpisodeDownloaded(videoId, ep))
   );
@@ -86,7 +95,7 @@ export default function BatchDownloadSheet({
     };
   }, []);
 
-  // Pre-select next 5 undownloaded only when sheet transitions closed->open or videoId changes while open
+  // Pre-select all unsaved (when launched from Full Season) or next 5 undownloaded when sheet opens
   useEffect(() => {
     const justOpened = isOpen && !prevOpenRef.current;
     const videoChangedWhileOpen = isOpen && prevVideoIdRef.current !== videoId;
@@ -94,26 +103,33 @@ export default function BatchDownloadSheet({
     prevVideoIdRef.current = videoId;
 
     if (justOpened || videoChangedWhileOpen) {
-      const count = Math.max(1, totalEpisodes || 1);
-      const eps = Array.from({ length: count }, (_, i) => i + 1);
-      const undownloaded = eps.filter((ep) => !isEpisodeDownloaded(videoId, ep));
-      setSelectedEps(new Set(undownloaded.slice(0, 5)));
+      const undownloaded = allEpisodes.filter((ep) => !isEpisodeDownloaded(videoId, ep));
+      setSelectedEps(new Set(preselectAll ? undownloaded : undownloaded.slice(0, 5)));
     }
-  }, [isOpen, videoId, totalEpisodes]);
+  }, [isOpen, videoId, totalEpisodes, preselectAll, sortedExplicitEps.length]);
 
   if (!isOpen) return null;
 
-  const isCurrentBatchActive = batchProgress.active && batchProgress.videoId === videoId;
-  const batchSessionKey = isCurrentBatchActive ? `${batchProgress.videoId}:${batchProgress.total}` : "";
+  const seriesQueueItems = Array.from(activeMap.values()).filter(
+    (item) => item.videoId === videoId && (item.status === "downloading" || item.status === "queued")
+  );
+  const isCurrentBatchActive =
+    seriesQueueItems.length > 0 || (batchProgress.active && batchProgress.videoId === videoId);
+  const batchSessionKey = isCurrentBatchActive ? `${videoId}:${Math.max(batchProgress.total, seriesQueueItems.length)}` : "";
   if (!isCurrentBatchActive || prevBatchKeyRef.current !== batchSessionKey) {
     maxBatchPctRef.current = 0;
     prevBatchKeyRef.current = batchSessionKey;
   }
 
-  const effectiveSelected = Array.from(selectedEps).filter((ep) => !downloadedSet.has(ep));
+  const effectiveSelected = Array.from(selectedEps).filter((ep) => {
+    if (downloadedSet.has(ep)) return false;
+    const st = activeMap.get(`${videoId}_${ep}`)?.status;
+    return st !== "downloading" && st !== "queued";
+  });
 
   const toggleEp = (ep: number) => {
-    if (downloadedSet.has(ep) || isCurrentBatchActive) return;
+    const st = activeMap.get(`${videoId}_${ep}`)?.status;
+    if (downloadedSet.has(ep) || st === "downloading" || st === "queued") return;
     const next = new Set(selectedEps);
     if (next.has(ep)) next.delete(ep);
     else next.add(ep);
@@ -121,19 +137,24 @@ export default function BatchDownloadSheet({
   };
 
   const selectNext = (count: number) => {
-    if (isCurrentBatchActive) return;
-    const undownloaded = allEpisodes.filter((ep) => !downloadedSet.has(ep));
+    const undownloaded = allEpisodes.filter((ep) => {
+      if (downloadedSet.has(ep)) return false;
+      const st = activeMap.get(`${videoId}_${ep}`)?.status;
+      return st !== "downloading" && st !== "queued";
+    });
     setSelectedEps(new Set(undownloaded.slice(0, count)));
   };
 
   const selectAllUnsaved = () => {
-    if (isCurrentBatchActive) return;
-    const undownloaded = allEpisodes.filter((ep) => !downloadedSet.has(ep));
+    const undownloaded = allEpisodes.filter((ep) => {
+      if (downloadedSet.has(ep)) return false;
+      const st = activeMap.get(`${videoId}_${ep}`)?.status;
+      return st !== "downloading" && st !== "queued";
+    });
     setSelectedEps(new Set(undownloaded));
   };
 
   const clearSelection = () => {
-    if (isCurrentBatchActive) return;
     setSelectedEps(new Set());
   };
 
@@ -154,28 +175,49 @@ export default function BatchDownloadSheet({
     }
     const list = [...effectiveSelected].sort((a, b) => a - b);
     const safeTitle = formatDramaTitle(title) || title || `Drama #${videoId}`;
-    toast(`Queued ${list.length} episodes for batch download`, "ok");
     try {
       const res = await executeBatchDownload(videoId, safeTitle, cover, list, allowCellular, downloadQuality);
-      setSelectedEps((prev) => new Set(Array.from(prev).filter((ep) => !isEpisodeDownloaded(videoId, ep))));
-      toast(`Batch download complete: ${res.success} saved (${res.failed} failed)`, res.failed ? "info" : "ok");
+      setSelectedEps((prev) =>
+        new Set(
+          Array.from(prev).filter((ep) => {
+            if (isEpisodeDownloaded(videoId, ep)) return false;
+            const st = activeMap.get(`${videoId}_${ep}`)?.status;
+            return st !== "downloading" && st !== "queued";
+          })
+        )
+      );
+      if (typeof res.queued === "number" && res.queued > 0) {
+        toast(`Queued ${res.queued} ${res.queued === 1 ? "episode" : "episodes"} for background download`, "ok");
+      } else {
+        toast(`Batch download complete: ${res.success} saved (${res.failed} failed)`, res.failed ? "info" : "ok");
+      }
     } catch (e) {
       toast((e as Error).message || "Batch download failed", "info");
     }
   };
 
-  const activeEpProgress = isCurrentBatchActive
-    ? activeMap.get(`${videoId}_${batchProgress.currentEpisode}`)
-    : undefined;
+  const activeDownloadingItem =
+    seriesQueueItems.find((item) => item.status === "downloading") ||
+    seriesQueueItems[0] ||
+    (batchProgress.videoId === videoId ? activeMap.get(`${videoId}_${batchProgress.currentEpisode}`) : undefined);
+  const activeEpProgress = activeDownloadingItem;
+  const activeEpNum = activeEpProgress?.episode || batchProgress.currentEpisode;
   const activeEpPct = activeEpProgress?.progress || 0;
   const activeFraction =
     activeEpProgress?.status === "downloading" ? Math.min(99, Math.max(0, activeEpPct)) / 100 : 0;
-  const processedCount = batchProgress.completed + batchProgress.failedCount;
+  const displayBatchTotal =
+    batchProgress.videoId === videoId && batchProgress.total > 0
+      ? Math.max(batchProgress.total, seriesQueueItems.length)
+      : Math.max(1, seriesQueueItems.length);
+  const processedCount =
+    batchProgress.videoId === videoId && batchProgress.total > 0
+      ? batchProgress.completed + batchProgress.failedCount
+      : Math.max(0, displayBatchTotal - seriesQueueItems.length);
   const rawBatchPct = Math.min(
     100,
     Math.max(
       activeEpPct > 0 || processedCount > 0 ? 2 : 0,
-      Math.round(((processedCount + activeFraction) / Math.max(1, batchProgress.total)) * 100)
+      Math.round(((processedCount + activeFraction) / Math.max(1, displayBatchTotal)) * 100)
     )
   );
   if (isCurrentBatchActive && rawBatchPct > maxBatchPctRef.current) {
@@ -230,30 +272,26 @@ export default function BatchDownloadSheet({
         {/* Quick Presets */}
         <div className="flex items-center gap-2 p-3 border-b border-edge/30 shrink-0 overflow-x-auto scrollbar-none">
           <Button
-            disabled={isCurrentBatchActive}
             onClick={() => selectNext(5)}
-            className="px-3 py-1.5 rounded-xl bg-s3 text-[12px] font-semibold text-on pressable disabled:opacity-50"
+            className="px-3 py-1.5 rounded-xl bg-s3 text-[12px] font-semibold text-on pressable"
           >
             + {t("batch.next_5")}
           </Button>
           <Button
-            disabled={isCurrentBatchActive}
             onClick={() => selectNext(10)}
-            className="px-3 py-1.5 rounded-xl bg-s3 text-[12px] font-semibold text-on pressable disabled:opacity-50"
+            className="px-3 py-1.5 rounded-xl bg-s3 text-[12px] font-semibold text-on pressable"
           >
             + {t("batch.next_10")}
           </Button>
           <Button
-            disabled={isCurrentBatchActive}
             onClick={selectAllUnsaved}
-            className="px-3 py-1.5 rounded-xl bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[12px] font-bold pressable disabled:opacity-50"
+            className="px-3 py-1.5 rounded-xl bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[12px] font-bold pressable"
           >
             {t("batch.all_unsaved", { count: Math.max(0, allEpisodes.length - downloadedSet.size) })}
           </Button>
           <Button
-            disabled={isCurrentBatchActive}
             onClick={clearSelection}
-            className="ml-auto px-2.5 py-1.5 rounded-xl bg-s3 text-[11px] text-mut hover:text-red-500 pressable disabled:opacity-50"
+            className="ml-auto px-2.5 py-1.5 rounded-xl bg-s3 text-[11px] text-mut hover:text-red-500 pressable"
           >
             {t("batch.clear")}
           </Button>
@@ -265,28 +303,32 @@ export default function BatchDownloadSheet({
             {allEpisodes.map((ep) => {
               const isDownloaded = downloadedSet.has(ep);
               const isSelected = selectedEps.has(ep);
-              const isCurrentDownloading = isCurrentBatchActive && batchProgress.currentEpisode === ep;
+              const epProg = activeMap.get(`${videoId}_${ep}`);
+              const isCurrentDownloading = epProg?.status === "downloading";
+              const isQueued = epProg?.status === "queued";
               return (
                 <button
                   key={ep}
                   type="button"
                   aria-label={`Episode ${ep}`}
-                  disabled={isDownloaded || isCurrentBatchActive}
+                  disabled={isDownloaded || isCurrentDownloading || isQueued}
                   onClick={() => toggleEp(ep)}
                   className={`h-11 rounded-xl text-[13px] font-semibold flex items-center justify-center relative overflow-hidden transition-all ${
                     isDownloaded
                       ? "bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 cursor-default font-bold"
                       : isCurrentDownloading
                       ? "bg-primary/20 border-2 border-primary text-primary font-bold"
+                      : isQueued
+                      ? "bg-blue-500/15 border border-blue-500/30 text-blue-600 dark:text-blue-400 font-bold"
                       : isSelected
                       ? "bg-primary text-on-primary shadow-sm font-bold scale-[0.98]"
                       : "bg-s3/90 text-on/80 hover:bg-s4/60 border border-edge/30"
                   }`}
                 >
-                  {isCurrentDownloading && activeEpPct > 0 && (
+                  {isCurrentDownloading && (epProg?.progress || 0) > 0 && (
                     <span
                       className="absolute inset-y-0 left-0 bg-primary/25 transition-all duration-300 pointer-events-none"
-                      style={{ width: `${activeEpPct}%` }}
+                      style={{ width: `${epProg?.progress || 0}%` }}
                     />
                   )}
                   {isDownloaded ? (
@@ -296,7 +338,11 @@ export default function BatchDownloadSheet({
                     </span>
                   ) : isCurrentDownloading ? (
                     <span className="text-[11px] relative z-10">
-                      {ep} · {activeEpPct}%
+                      {ep} · {epProg?.progress || 0}%
+                    </span>
+                  ) : isQueued ? (
+                    <span className="text-[10.5px] relative z-10">
+                      {ep} · Q
                     </span>
                   ) : (
                     <span className="relative z-10">{ep}</span>
@@ -307,7 +353,7 @@ export default function BatchDownloadSheet({
           </div>
         </div>
 
-        {/* Active Batch Progress Banner (if downloading) */}
+        {/* Active Batch Progress Banner (if downloading or queued) */}
         {isCurrentBatchActive && (
           <div className="p-3 bg-primary/10 border-t border-primary/20 flex flex-col gap-1.5 shrink-0">
             <div className="flex items-center justify-between text-[12px]">
@@ -315,15 +361,15 @@ export default function BatchDownloadSheet({
                 <Loader className="w-4 h-4 spinner" />
                 <span>
                   {t("batch.downloading", {
-                    current: batchProgress.currentEpisode,
-                    completed: batchProgress.completed,
-                    total: batchProgress.total,
+                    current: activeEpNum,
+                    completed: processedCount,
+                    total: displayBatchTotal,
                   })}
                   {activeEpPct > 0 ? ` · ${activeEpPct}%` : ""}
                 </span>
               </span>
               <Button
-                onClick={() => cancelBatchDownload()}
+                onClick={() => cancelBatchDownload(videoId)}
                 className="text-[11px] text-red-500 hover:underline pressable"
               >
                 {t("batch.cancel_batch")}

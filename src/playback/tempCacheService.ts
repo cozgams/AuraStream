@@ -10,6 +10,7 @@
  */
 
 import { api, playlist, LOCAL } from "../api";
+import { isEpisodeDownloaded } from "../offline/downloadService";
 
 export interface PreloadedEpisode {
   key: string; // `${videoId}:${ep}`
@@ -187,6 +188,8 @@ export async function preloadEpisode(
 ): Promise<boolean> {
   if (!isNextEpisodePreloadEnabled()) return false;
   if (!videoId || episode <= 0) return false;
+  if (isEpisodeDownloaded(videoId, episode)) return false;
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
 
   const key = `${videoId}:${episode}`;
 

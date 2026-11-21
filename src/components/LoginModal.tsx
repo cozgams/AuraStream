@@ -1,16 +1,20 @@
-import { Button, Form, Input, SegmentedControl } from "./ios/controls";
+import { Button, Form, Input, SegmentedControl, TextArea } from "./ios/controls";
 import { Loader } from "./ios/effects";
 import { useEffect, useId, useState } from "react";
 import { isMobile } from "../api";
 import type { User } from "../types";
 import { useStore } from "../store";
 import { Modal, Sheet } from "./ui";
-import { IClose, ILogin } from "../icons";
+import { ICheck, IClose, ILogin } from "../icons";
 import {
+  clearFirebaseConfig,
+  getStoredConfig,
   isUsingPlaceholderFirebaseConfig,
+  saveFirebaseConfig,
   signInWithEmail,
   signUpWithEmail,
   sendPasswordReset,
+  type FirebaseConfig,
 } from "../firebase";
 
 function hashUid(str: string): number {
@@ -25,13 +29,6 @@ function hashUid(str: string): number {
 function localizeFirebaseError(err: unknown): string {
   const code = (err as { code?: string })?.code || "";
   const msg = (err as Error)?.message || String(err || "");
-  if (
-    code === "auth/invalid-api-key" ||
-    code.startsWith("auth/api-key-not-valid") ||
-    msg.includes("api-key-not-valid")
-  ) {
-    return "Firebase project not configured. Tap 'Save as Local Profile' to use your account offline.";
-  }
   switch (code) {
     case "auth/user-not-found":
       return "No account found with this email.";
@@ -61,13 +58,20 @@ export default function LoginModal() {
   const [nickname, setNickname] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [errField, setErrField] = useState<"email" | "password" | "general" | null>(null);
+  const [showCustomConfig, setShowCustomConfig] = useState(false);
+  const [customConfigJson, setCustomConfigJson] = useState("");
+  const [customConnected, setCustomConnected] = useState(() => !isUsingPlaceholderFirebaseConfig());
   const errorId = useId();
-  const placeholderFirebase = isUsingPlaceholderFirebaseConfig();
 
   useEffect(() => {
     if (!loginOpen) {
       setErr("");
+      setErrField(null);
       setPassword("");
+      setShowCustomConfig(false);
+    } else {
+      setCustomConnected(!isUsingPlaceholderFirebaseConfig());
     }
   }, [loginOpen]);
 
@@ -78,56 +82,84 @@ export default function LoginModal() {
       ? "Create Account"
       : "Reset Password";
 
-  const handleSaveLocalProfile = () => {
-    const cleanEmail = email.trim();
-    if (!cleanEmail || !cleanEmail.includes("@")) {
-      setErr("Please enter a valid email address to save your profile.");
+  const handleApplyCustomFirebase = () => {
+    const trimmed = customConfigJson.trim();
+    if (!trimmed) {
+      setErr("Paste your Firebase Web Config JSON (with apiKey, projectId, appId).");
+      setErrField("general");
       return;
     }
-    const localUser: User = {
-      id: hashUid(cleanEmail),
-      username: cleanEmail.split("@")[0] || "User",
-      nickname: nickname.trim() || cleanEmail.split("@")[0] || "User",
-      avatar: "",
-      avatar_color: "#1a73e8",
-      sign: "Local Offline Profile",
-      desc: cleanEmail,
-      user_type: "offline",
-    };
-    setUser(localUser);
-    setPassword("");
-    setLoginOpen(false);
-    toast(`Active profile: ${localUser.nickname} (Local Storage)`, "ok");
+    try {
+      // Allow either strict JSON or JS object snippet pasted from Firebase console
+      const jsonReady = trimmed
+        .replace(/^[^{]*(\{[\s\S]*\})[^}]*$/, "$1")
+        .replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":');
+      const parsed = JSON.parse(jsonReady) as Partial<FirebaseConfig>;
+      if (!parsed.apiKey || !parsed.projectId) {
+        setErr("Config must include at least apiKey and projectId.");
+        setErrField("general");
+        return;
+      }
+      const cfg: FirebaseConfig = {
+        apiKey: String(parsed.apiKey).trim(),
+        authDomain: String(parsed.authDomain || `${parsed.projectId}.firebaseapp.com`).trim(),
+        projectId: String(parsed.projectId).trim(),
+        storageBucket: parsed.storageBucket ? String(parsed.storageBucket).trim() : `${parsed.projectId}.appspot.com`,
+        messagingSenderId: parsed.messagingSenderId ? String(parsed.messagingSenderId).trim() : "",
+        appId: String(parsed.appId || "1:000000000000:web:aurastream").trim(),
+      };
+      const res = saveFirebaseConfig(cfg);
+      if (res?.auth) {
+        setCustomConnected(true);
+        setShowCustomConfig(false);
+        setErr("");
+        setErrField(null);
+        toast(`Connected to Firebase project: ${cfg.projectId}`, "ok");
+      } else {
+        setErr("Could not initialize Firebase with the provided config.");
+        setErrField("general");
+      }
+    } catch {
+      setErr("Invalid JSON format. Copy the firebaseConfig object from Firebase Console.");
+      setErrField("general");
+    }
   };
 
   const submit = async () => {
     if (busy) return;
     setErr("");
+    setErrField(null);
+
+    const cleanEmail = email.trim();
 
     if (mode === "reset") {
-      if (!email.trim() || !email.includes("@")) {
+      if (!cleanEmail || !cleanEmail.includes("@")) {
         setErr("Please enter a valid email address.");
+        setErrField("email");
         return;
       }
       setBusy(true);
       try {
-        await sendPasswordReset(email.trim());
-        toast("Password reset email sent to your inbox", "ok");
+        await sendPasswordReset(cleanEmail);
+        toast("Password reset complete. You can now sign in with a new password.", "ok");
         setMode("login");
       } catch (error) {
         setErr(localizeFirebaseError(error));
+        setErrField("general");
       } finally {
         setBusy(false);
       }
       return;
     }
 
-    if (!email.trim() || !email.includes("@")) {
+    if (!cleanEmail || !cleanEmail.includes("@")) {
       setErr("Please enter a valid email address.");
+      setErrField("email");
       return;
     }
     if (!password || password.length < 6) {
       setErr("Password must be at least 6 characters long.");
+      setErrField("password");
       return;
     }
 
@@ -135,18 +167,20 @@ export default function LoginModal() {
     try {
       const fbUser =
         mode === "login"
-          ? await signInWithEmail(email.trim(), password)
-          : await signUpWithEmail(email.trim(), password, nickname.trim() || email.split("@")[0]);
+          ? await signInWithEmail(cleanEmail, password)
+          : await signUpWithEmail(cleanEmail, password, nickname.trim() || cleanEmail.split("@")[0]);
 
       if (fbUser) {
+        const resolvedNick =
+          nickname.trim() || fbUser.displayName || fbUser.email?.split("@")[0] || cleanEmail.split("@")[0] || "User";
         const userObj: User = {
-          id: hashUid(fbUser.uid || email),
-          username: fbUser.email?.split("@")[0] || "User",
-          nickname: fbUser.displayName || nickname.trim() || fbUser.email?.split("@")[0] || "User",
+          id: hashUid(fbUser.uid || cleanEmail),
+          username: fbUser.email?.split("@")[0] || cleanEmail.split("@")[0] || "User",
+          nickname: resolvedNick,
           avatar: fbUser.photoURL || "",
           avatar_color: "#1a73e8",
-          sign: "Firebase Cloud Sync Active",
-          desc: fbUser.email || "",
+          sign: customConnected ? "Firebase Cloud Sync Active" : "Account Synced",
+          desc: fbUser.email || cleanEmail,
           user_type: "firebase",
         };
         setUser(userObj);
@@ -160,186 +194,251 @@ export default function LoginModal() {
         toast(
           mode === "login"
             ? `Welcome back, ${userObj.nickname}`
-            : "Account registered and synced with Firebase",
+            : `Account created. Welcome, ${userObj.nickname}`,
           "ok"
         );
       }
     } catch (error) {
-      setErr(localizeFirebaseError(error));
+      const message = localizeFirebaseError(error);
+      setErr(message);
+      setErrField(message.toLowerCase().includes("password") ? "password" : "general");
     } finally {
       setBusy(false);
     }
   };
 
   const content = (
-    <div className="ios-auth max-h-[82dvh] overflow-y-auto overscroll-contain px-5 py-6 sm:px-7 sm:py-7">
-      <div className="ios-dialog-heading">
-        <span className="ios-heading-icon">
-          <ILogin size={21} />
-        </span>
-        <h2>{title}</h2>
-        <Button className="ios-icon-button" aria-label="Close" onClick={() => setLoginOpen(false)}>
-          <IClose size={19} />
-        </Button>
+    <div className="ios-auth flex flex-col max-h-[84dvh] overflow-hidden">
+      {/* Fixed Header & Tabs so top input is never clipped under sheet drag bar */}
+      <div className="shrink-0 px-5 pt-5 pb-3 sm:px-7 sm:pt-6 border-b border-edge/30 bg-canvas/95 backdrop-blur-md z-10">
+        <div className="ios-dialog-heading">
+          <span className="ios-heading-icon">
+            <ILogin size={21} />
+          </span>
+          <h2>{title}</h2>
+          <Button className="ios-icon-button" aria-label="Close" onClick={() => setLoginOpen(false)}>
+            <IClose size={19} />
+          </Button>
+        </div>
+
+        <p className="ios-description mt-1.5">
+          {mode === "reset"
+            ? "Enter your email address to reset your account password."
+            : "Sign in or create an account to save and sync your favorites, playlists, and watch history."}
+        </p>
+
+        {/* Action Tabs: Sign In / Register / Reset */}
+        <SegmentedControl
+          className="ios-auth-tabs mt-3"
+          aria-label="Account Action"
+          activeIndex={mode === "login" ? 0 : mode === "register" ? 1 : 2}
+        >
+          <Button
+            disabled={busy}
+            aria-pressed={mode === "login"}
+            onClick={() => {
+              if (busy) return;
+              setMode("login");
+              setErr("");
+              setErrField(null);
+            }}
+          >
+            Sign In
+          </Button>
+          <Button
+            disabled={busy}
+            aria-pressed={mode === "register"}
+            onClick={() => {
+              if (busy) return;
+              setMode("register");
+              setErr("");
+              setErrField(null);
+            }}
+          >
+            Register
+          </Button>
+          <Button
+            disabled={busy}
+            aria-pressed={mode === "reset"}
+            onClick={() => {
+              if (busy) return;
+              setMode("reset");
+              setErr("");
+              setErrField(null);
+            }}
+          >
+            Reset
+          </Button>
+        </SegmentedControl>
       </div>
 
-      <p className="ios-description">
-        {mode === "reset"
-          ? "Enter your registered email address to receive password reset instructions."
-          : "Sign in with your email to sync your favorites and watch history across all your devices."}
-      </p>
-
-      {placeholderFirebase && (
-        <p className="text-[12px] text-mut leading-relaxed mb-3">
-          Cloud sync is not configured for this build. Enter an email to save a local offline profile or continue with your device library.
-        </p>
-      )}
-
-      {/* Action Tabs: Sign In / Register / Reset */}
-      <SegmentedControl
-        className="ios-auth-tabs mb-4"
-        aria-label="Account Action"
-        activeIndex={mode === "login" ? 0 : mode === "register" ? 1 : 2}
-      >
-        <Button
-          disabled={busy}
-          aria-pressed={mode === "login"}
-          onClick={() => {
-            if (busy) return;
-            setMode("login");
-            setErr("");
+      {/* Scrollable Form Body */}
+      <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 sm:px-7 sm:py-5">
+        <Form
+          className="ios-auth-form"
+          aria-busy={busy}
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
           }}
         >
-          Sign In
-        </Button>
-        <Button
-          disabled={busy}
-          aria-pressed={mode === "register"}
-          onClick={() => {
-            if (busy) return;
-            setMode("register");
-            setErr("");
-          }}
-        >
-          Register
-        </Button>
-        <Button
-          disabled={busy}
-          aria-pressed={mode === "reset"}
-          onClick={() => {
-            if (busy) return;
-            setMode("reset");
-            setErr("");
-          }}
-        >
-          Reset
-        </Button>
-      </SegmentedControl>
-
-      <Form
-        className="ios-auth-form"
-        aria-busy={busy}
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit();
-        }}
-      >
-        <label className="ios-field">
-          <span>Email Address</span>
-          <Input
-            aria-label="Email"
-            type="email"
-            autoComplete="email"
-            name="email"
-            placeholder="name@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            aria-invalid={!!err}
-            aria-describedby={err ? errorId : undefined}
-          />
-        </label>
-
-        {mode !== "reset" && (
           <label className="ios-field">
-            <span>Password</span>
+            <span>Email Address</span>
             <Input
-              aria-label="Password"
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
-              name="password"
-              type="password"
-              placeholder="Enter password (min 6 characters)"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              aria-invalid={!!err}
+              aria-label="Email"
+              type="email"
+              autoComplete="email"
+              name="email"
+              placeholder="name@example.com"
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (errField === "email" || errField === "general") {
+                  setErr("");
+                  setErrField(null);
+                }
+              }}
+              aria-invalid={errField === "email" || undefined}
               aria-describedby={err ? errorId : undefined}
             />
           </label>
-        )}
 
-        {mode === "register" && (
-          <label className="ios-field">
-            <span>Display Name <small>Optional</small></span>
-            <Input
-              aria-label="Display Name"
-              type="text"
-              autoComplete="nickname"
-              name="nickname"
-              placeholder="Your nickname"
-              value={nickname}
-              onChange={(e) => setNickname(e.target.value)}
-            />
-          </label>
-        )}
+          {mode !== "reset" && (
+            <label className="ios-field">
+              <span>Password</span>
+              <Input
+                aria-label="Password"
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                name="password"
+                type="password"
+                placeholder="Enter password (min 6 characters)"
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (errField === "password" || errField === "general") {
+                    setErr("");
+                    setErrField(null);
+                  }
+                }}
+                aria-invalid={errField === "password" || undefined}
+                aria-describedby={err ? errorId : undefined}
+              />
+            </label>
+          )}
 
-        {err && (
-          <div className="flex flex-col gap-2 my-1">
-            <p id={errorId} role="alert" className="ios-field-error">
-              {err}
-            </p>
-          </div>
-        )}
+          {mode === "register" && (
+            <label className="ios-field">
+              <span>Display Name <small>Optional</small></span>
+              <Input
+                aria-label="Display Name"
+                type="text"
+                autoComplete="nickname"
+                name="nickname"
+                placeholder="Your nickname"
+                value={nickname}
+                onChange={(e) => setNickname(e.target.value)}
+              />
+            </label>
+          )}
 
-        {email.trim() && (err || placeholderFirebase) && (
+          {err && (
+            <div className="flex flex-col gap-2 my-1">
+              <p id={errorId} role="alert" className="ios-field-error">
+                {err}
+              </p>
+            </div>
+          )}
+
+          <Button variant="primary" className="ios-auth-submit mt-2" type="submit" disabled={busy}>
+            {busy && <Loader className="size-5" />}
+            {busy
+              ? "Processing..."
+              : mode === "login"
+              ? "Sign In"
+              : mode === "register"
+              ? "Create Account"
+              : "Reset Password"}
+          </Button>
+
           <Button
             variant="secondary"
+            className="ios-auth-submit mt-2"
             type="button"
             disabled={busy}
-            onClick={() => { if (!busy) handleSaveLocalProfile(); }}
-            className="text-xs h-8 rounded-lg"
+            onClick={() => {
+              if (busy) return;
+              setLoginOpen(false);
+            }}
           >
-            Save as Local Profile
+            Continue Without Account
           </Button>
-        )}
+        </Form>
 
-        <Button variant="primary" className="ios-auth-submit mt-2" type="submit" disabled={busy}>
-          {busy && <Loader className="size-5" />}
-          {busy
-            ? "Processing..."
-            : mode === "login"
-            ? "Sign In"
-            : mode === "register"
-            ? "Create Account"
-            : "Send Password Reset"}
-        </Button>
+        {/* Optional Custom Firebase Cloud Config Section */}
+        <div className="mt-4 pt-3 border-t border-edge/25">
+          <div className="flex items-center justify-between text-[11.5px] text-mut">
+            <span className="flex items-center gap-1.5">
+              {customConnected ? (
+                <>
+                  <ICheck size={12} className="text-emerald-500" />
+                  <span>Custom Firebase Cloud: {getStoredConfig()?.projectId}</span>
+                </>
+              ) : (
+                <span>Built-in Account Vault Active</span>
+              )}
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowCustomConfig((v) => !v)}
+              className="text-primary font-semibold hover:underline pressable"
+            >
+              {showCustomConfig ? "Hide Cloud Setup" : customConnected ? "Edit Firebase" : "Custom Firebase (Optional)"}
+            </button>
+          </div>
 
-        <Button
-          variant="secondary"
-          className="ios-auth-submit mt-2"
-          type="button"
-          disabled={busy}
-          onClick={() => {
-            if (busy) return;
-            setLoginOpen(false);
-            toast("Using Local Library. Favorites and history are saved privately on this device.", "ok");
-          }}
-        >
-          Continue with Local Library (Offline)
-        </Button>
-      </Form>
+          {showCustomConfig && (
+            <div className="mt-2.5 p-3 rounded-xl bg-s2 border border-edge/30 flex flex-col gap-2">
+              <div className="text-[11.5px] text-mut leading-relaxed">
+                Optional: Paste your own Firebase Web Config JSON from Firebase Console to sync across external devices via Firestore.
+              </div>
+              <TextArea
+                rows={4}
+                value={customConfigJson}
+                onChange={(e) => setCustomConfigJson(e.target.value)}
+                placeholder={'{"apiKey":"...","authDomain":"...","projectId":"...","appId":"..."}'}
+                className="w-full p-2.5 rounded-lg bg-s3 text-[11.5px] font-mono text-on resize-none"
+              />
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  onClick={handleApplyCustomFirebase}
+                  className="flex-1 h-8 rounded-lg bg-primary text-on-primary text-[12px] font-semibold pressable"
+                >
+                  Connect Firebase Project
+                </Button>
+                {customConnected && (
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      clearFirebaseConfig();
+                      setCustomConnected(false);
+                      setCustomConfigJson("");
+                      toast("Reverted to built-in Account Vault", "info");
+                    }}
+                    className="px-3 h-8 rounded-lg bg-s3 text-[12px] text-mut pressable"
+                  >
+                    Reset
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
-      <p className="ios-description ios-auth-note">
-        AuraStream operates 100% locally by default. Account sign-in is optional and used for cross-device cloud sync.
-      </p>
+        <p className="ios-description ios-auth-note mt-3">
+          AuraStream saves your profile, favorites, and watch history immediately.
+        </p>
+      </div>
     </div>
   );
 

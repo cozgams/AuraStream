@@ -35,6 +35,8 @@ import {
   IUserF,
 } from "../icons";
 import {
+  cancelAllDownloads,
+  getOfflineCoverUrl,
   getOfflineEpisodes,
   deleteOfflineEpisode,
   deleteOfflineEpisodesBatch,
@@ -61,6 +63,7 @@ import {
   type DeviceStorageStats,
   type BatchProgressState,
 } from "../offline/downloadService";
+import { getAndroidPermissionsStatus, type AndroidPermissionsStatus } from "../offline/exportService";
 import BatchDownloadSheet from "../components/BatchDownloadSheet";
 import { formatDramaTag, formatDramaTitle } from "../subtitles/dramaTranslator";
 
@@ -167,26 +170,41 @@ export default function Profile({ wide }: { wide: boolean }) {
   const [detailCache, setDetailCache] = useState<Record<number, Detail>>({});
   const [wifiOnlyDl, setWifiOnlyDl] = useState<boolean>(() => isWifiOnlyDownloadEnabled());
   const [smartDl, setSmartDl] = useState<boolean>(() => isSmartDownloadEnabled());
+  const [androidPerms, setAndroidPerms] = useState<AndroidPermissionsStatus | null>(() => getAndroidPermissionsStatus());
+  const [permBannerDismissed, setPermBannerDismissed] = useState(false);
 
   useEffect(() => {
     const syncConfig = () => {
       setWifiOnlyDl(isWifiOnlyDownloadEnabled());
       setSmartDl(isSmartDownloadEnabled());
     };
+    const refreshPerms = () => setAndroidPerms(getAndroidPermissionsStatus());
+    const onVis = () => {
+      if (document.visibilityState === "visible") refreshPerms();
+    };
     window.addEventListener("aurastream:storage-config-changed", syncConfig);
-    return () => window.removeEventListener("aurastream:storage-config-changed", syncConfig);
+    window.addEventListener("aurastream:app-resumed", refreshPerms);
+    window.addEventListener("aurastream:permissions-changed", refreshPerms);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("aurastream:storage-config-changed", syncConfig);
+      window.removeEventListener("aurastream:app-resumed", refreshPerms);
+      window.removeEventListener("aurastream:permissions-changed", refreshPerms);
+      document.removeEventListener("visibilitychange", onVis);
+    };
   }, []);
 
   const openSeriesBatchDownloader = async (group: DramaGroup) => {
     const cached = detailCache[group.videoId];
     const maxDownloadedEp = group.episodes.reduce((m, e) => Math.max(m, e.episode), 1);
-    let totalEpisodes = cached?.episodes?.length || cached?.episode_count || Math.max(10, maxDownloadedEp + 5);
+    const totalEpisodes = cached?.episodes?.length || cached?.episode_count || Math.max(10, maxDownloadedEp + 5);
     setBatchSheet({
       isOpen: true,
       videoId: group.videoId,
       title: formatDramaTitle(group.title),
       cover: group.cover,
       totalEpisodes,
+      episodeNumbers: cached?.episodes?.map((e) => e.ep_num),
     });
     if (!cached) {
       try {
@@ -195,7 +213,13 @@ export default function Profile({ wide }: { wide: boolean }) {
           setDetailCache((prev) => ({ ...prev, [d.id]: d }));
           const resolvedTotal = d.episodes?.length || d.episode_count || totalEpisodes;
           setBatchSheet((prev) =>
-            prev.isOpen && prev.videoId === group.videoId ? { ...prev, totalEpisodes: resolvedTotal } : prev
+            prev.isOpen && prev.videoId === group.videoId
+              ? {
+                  ...prev,
+                  totalEpisodes: resolvedTotal,
+                  episodeNumbers: d.episodes?.map((e) => e.ep_num),
+                }
+              : prev
           );
         }
       } catch {
@@ -205,15 +229,12 @@ export default function Profile({ wide }: { wide: boolean }) {
   };
 
   useEffect(() => {
+    // Only fetch metadata for online history items; keep Downloads Hub 100% zero-internet unless user taps More Eps
     const histNeeded = history
       .slice(0, 15)
       .filter((h) => !h.cover || !h.title || h.title.startsWith("Drama #"))
       .map((h) => h.id);
-    const dlNeeded =
-      view === "downloads" || view === "seriesDetail"
-        ? Array.from(new Set(downloads.map((d) => d.videoId))).slice(0, 15)
-        : [];
-    const needed = Array.from(new Set([...histNeeded, ...dlNeeded])).filter((id) => !detailCache[id]);
+    const needed = Array.from(new Set(histNeeded)).filter((id) => !detailCache[id]);
 
     if (!needed.length) return;
 
@@ -235,7 +256,7 @@ export default function Profile({ wide }: { wide: boolean }) {
     return () => {
       alive = false;
     };
-  }, [history, downloads, view]);
+  }, [history]);
 
   const [batchSheet, setBatchSheet] = useState<{
     isOpen: boolean;
@@ -243,6 +264,7 @@ export default function Profile({ wide }: { wide: boolean }) {
     title: string;
     cover: string;
     totalEpisodes: number;
+    episodeNumbers?: number[];
   }>({
     isOpen: false,
     videoId: 0,
@@ -465,6 +487,7 @@ export default function Profile({ wide }: { wide: boolean }) {
       videoIds: Array.from(new Set(selectedEpisodes.map((e) => e.videoId))),
       index: 0,
       title: formatDramaTitle(first.title),
+      source: "offline",
       startEp: first.episode,
     });
   };
@@ -1210,15 +1233,62 @@ export default function Profile({ wide }: { wide: boolean }) {
               </div>
             )}
 
-            {/* Active Downloads in Progress */}
-            {activeDownloads.length > 0 && (
-              <div className="flex flex-col gap-2.5 mb-1">
-                <div className="flex items-center justify-between px-0.5">
-                  <div className="text-[12px] font-black text-[#0f172a] dark:text-neutral-100 uppercase tracking-wider flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                    <span>Downloading ({activeDownloads.length})</span>
+            {/* Android Background Permission Banner */}
+            {androidPerms &&
+              !permBannerDismissed &&
+              (!androidPerms.batteryOptimizationIgnored || !androidPerms.notificationsGranted) && (
+                <div className="bg-amber-50/95 dark:bg-amber-950/35 border border-amber-200 dark:border-amber-500/30 rounded-2xl p-3 flex items-center justify-between gap-2.5 shadow-xs">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[12.5px] font-bold text-[#0f172a] dark:text-neutral-100">
+                      Keep Background Downloads Running
+                    </div>
+                    <div className="text-[11px] text-[#64748b] dark:text-neutral-400 leading-snug mt-0.5">
+                      Allow unrestricted battery and notifications so downloads keep running when you leave the app.
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const bridge = window.AuraNativeExport;
+                        if (!androidPerms.notificationsGranted) {
+                          bridge?.requestNotificationPermissionNow?.();
+                        } else if (!androidPerms.batteryOptimizationIgnored) {
+                          bridge?.requestIgnoreBatteryOptimizations?.();
+                        }
+                        window.setTimeout(() => setAndroidPerms(getAndroidPermissionsStatus()), 400);
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-[#1a73e8] text-white text-[11.5px] font-bold pressable"
+                    >
+                      Allow Now
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPermBannerDismissed(true)}
+                      className="w-7 h-7 rounded-full bg-black/5 dark:bg-white/10 text-slate-500 dark:text-neutral-300 flex items-center justify-center pressable"
+                      aria-label="Dismiss permission reminder"
+                    >
+                      <IClose size={11} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+            {/* Active Downloads & Queue */}
+            {activeDownloads.length > 0 && (() => {
+              const downloadingItemsCount = activeDownloads.filter((d) => d.status === "downloading").length;
+              const queuedItemsCount = activeDownloads.filter((d) => d.status === "queued").length;
+              return (
+              <div className="flex flex-col gap-2.5 mb-1">
+                <div className="flex items-center justify-between px-0.5 gap-2">
+                  <div className="text-[12px] font-black text-[#0f172a] dark:text-neutral-100 uppercase tracking-wider flex items-center gap-2 min-w-0">
+                    <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse shrink-0" />
+                    <span className="truncate">
+                      Downloading ({downloadingItemsCount || activeDownloads.length})
+                      {queuedItemsCount > 0 ? ` · ${queuedItemsCount} queued` : ""}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2.5 shrink-0">
                     {activeDownloads.some((d) => d.status === "paused" || d.status === "error") && (
                       <button
                         type="button"
@@ -1228,7 +1298,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                         Resume All
                       </button>
                     )}
-                    {activeDownloads.some((d) => d.status === "downloading") && (
+                    {activeDownloads.some((d) => d.status === "downloading" || d.status === "queued") && (
                       <button
                         type="button"
                         onClick={() => pauseAllDownloads()}
@@ -1237,6 +1307,13 @@ export default function Profile({ wide }: { wide: boolean }) {
                         Pause All
                       </button>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => cancelAllDownloads()}
+                      className="text-[11.5px] font-bold text-red-500 hover:underline pressable"
+                    >
+                      Cancel All
+                    </button>
                   </div>
                 </div>
 
@@ -1260,25 +1337,46 @@ export default function Profile({ wide }: { wide: boolean }) {
                         <div className="text-[14px] font-bold text-[#0f172a] dark:text-neutral-100 truncate leading-tight">
                           {formatDramaTitle(item.title)}
                         </div>
-                        <div className="text-[11px] text-[#64748b] dark:text-neutral-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                          <span>Episode {item.episode}</span>
-                          <span>·</span>
-                          <span className="font-semibold text-blue-600 dark:text-blue-400">
-                            {item.speedFormatted || "Connecting..."}
+                        <div className="text-[11px] text-[#64748b] dark:text-neutral-400 mt-0.5 flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
+                          <span className="shrink-0">Episode {item.episode}</span>
+                          <span className="shrink-0">·</span>
+                          <span
+                            className={`font-semibold truncate ${
+                              item.status === "queued"
+                                ? "text-amber-600 dark:text-amber-400"
+                                : item.status === "paused"
+                                ? "text-slate-500 dark:text-neutral-400"
+                                : item.status === "error"
+                                ? "text-red-500"
+                                : "text-blue-600 dark:text-blue-400"
+                            }`}
+                          >
+                            {item.status === "queued"
+                              ? "Queued"
+                              : item.status === "paused"
+                              ? "Paused"
+                              : item.status === "error"
+                              ? "Failed"
+                              : item.speedFormatted || "Connecting..."}
                           </span>
-                          {item.etaFormatted && item.etaFormatted !== "--" && (
-                            <>
-                              <span>·</span>
-                              <span>ETA {item.etaFormatted}</span>
-                            </>
-                          )}
                         </div>
-                        <div className="text-[10.5px] text-[#94a3b8] mt-0.5 tabular-nums">
-                          {formatBytes(item.downloadedBytes)} / {formatBytes(item.totalBytes)} ({item.progress}%)
+                        <div className="flex items-center justify-between gap-2 text-[10.5px] text-[#94a3b8] mt-0.5 tabular-nums">
+                          <span className="truncate">
+                            {item.status === "queued"
+                              ? "Waiting in background queue"
+                              : item.totalBytes > 0
+                              ? `${formatBytes(item.downloadedBytes)} / ${formatBytes(item.totalBytes)} (${item.progress}%)`
+                              : item.downloadedBytes > 0
+                              ? `${formatBytes(item.downloadedBytes)} (${item.progress}%)`
+                              : "Preparing..."}
+                          </span>
+                          {item.status === "downloading" && item.etaFormatted && item.etaFormatted !== "--" && (
+                            <span className="shrink-0">ETA {item.etaFormatted}</span>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        {item.status === "downloading" ? (
+                        {item.status === "downloading" || item.status === "queued" ? (
                           <button
                             type="button"
                             onClick={() => pauseDownload(item.id)}
@@ -1320,7 +1418,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                     <div className="w-full h-1.5 rounded-full bg-blue-100 dark:bg-blue-950/60 overflow-hidden">
                       <div
                         className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-300"
-                        style={{ width: `${Math.max(2, item.progress)}%` }}
+                        style={{ width: `${item.status === "queued" ? 0 : Math.max(2, item.progress)}%` }}
                       />
                     </div>
                     {item.error && (
@@ -1331,7 +1429,8 @@ export default function Profile({ wide }: { wide: boolean }) {
                   </div>
                 ))}
               </div>
-            )}
+              );
+            })()}
 
             {downloads.length > 0 ? (
               <>
@@ -1503,7 +1602,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                           className="w-14 aspect-[3/4] rounded-xl overflow-hidden shrink-0 shadow-xs border border-black/5 dark:border-white/10 bg-slate-100 dark:bg-neutral-800 cursor-pointer pressable relative p-0 border-0 text-left block"
                         >
                           <img
-                            src={getCoverUrl(group.cover, 200)}
+                            src={getOfflineCoverUrl(group.episodes.find((e) => e.hasLocalCover) || group.episodes[0] || { id: "", cover: group.cover }, 200)}
                             alt=""
                             className="w-full h-full object-cover"
                             loading="lazy"
@@ -1563,6 +1662,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                                   videoIds: [group.videoId],
                                   index: 0,
                                   title: formatDramaTitle(group.title),
+                                  source: "offline",
                                   startEp: group.episodes[0].episode,
                                 });
                               }
@@ -1606,6 +1706,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                                       videoIds: [ep.videoId],
                                       index: 0,
                                       title: formatDramaTitle(ep.title),
+                                      source: "offline",
                                       startEp: ep.episode,
                                     });
                                   }
@@ -1614,7 +1715,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                               >
                                 <div className="w-full aspect-[16/10] rounded-lg overflow-hidden relative border border-black/5 bg-slate-200">
                                   <img
-                                    src={getCoverUrl(group.cover, 160)}
+                                    src={getOfflineCoverUrl(ep, 160)}
                                     alt=""
                                     className="w-full h-full object-cover"
                                     loading="lazy"
@@ -1741,7 +1842,7 @@ export default function Profile({ wide }: { wide: boolean }) {
             <div className="flex items-center gap-3.5 px-0.5">
               <div className="w-16 h-16 rounded-2xl overflow-hidden shrink-0 shadow-md border border-black/5 dark:border-white/10 bg-slate-100 dark:bg-neutral-800">
                 <img
-                  src={getCoverUrl(selectedSeriesGroup.cover, 240)}
+                  src={getOfflineCoverUrl(selectedSeriesGroup.episodes.find((e) => e.hasLocalCover) || selectedSeriesGroup.episodes[0] || { id: "", cover: selectedSeriesGroup.cover }, 240)}
                   alt=""
                   className="w-full h-full object-cover"
                 />
@@ -1779,6 +1880,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                       videoIds: [selectedSeriesGroup.videoId],
                       index: 0,
                       title: formatDramaTitle(selectedSeriesGroup.title),
+                      source: "offline",
                       startEp: displayEpisodes[0].episode,
                     });
                   }
@@ -1857,6 +1959,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                         videoIds: [item.videoId],
                         index: 0,
                         title: formatDramaTitle(item.title),
+                        source: "offline",
                         startEp: item.episode,
                       })
                     }
@@ -1864,7 +1967,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                   >
                     <div className="w-20 aspect-[16/10] rounded-xl overflow-hidden relative border border-black/5 bg-slate-200 shrink-0">
                       <img
-                        src={getCoverUrl(selectedSeriesGroup.cover, 160)}
+                        src={getOfflineCoverUrl(item, 160)}
                         alt=""
                         className="w-full h-full object-cover"
                       />
@@ -2232,6 +2335,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                     videoIds: [selectedSeriesGroup.videoId],
                     index: 0,
                     title: formatDramaTitle(selectedSeriesGroup.title),
+                    source: "offline",
                     startEp: selectedSeriesGroup.episodes[0].episode,
                   });
                 }
@@ -2399,6 +2503,7 @@ export default function Profile({ wide }: { wide: boolean }) {
         title={batchSheet.title}
         cover={batchSheet.cover}
         totalEpisodes={batchSheet.totalEpisodes}
+        episodeNumbers={batchSheet.episodeNumbers}
       />
     </div>
   );

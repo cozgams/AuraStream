@@ -1,6 +1,7 @@
 mod api;
 #[cfg(any(target_os = "macos", target_os = "ios", test))]
 mod apple_proxy;
+mod downloader;
 mod env;
 #[cfg(target_os = "ios")]
 mod ios_layout;
@@ -99,8 +100,12 @@ pub fn run() {
                 // Restore line and diagnostic bindings on startup
                 net::bind_base(&dir);
                 playback_log::bind(&dir);
+                downloader::bind(app.handle().clone(), dir.clone());
                 let state: tauri::State<Api> = app.state();
                 state.session.bind(dir);
+            }
+            if let Ok(cache_dir) = app.path().app_cache_dir() {
+                downloader::bind_cache(cache_dir);
             }
             // Loopback proxy for Linux media playback via GStreamer
             #[cfg(target_os = "linux")]
@@ -274,6 +279,18 @@ pub fn run() {
             api::api_like,
             api::api_collect,
             api::api_follow,
+            downloader::native_download_enqueue,
+            downloader::native_download_pause,
+            downloader::native_download_pause_all,
+            downloader::native_download_resume,
+            downloader::native_download_resume_all,
+            downloader::native_download_cancel,
+            downloader::native_download_cancel_all,
+            downloader::native_download_status,
+            downloader::native_offline_list,
+            downloader::native_offline_delete,
+            downloader::native_offline_clear,
+            downloader::native_offline_prepare_export,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

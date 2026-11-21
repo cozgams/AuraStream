@@ -1,6 +1,7 @@
 import type { AICaptionConfig, SubtitleCue, SubtitleTrack, SubtitleStyleConfig } from "./types";
 import { parseVtt } from "./vttParser";
 import { formatSubtitleText } from "./dramaTranslator";
+import { LOCAL, isLocalMedia } from "../api";
 
 const MEMORY_CACHE = new Map<string, SubtitleTrack>();
 
@@ -22,12 +23,13 @@ const STORAGE_KEYS = {
 };
 
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyleConfig = {
-  color: "white", // Authentic YouTube clean white text
+  color: "white",
   edgeStyle: "drop_shadow",
   font: "sans",
   bgStyle: "translucent",
-  bgOpacity: 78,
-  position: "bottom", // Anchored on the downside
+  bgOpacity: 75,
+  position: "bottom",
+  offsetSec: 0,
 };
 
 export function getSubtitleStyleConfig(): SubtitleStyleConfig {
@@ -37,7 +39,10 @@ export function getSubtitleStyleConfig(): SubtitleStyleConfig {
       return DEFAULT_SUBTITLE_STYLE;
     }
     const parsed = JSON.parse(raw);
-    return { ...DEFAULT_SUBTITLE_STYLE, ...parsed };
+    const offsetSec = Number.isFinite(Number(parsed?.offsetSec))
+      ? Math.max(-5, Math.min(5, Number(parsed.offsetSec)))
+      : 0;
+    return { ...DEFAULT_SUBTITLE_STYLE, ...parsed, offsetSec };
   } catch {
     return DEFAULT_SUBTITLE_STYLE;
   }
@@ -46,7 +51,11 @@ export function getSubtitleStyleConfig(): SubtitleStyleConfig {
 export function setSubtitleStyleConfig(config: Partial<SubtitleStyleConfig>): void {
   try {
     const current = getSubtitleStyleConfig();
-    const updated = { ...current, ...config };
+    const nextOffset =
+      config.offsetSec !== undefined && Number.isFinite(Number(config.offsetSec))
+        ? Math.max(-5, Math.min(5, Math.round(Number(config.offsetSec) * 100) / 100))
+        : current.offsetSec ?? 0;
+    const updated: SubtitleStyleConfig = { ...current, ...config, offsetSec: nextOffset };
     localStorage.setItem(STORAGE_KEYS.STYLE_CONFIG, JSON.stringify(updated));
     window.dispatchEvent(new CustomEvent("aurastream:subtitlestyle-changed", { detail: updated }));
   } catch {
@@ -59,13 +68,17 @@ export function setSubtitleStyleConfig(config: Partial<SubtitleStyleConfig>): vo
  */
 export function getAICaptionConfig(): AICaptionConfig {
   try {
-    const provider = (localStorage.getItem(STORAGE_KEYS.PROVIDER) as AICaptionConfig["provider"]) || "procedural";
+    const rawProvider = localStorage.getItem(STORAGE_KEYS.PROVIDER);
+    const provider: AICaptionConfig["provider"] =
+      rawProvider === "gemini" || rawProvider === "whisper" || rawProvider === "custom"
+        ? rawProvider
+        : "none";
     const geminiKey = localStorage.getItem(STORAGE_KEYS.GEMINI_KEY) || "";
     const whisperKey = localStorage.getItem(STORAGE_KEYS.WHISPER_KEY) || "";
     const customUrl = localStorage.getItem(STORAGE_KEYS.CUSTOM_URL) || "";
     return { provider, geminiKey, whisperKey, customUrl };
   } catch {
-    return { provider: "procedural" };
+    return { provider: "none" };
   }
 }
 
@@ -74,13 +87,24 @@ export function getAICaptionConfig(): AICaptionConfig {
  */
 export function setAICaptionConfig(config: Partial<AICaptionConfig>): void {
   try {
-    if (config.provider) localStorage.setItem(STORAGE_KEYS.PROVIDER, config.provider);
-    if (config.geminiKey !== undefined) localStorage.setItem(STORAGE_KEYS.GEMINI_KEY, config.geminiKey);
-    if (config.whisperKey !== undefined) localStorage.setItem(STORAGE_KEYS.WHISPER_KEY, config.whisperKey);
-    if (config.customUrl !== undefined) localStorage.setItem(STORAGE_KEYS.CUSTOM_URL, config.customUrl);
+    if (config.provider !== undefined) localStorage.setItem(STORAGE_KEYS.PROVIDER, config.provider);
+    if (config.geminiKey !== undefined) localStorage.setItem(STORAGE_KEYS.GEMINI_KEY, config.geminiKey.trim());
+    if (config.whisperKey !== undefined) localStorage.setItem(STORAGE_KEYS.WHISPER_KEY, config.whisperKey.trim());
+    if (config.customUrl !== undefined) localStorage.setItem(STORAGE_KEYS.CUSTOM_URL, config.customUrl.trim());
   } catch {
     // ignore
   }
+}
+
+function isLegacyFakeTrack(rawOrTrack: unknown): boolean {
+  if (typeof rawOrTrack === "string") {
+    return rawOrTrack.includes('"procedural"') || rawOrTrack.includes('"mock"');
+  }
+  if (rawOrTrack && typeof rawOrTrack === "object") {
+    const src = String((rawOrTrack as { source?: string }).source || "");
+    return src === "procedural" || src === "mock";
+  }
+  return false;
 }
 
 // Purge any previously stored fake procedural subtitles from storage
@@ -91,7 +115,7 @@ try {
       if (key.startsWith(STORAGE_KEYS.PREFIX)) {
         try {
           const raw = localStorage.getItem(key);
-          if (raw && (raw.includes("procedural") || raw.includes("mock"))) {
+          if (raw && isLegacyFakeTrack(raw)) {
             localStorage.removeItem(key);
           }
         } catch {
@@ -104,246 +128,67 @@ try {
   // ignore
 }
 
-/**
- * Procedural AI subtitle generator:
- * Generates context-aware, dramatic, timed English dialogue cues
- * tailored to short drama genres (CEO romance, billionaire comeback, rebirth revenge, martial arts).
- * Guarantees every episode has real-time synchronized English closed captions (CC).
- */
-export function generateProceduralCues(rawTitle: string = "", episode: number = 1): SubtitleCue[] {
-  const titleLower = (rawTitle || "").toLowerCase();
-  const epNum = Math.max(1, episode);
-
-  // Determine narrative archetype based on keywords
-  let genre: "ceo" | "warrior" | "rebirth" | "immortal" | "urban" = "urban";
-
-  if (
-    titleLower.includes("ceo") ||
-    titleLower.includes("bride") ||
-    titleLower.includes("heiress") ||
-    titleLower.includes("marriage") ||
-    titleLower.includes("madam") ||
-    titleLower.includes("darling") ||
-    titleLower.includes("sweet") ||
-    titleLower.includes("charming") ||
-    titleLower.includes("fortune") ||
-    titleLower.includes("love")
-  ) {
-    genre = "ceo";
-  } else if (
-    titleLower.includes("war") ||
-    titleLower.includes("dragon") ||
-    titleLower.includes("doctor") ||
-    titleLower.includes("son-in-law") ||
-    titleLower.includes("comeback") ||
-    titleLower.includes("invincible") ||
-    titleLower.includes("master") ||
-    titleLower.includes("tycoon")
-  ) {
-    genre = "warrior";
-  } else if (
-    titleLower.includes("rebirth") ||
-    titleLower.includes("revenge") ||
-    titleLower.includes("second chance") ||
-    titleLower.includes("payback") ||
-    titleLower.includes("strike") ||
-    titleLower.includes("secret")
-  ) {
-    genre = "rebirth";
-  } else if (
-    titleLower.includes("immortal") ||
-    titleLower.includes("cultivation") ||
-    titleLower.includes("sect") ||
-    titleLower.includes("god") ||
-    titleLower.includes("goddess") ||
-    titleLower.includes("divine") ||
-    titleLower.includes("blade")
-  ) {
-    genre = "immortal";
+function persistTrack(track: SubtitleTrack): void {
+  const cacheKey = `${track.videoId}_${track.episode}`;
+  setCachedTrack(cacheKey, track);
+  try {
+    localStorage.setItem(`${STORAGE_KEYS.PREFIX}${cacheKey}`, JSON.stringify(track));
+  } catch {
+    // ignore quota limits
   }
+}
 
-  // Script templates per genre and episode stage
-  const scripts: Record<string, string[][]> = {
-    ceo: [
-      // Act 1: The Inciting Contract / Accidental Encounter
-      [
-        "Wait! Who gave you permission to enter my private suite?!",
-        "Don't move... someone spiked my drink tonight.",
-        "Let go of me! Do you know who I am?!",
-        "You have exactly three minutes to sign this marriage contract.",
-        "Are you insane? We just met five minutes ago!",
-        "Sign it, and ten million dollars will be wired to your account immediately.",
-        "Ten million...? But my family's medical bills...",
-        "Tomorrow morning at eight sharp, meet me at the Civil Affairs Bureau.",
-        "Remember, Mrs. Gu: this marriage is strictly business in public.",
-        "Understood. But what about when we are alone?",
-        "That will depend entirely on your loyalty.",
-        "Just wait... this story is only beginning.",
-      ],
-      // Act 2: The Family Banquet Confrontation
-      [
-        "Look who decided to grace us with her presence!",
-        "Is this the country girl you chose over Miss Lin?",
-        "Mother, she is my lawfully wedded wife now.",
-        "Absurd! An ordinary girl with neither wealth nor background!",
-        "Excuse me, Madam, but love isn't measured in bank accounts.",
-        "How dare you talk back to the matriarch of the Gu family?!",
-        "Silence! Anyone who insults my wife insults the entire corporation.",
-        "CEO Gu... you're really defending her against your own mother?!",
-        "Security, escort anyone causing a scene out of the banquet hall.",
-        "Thank you for standing up for me back there...",
-        "Don't flatter yourself. I was simply protecting my own reputation.",
-        "Then why won't you let go of my hand?",
-      ],
-      // Act 3: The Boardroom Scheme & True Identity
-      [
-        "The board meeting will commence. Who authorized this audit?",
-        "I did. And I found three hundred million missing from the accounts.",
-        "Preposterous! What does a substitute bride know about finance?!",
-        "Take a closer look at the seal on this audit report.",
-        "This... this is the sovereign crest of the International Investment Group?!",
-        "You thought I was just an outcast daughter?",
-        "You're... you're the mysterious chief executive from Wall Street?!",
-        "Every single person who conspired against my husband is dismissed today.",
-        "Gu Chen, you knew about her real identity all along?!",
-        "Of course. My wife has always been the smartest person in the room.",
-        "It's over for you. Hand over the company seals.",
-        "Next episode: The shocking truth about the heir's disappearance!",
-      ],
-    ],
-    warrior: [
-      // Act 1: The Return of the Supreme Commander
-      [
-        "Five long years on the northern frontier... I have finally returned.",
-        "Lord Dragon King! All nine armies await your supreme command!",
-        "Tell them to stand down. I only wish to return to my wife and daughter.",
-        "Look at this useless son-in-law! Still dressed like a common beggar!",
-        "He vanished for five years and didn't send back a single cent!",
-        "Mother, please stop. He just walked through the front door.",
-        "If he cannot pay the five-hundred-thousand hospital fee, throw him out!",
-        "Five hundred thousand? Is that all my family's peace is worth?",
-        "Hahaha! Listen to this deadbeat boast like he's a billionaire!",
-        "Give me ten minutes. The money will arrive in full.",
-        "If it doesn't, you will sign the divorce agreement right now!",
-        "Father... don't leave me and mommy again...",
-      ],
-      // Act 2: Tycoon Kneels in Public
-      [
-        "Time is up, Ye Chen! Where is your so-called fortune?",
-        "Hurry up and sign the divorce papers so she can marry Young Master Zhao!",
-        "Wait! Look outside! A convoy of black armored sedans just arrived!",
-        "Who is that stepping out?! Isn't that the provincial governor?!",
-        "Director Lin of the Provincial Commerce Chamber is here too!",
-        "Where is Master Ye?! Where is the Supreme Commander?!",
-        "Are you talking about this peasant? He's just an unemployed son-in-law!",
-        "How dare you insult the Lord! Kneel down immediately!",
-        "Governor... why are you on your knees before him?!",
-        "Silence, you blind fools! Master Ye holds the sovereign black dragon seal!",
-        "This black card has an unlimited balance. Clear the hospital debt now.",
-        "He's... he's really the legendary Northern God of War?!",
-      ],
-      // Act 3: Crushing the Arrogant Suitor
-      [
-        "Young Master Zhao, your family's conglomerate declared bankruptcy ten seconds ago.",
-        "Impossible! My father is worth tens of billions!",
-        "Check your phone. The international markets have liquidated your holdings.",
-        "Hello, Father?! What happened?! Our family is completely ruined?!",
-        "Ye Chen... what kind of demon are you?!",
-        "I gave your family three chances to show respect. You squandered them all.",
-        "Please spare us, Lord Dragon King! We were blind to your greatness!",
-        "Guards, confiscate his assets and remove him from my sight.",
-        "Ye Chen... is this really who you have been all along?",
-        "To the world, I am the Dragon King. To you, I am only your husband.",
-        "Let us go home. Our daughter is waiting for us.",
-        "Stay tuned for the grand family tournament tomorrow!",
-      ],
-    ],
-    rebirth: [
-      // Act 1: Second Chance at Life
-      [
-        "In my past life, I was naive enough to trust my closest sister...",
-        "They poisoned my tea, stole my inheritance, and pushed me from the balcony.",
-        "When I opened my eyes... I was back ten years ago!",
-        "Young Miss, your stepmother is demanding the keys to the family vault.",
-        "Let her wait. The game is only just beginning this time.",
-        "Sister, why are you staring at me with such chilling eyes?",
-        "Because I already know what powder you concealed inside that teacup.",
-        "What are you talking about?! I would never hurt you!",
-        "Drink it yourself, then. Show everyone your innocent love.",
-        "You... you've changed! You were never this ruthless!",
-        "The gentle girl died in the cold rain ten years ago.",
-        "Every single debt of blood will be repaid tenfold!",
-      ],
-      // Act 2: Exposing the Stepfamily
-      [
-        "Father! Look how rebellious your eldest daughter has become!",
-        "She refuses to yield the corporate shares to her younger brother!",
-        "Those shares were left exclusively to me by my late mother.",
-        "A woman cannot manage the family legacy! Give them to your brother!",
-        "Is that so? Then explain this secret offshore account under your name.",
-        "Where did you get these bank statements?!",
-        "You transferred forty million from mother's trust fund to your mistress!",
-        "Guards, seize those papers! Do not let the press see this!",
-        "Too late. The journalists from Central News are already broadcasting live.",
-        "You ungrateful wretch! You ruined our entire family reputation!",
-        "No, Father. You ruined yourself the day you betrayed my mother.",
-        "Now, watch me take back everything that belongs to me.",
-      ],
-    ],
-    immortal: [
-      // Act 1: The Awakening of the Supreme Lord
-      [
-        "Ten thousand years of slumber... the Heavenly Emperor awakens at last.",
-        "The spiritual veins of this mortal realm are so thin and fragile.",
-        "Junior disciple, fetch the water and sweep the mountain stairs before dusk!",
-        "Little do you know, the very sword on your back was forged by my hands.",
-        "Hahaha! An outer disciple who failed his spiritual test dares speak of heaven?!",
-        "Draw your blade. Let me see how far this sect has fallen in my absence.",
-        "Insolent fool! Take my Thunder Strike!",
-        "A mere flicker of mortal lightning. Disperse!",
-        "What?! He shattered a ninth-tier lightning spell with a single wave?!",
-        "Tell your Grand Elder that the Ancestor has returned to reclaim the throne.",
-        "This golden dragon aura... it cannot be! The Supreme Founder is alive!",
-        "Prepare the grand ascension ceremony! The Nine Heavens will tremble!",
-      ],
-    ],
-    urban: [
-      // Act 1: The Modern Urban Showdown
-      [
-        "Did you honestly believe you could hide this secret forever?",
-        "I told you from day one: do not interfere with my life.",
-        "Your life? You are carrying the legacy of the entire dynasty!",
-        "I don't care about the dynasty. I only care about protecting her.",
-        "She is your greatest weakness! Your enemies will use her to destroy you!",
-        "Then I will annihilate every enemy before they take a single step near her.",
-        "You're risking everything for a girl who doesn't even know your real name!",
-        "She knows who I truly am in my heart. That is all that matters.",
-        "Sir! The rival consortium has launched an aggressive takeover bid!",
-        "Let them try. Deploy the capital reserves from our Swiss accounts.",
-        "We will buy out their entire group before the opening bell tomorrow.",
-        "The battle for the metropolis has officially begun.",
-      ],
-    ],
+function emitTrackUpdated(track: SubtitleTrack): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent("aurastream:subtitle-track-updated", {
+      detail: { videoId: track.videoId, episode: track.episode, track },
+    })
+  );
+}
+
+/**
+ * Imports user-provided .SRT or .VTT text for an episode and makes it active immediately.
+ */
+export function importSubtitleTextForEpisode(
+  videoId: number,
+  episode: number,
+  rawText: string,
+  fileName: string = "subtitles.srt"
+): SubtitleTrack {
+  const cues = parseVtt(rawText);
+  if (cues.length === 0) {
+    throw new Error("No valid subtitle cues found in file. Please choose a valid .srt or .vtt file.");
+  }
+  const track: SubtitleTrack = {
+    videoId,
+    episode,
+    cues,
+    source: "local_import",
+    fileName,
+    generatedAt: Date.now(),
   };
+  persistTrack(track);
+  emitTrackUpdated(track);
+  return track;
+}
 
-  const pool = scripts[genre] || scripts.urban;
-  const scriptIndex = (epNum - 1) % pool.length;
-  const lines = pool[scriptIndex];
-
-  // Duration spacing: spaced evenly across 90-110 seconds
-  const totalCues = lines.length;
-  const step = 90 / totalCues;
-
-  return lines.map((text, idx) => {
-    const start = Math.round((idx * step + 1.2) * 10) / 10;
-    const end = Math.round((start + Math.min(step - 0.6, 4.2)) * 10) / 10;
-    return {
-      id: idx + 1,
-      start,
-      end,
-      en: text,
-      zh: text,
-    };
+/**
+ * Clears an imported or AI-generated subtitle track for an episode.
+ */
+export function removeSubtitleTrackForEpisode(videoId: number, episode: number): void {
+  const cacheKey = `${videoId}_${episode}`;
+  MEMORY_CACHE.delete(cacheKey);
+  try {
+    localStorage.removeItem(`${STORAGE_KEYS.PREFIX}${cacheKey}`);
+  } catch {
+    // ignore
+  }
+  emitTrackUpdated({
+    videoId,
+    episode,
+    cues: [],
+    source: "none",
   });
 }
 
@@ -496,46 +341,263 @@ export async function transcribeWithWhisper(
   }));
 }
 
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const comma = result.indexOf(",");
+      if (comma < 0) {
+        reject(new Error("Failed to encode audio/video payload"));
+        return;
+      }
+      resolve(result.slice(comma + 1));
+    };
+    reader.onerror = () => reject(reader.error || new Error("Failed to read media blob"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function resolveMediaProxyUrl(rawUrl: string): string {
+  if (
+    rawUrl.startsWith(`${LOCAL}/`) ||
+    rawUrl.startsWith("http://127.0.0.1:") ||
+    rawUrl.startsWith("http://hg.localhost/") ||
+    rawUrl.startsWith("hg://localhost/") ||
+    rawUrl.startsWith("blob:")
+  ) {
+    return rawUrl;
+  }
+  return `${LOCAL}/seg?u=${encodeURIComponent(rawUrl)}`;
+}
+
+function resolveRelativeUrl(baseUrl: string, relOrAbs: string): string {
+  if (/^(https?:|blob:|hg:)/i.test(relOrAbs)) return relOrAbs;
+  try {
+    return new URL(relOrAbs, baseUrl).toString();
+  } catch {
+    return relOrAbs;
+  }
+}
+
+function parseExtXMediaSubtitleUri(playlistText: string, playlistBaseUrl: string): string | null {
+  const lines = playlistText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    if (!line.startsWith("#EXT-X-MEDIA:")) continue;
+    const typeMatch = line.match(/TYPE=([^,\s]+)/i);
+    if (!typeMatch || typeMatch[1].toUpperCase() !== "SUBTITLES") continue;
+    const uriMatch = line.match(/URI="([^"]+)"/i);
+    if (uriMatch?.[1]) {
+      return resolveRelativeUrl(playlistBaseUrl, uriMatch[1]);
+    }
+  }
+  return null;
+}
+
+async function fetchHlsSubtitleCues(subtitleUrlOrPlaylistUrl: string): Promise<SubtitleCue[]> {
+  const fetchUrl = resolveMediaProxyUrl(subtitleUrlOrPlaylistUrl);
+  const res = await fetch(fetchUrl, { signal: AbortSignal.timeout(8000) });
+  if (!res.ok) return [];
+  const text = await res.text();
+  if (!text) return [];
+  if (!text.trimStart().startsWith("#EXTM3U")) {
+    return parseVtt(text);
+  }
+  // If subtitle URI itself is a sub-playlist of .vtt segments, fetch first up to 12 VTT segments
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const vttSegments = lines.filter((l) => !l.startsWith("#")).slice(0, 12);
+  const allCues: SubtitleCue[] = [];
+  let seqId = 1;
+  for (const seg of vttSegments) {
+    try {
+      const segUrl = resolveMediaProxyUrl(resolveRelativeUrl(subtitleUrlOrPlaylistUrl, seg));
+      const segRes = await fetch(segUrl, { signal: AbortSignal.timeout(6000) });
+      if (!segRes.ok) continue;
+      const segText = await segRes.text();
+      for (const cue of parseVtt(segText)) {
+        allCues.push({ ...cue, id: seqId++ });
+      }
+    } catch {
+      // continue remaining segments
+    }
+  }
+  return allCues;
+}
+
+async function collectEpisodeMediaForAI(streamUrl: string): Promise<{ blob: Blob; mimeType: string }> {
+  const MAX_BYTES = 12 * 1024 * 1024;
+  const isHls = /\.m3u8(\?|$|#)/i.test(streamUrl) || streamUrl.includes("/hls?u=");
+
+  if (!isHls) {
+    const res = await fetch(resolveMediaProxyUrl(streamUrl), { signal: AbortSignal.timeout(30000) });
+    if (!res.ok) throw new Error(`Failed to fetch media stream (HTTP ${res.status})`);
+    const ab = await res.arrayBuffer();
+    const sliced = ab.byteLength > MAX_BYTES ? ab.slice(0, MAX_BYTES) : ab;
+    const ctype = res.headers.get("content-type") || "video/mp4";
+    return { blob: new Blob([sliced], { type: ctype }), mimeType: ctype };
+  }
+
+  const plUrl = isLocalMedia(streamUrl) || streamUrl.startsWith("blob:")
+    ? streamUrl
+    : `${LOCAL}/hls?u=${encodeURIComponent(streamUrl)}`;
+  const plRes = await fetch(plUrl, { signal: AbortSignal.timeout(15000) });
+  if (!plRes.ok) throw new Error(`Failed to load HLS playlist (HTTP ${plRes.status})`);
+  let playlistText = await plRes.text();
+
+  if (playlistText.includes("#EXT-X-STREAM-INF")) {
+    const lines = playlistText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const variant = lines.find((l) => !l.startsWith("#"));
+    if (!variant) throw new Error("Master playlist has no media variants");
+    const vRes = await fetch(resolveMediaProxyUrl(variant), { signal: AbortSignal.timeout(15000) });
+    if (!vRes.ok) throw new Error(`Failed to load variant playlist (HTTP ${vRes.status})`);
+    playlistText = await vRes.text();
+  }
+
+  const segUrls = playlistText
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#"));
+  if (segUrls.length === 0) throw new Error("No downloadable media segments found");
+
+  const parts: BlobPart[] = [];
+  let totalBytes = 0;
+  for (const segUrl of segUrls) {
+    if (totalBytes >= MAX_BYTES) break;
+    const segRes = await fetch(resolveMediaProxyUrl(segUrl), { signal: AbortSignal.timeout(20000) });
+    if (!segRes.ok) continue;
+    const ab = await segRes.arrayBuffer();
+    if (ab.byteLength > 0) {
+      parts.push(ab);
+      totalBytes += ab.byteLength;
+    }
+  }
+  if (totalBytes === 0) throw new Error("Failed to read media segments for transcription");
+  return { blob: new Blob(parts, { type: "video/mp4" }), mimeType: "video/mp4" };
+}
+
 /**
- * Retrieves subtitles for a video and episode.
- * 1. Checks memory cache.
- * 2. Checks local persistent storage.
- * 3. Tries remote WebVTT if provided.
- * 4. Generates AI automated captions using the configured provider.
+ * Generates real subtitles using the user's configured Gemini or Whisper API key.
+ */
+export async function transcribeEpisodeWithAI(
+  videoId: number,
+  episode: number,
+  streamUrl: string,
+  onStatus?: (msg: string) => void
+): Promise<SubtitleTrack> {
+  if (!streamUrl) {
+    throw new Error("Stream is not ready yet. Wait for video playback to load.");
+  }
+  const config = getAICaptionConfig();
+  const provider =
+    config.provider === "gemini" || config.provider === "whisper"
+      ? config.provider
+      : config.geminiKey
+      ? "gemini"
+      : config.whisperKey
+      ? "whisper"
+      : "none";
+
+  if (provider === "none") {
+    throw new Error("Configure a Gemini or Whisper API key first.");
+  }
+
+  onStatus?.("Fetching episode audio/video...");
+  const { blob, mimeType } = await collectEpisodeMediaForAI(streamUrl);
+
+  let cues: SubtitleCue[] = [];
+  let source: SubtitleTrack["source"] = "ai_gemini";
+
+  if (provider === "gemini") {
+    if (!config.geminiKey) throw new Error("Gemini API Key is required.");
+    onStatus?.("Transcribing & translating with Gemini...");
+    const base64 = await blobToBase64(blob);
+    cues = await transcribeWithGemini(base64, mimeType || "video/mp4", config.geminiKey);
+    source = "ai_gemini";
+  } else {
+    if (!config.whisperKey && !config.customUrl) {
+      throw new Error("OpenAI Whisper API Key is required.");
+    }
+    onStatus?.("Translating speech with Whisper...");
+    cues = await transcribeWithWhisper(blob, config.whisperKey, config.customUrl);
+    source = "ai_whisper";
+  }
+
+  if (!cues.length) {
+    throw new Error("No spoken dialogue detected in episode audio.");
+  }
+
+  const normalizedCues = cues.map((c, idx) => ({
+    ...c,
+    id: c.id || idx + 1,
+    en: formatSubtitleText(c.en || c.zh),
+    zh: c.zh || c.en || "",
+  })).filter((c) => Boolean(c.en));
+
+  if (!normalizedCues.length) {
+    throw new Error("AI transcription returned empty captions.");
+  }
+
+  const track: SubtitleTrack = {
+    videoId,
+    episode,
+    cues: normalizedCues,
+    source,
+    generatedAt: Date.now(),
+  };
+  persistTrack(track);
+  emitTrackUpdated(track);
+  return track;
+}
+
+/**
+ * Retrieves real subtitles for a video and episode.
+ * Never fabricates fake procedural dialogue; returns source="none" when no real track exists.
  */
 export async function getSubtitlesForEpisode(
   videoId: number,
   episode: number,
-  title?: string,
-  remoteVttUrl?: string
+  _title?: string,
+  remoteVttUrl?: string,
+  hlsPlaylistUrl?: string
 ): Promise<SubtitleTrack> {
   const cacheKey = `${videoId}_${episode}`;
 
-  if (MEMORY_CACHE.has(cacheKey)) {
-    return MEMORY_CACHE.get(cacheKey)!;
+  const memHit = MEMORY_CACHE.get(cacheKey);
+  if (memHit) {
+    if (isLegacyFakeTrack(memHit) || !memHit.cues?.length) {
+      MEMORY_CACHE.delete(cacheKey);
+    } else {
+      return memHit;
+    }
   }
 
-  // Check localStorage for previously saved cues
+  // 1. Check persisted real tracks (user-imported .SRT/.VTT or real AI transcripts)
   try {
     const stored = localStorage.getItem(`${STORAGE_KEYS.PREFIX}${cacheKey}`);
     if (stored) {
-      const parsed: SubtitleTrack = JSON.parse(stored);
-      if (parsed.cues && Array.isArray(parsed.cues) && parsed.cues.length > 0) {
-        setCachedTrack(cacheKey, parsed);
-        return parsed;
+      if (isLegacyFakeTrack(stored)) {
+        localStorage.removeItem(`${STORAGE_KEYS.PREFIX}${cacheKey}`);
+      } else {
+        const parsed: SubtitleTrack = JSON.parse(stored);
+        if (parsed.cues && Array.isArray(parsed.cues) && parsed.cues.length > 0 && !isLegacyFakeTrack(parsed)) {
+          setCachedTrack(cacheKey, parsed);
+          return parsed;
+        }
       }
     }
   } catch {
     // ignore parse error
   }
 
-  // Check offline downloads metadata
+  // 2. Check offline downloads metadata (only non-procedural cues)
   try {
     const rawOffline = localStorage.getItem("aurastream_offline_episodes_v1");
     if (rawOffline) {
       const list = JSON.parse(rawOffline);
-      const offlineItem = list.find((it: any) => it.videoId === videoId && it.episode === episode);
-      if (offlineItem?.cues && Array.isArray(offlineItem.cues) && offlineItem.cues.length > 0) {
+      const offlineItem = Array.isArray(list)
+        ? list.find((it: any) => it.videoId === videoId && it.episode === episode)
+        : null;
+      if (offlineItem?.cues && Array.isArray(offlineItem.cues) && offlineItem.cues.length > 0 && !isLegacyFakeTrack(offlineItem)) {
         const track: SubtitleTrack = {
           videoId,
           episode,
@@ -551,42 +613,70 @@ export async function getSubtitlesForEpisode(
     // ignore
   }
 
-  // Try fetching remote WebVTT if provided
+  // 3. Try explicit upstream WebVTT/SRT URL if provided
   if (remoteVttUrl) {
     try {
-      const resp = await fetch(remoteVttUrl, { signal: AbortSignal.timeout(6000) });
-      if (resp.ok) {
-        const text = await resp.text();
-        const cues = parseVtt(text);
-        if (cues.length > 0) {
-          const track: SubtitleTrack = {
-            videoId,
-            episode,
-            cues,
-            source: "upstream_vtt",
-            generatedAt: Date.now(),
-          };
-          setCachedTrack(cacheKey, track);
-          return track;
-        }
+      const cues = await fetchHlsSubtitleCues(remoteVttUrl);
+      if (cues.length > 0) {
+        const track: SubtitleTrack = {
+          videoId,
+          episode,
+          cues,
+          source: "upstream_vtt",
+          generatedAt: Date.now(),
+        };
+        setCachedTrack(cacheKey, track);
+        return track;
       }
     } catch {
-      // fallback to AI generation
+      // continue checking playlist
     }
   }
 
-  // Synchronized context-aware AI subtitles for the drama episode
-  const cues = generateProceduralCues(title || "", episode);
-  const track: SubtitleTrack = {
+  // 4. Inspect HLS master manifest for embedded #EXT-X-MEDIA:TYPE=SUBTITLES track
+  if (hlsPlaylistUrl && (/\.m3u8(\?|$|#)/i.test(hlsPlaylistUrl) || hlsPlaylistUrl.includes("/hls?u="))) {
+    const isLocalPl = isLocalMedia(hlsPlaylistUrl) || hlsPlaylistUrl.startsWith("blob:");
+    if (!isLocalPl && typeof navigator !== "undefined" && navigator.onLine === false) {
+      // Strict zero-internet offline mode: never inspect remote HLS playlists while offline
+    } else {
+      try {
+        const plUrl = isLocalPl
+          ? hlsPlaylistUrl
+          : `${LOCAL}/hls?u=${encodeURIComponent(hlsPlaylistUrl)}`;
+        const plRes = await fetch(plUrl, { signal: AbortSignal.timeout(5000) });
+        if (plRes.ok) {
+          const playlistText = await plRes.text();
+          if (playlistText.includes("TYPE=SUBTITLES")) {
+            const subUri = parseExtXMediaSubtitleUri(playlistText, plUrl);
+            if (subUri) {
+              const cues = await fetchHlsSubtitleCues(subUri);
+              if (cues.length > 0) {
+                const track: SubtitleTrack = {
+                  videoId,
+                  episode,
+                  cues,
+                  source: "upstream_vtt",
+                  generatedAt: Date.now(),
+                };
+                setCachedTrack(cacheKey, track);
+                return track;
+              }
+            }
+          }
+        }
+      } catch {
+        // silent non-blocking check
+      }
+    }
+  }
+
+  // No real subtitle track present — return honest empty track (never fabricate fake captions)
+  return {
     videoId,
     episode,
-    cues,
-    source: "procedural",
-    generatedAt: Date.now(),
+    cues: [],
+    source: "none",
   };
-
-  setCachedTrack(cacheKey, track);
-  return track;
 }
 
 function formatSubtitleTimestamp(rawSec: number, decimalSep: "." | ","): string {

@@ -300,7 +300,9 @@ fn build_client(host: &str, addrs: &[SocketAddr], route: &ProxyRoute) -> Result<
         .referer(false)
         .gzip(true)
         .brotli(true)
-        .pool_idle_timeout(Duration::from_secs(60));
+        .pool_max_idle_per_host(8)
+        .tcp_keepalive(Duration::from_secs(30))
+        .pool_idle_timeout(Duration::from_secs(120));
     if !addrs.is_empty() {
         builder = builder.resolve_to_addrs(host, addrs);
     }
@@ -361,7 +363,7 @@ impl ProxyRoute {
 }
 
 static CLIENT_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-const CLIENT_TTL: Duration = Duration::from_secs(30);
+const CLIENT_TTL: Duration = Duration::from_secs(300);
 type ClientCache = HashMap<String, (Instant, Arc<reqwest::Client>)>;
 static CLIENTS: Lazy<Mutex<ClientCache>> = Lazy::new(|| Mutex::new(HashMap::new()));
 static MEDIA_DNS_ROUTES: Lazy<Mutex<crate::media_dns::Routes>> =

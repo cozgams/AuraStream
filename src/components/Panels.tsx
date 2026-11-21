@@ -122,6 +122,7 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bar
         title={title || `Series #${videoId}`}
         cover={cover || ""}
         totalEpisodes={epCount}
+        episodeNumbers={episodes?.map((e) => e.ep_num)}
       />
     </div>
   );

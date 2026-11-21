@@ -146,9 +146,11 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
 
     const isBlob = src.startsWith("blob:");
     const isHlsBlob = isBlob && (src.includes(".m3u8") || src.includes("type=hls") || src.includes("#.m3u8"));
+    const isOfflineLocal = isBlob || src.includes("/offline/");
+    const isDirectOfflineFile = src.includes("/offline/") && !src.toLowerCase().includes(".m3u8");
     const proxied = isLocalMedia(src) || isBlob;
     const url = isBlob ? src : (proxied ? src : playlist(src));
-    const useHls = (isHlsBlob || !isBlob) && !url.includes("/seg?u=");
+    const useHls = (isHlsBlob || (!isBlob && !isDirectOfflineFile)) && !url.includes("/seg?u=");
     trace("source.load", { engine: useHls && Hls.isSupported() ? "hls.js" : "native", auto_play: autoPlay, resource: mediaResource(src), host: mediaHost(src) });
 
     /* Restore volume and playback speed after HLS attach */
@@ -162,6 +164,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
     applySettings();
 
     if (useHls && Hls.isSupported()) {
+      const fullPreCache = isFullEpisodePreCacheEnabled();
       const hls = new Hls({
         // Disable direct steering URLs
         interstitialsController: undefined,
@@ -178,10 +181,10 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         lowLatencyMode: true,
         maxLoadingDelay: 1,
         startPosition: resume?.time ?? -1,
-        // Turbo Wi-Fi Buffer: Eagerly pre-buffers up to 120s (entire short episode)
-        maxBufferLength: isFullEpisodePreCacheEnabled() ? 120 : 60,
-        maxMaxBufferLength: isFullEpisodePreCacheEnabled() ? 240 : 120,
-        maxBufferSize: isFullEpisodePreCacheEnabled() ? 80 * 1024 * 1024 : 40 * 1024 * 1024,
+        // Turbo Wi-Fi Buffer: Eagerly pre-buffers up to 120s online; standard buffer from local disk
+        maxBufferLength: isOfflineLocal ? 60 : (fullPreCache ? 120 : 60),
+        maxMaxBufferLength: isOfflineLocal ? 120 : (fullPreCache ? 240 : 120),
+        maxBufferSize: fullPreCache && !isOfflineLocal ? 80 * 1024 * 1024 : 40 * 1024 * 1024,
         backBufferLength: 45,
         highBufferWatchdogPeriod: 2,
         maxBufferHole: 0.5,

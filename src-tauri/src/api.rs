@@ -375,16 +375,21 @@ pub async fn check_update() -> Result<Value, String> {
                     .filter_map(|a| {
                         let name = a.get("name").and_then(Value::as_str)?;
                         let url = a.get("browser_download_url").and_then(Value::as_str)?;
-                        Some((name.to_string(), url.to_string()))
+                        let size = a.get("size").and_then(Value::as_u64);
+                        Some((name.to_string(), url.to_string(), size))
                     })
-                    .filter(|(n, _)| asset_rank(n) > 0)
-                    .max_by_key(|(n, _)| asset_rank(n));
+                    .filter(|(n, _, _)| asset_rank(n) > 0)
+                    .max_by_key(|(n, _, _)| asset_rank(n));
+                let resolved_asset = asset
+                    .map(|(name, url, size)| json!({ "name": name, "url": url, "size": size }))
+                    .or_else(|| fallback_android_asset(&latest, &tag));
                 return Ok(json!({
                     "current": current,
                     "latest": latest,
                     "tag": tag,
+                    "arch": std::env::consts::ARCH,
                     "has_update": !latest.is_empty() && is_newer(&latest, &current),
-                    "asset": asset.map(|(name, url)| json!({ "name": name, "url": url })),
+                    "asset": resolved_asset,
                     "url": html,
                     "name": v.get("name").and_then(|x| x.as_str()).unwrap_or(""),
                     "published_at": v.get("published_at").and_then(|x| x.as_str()).unwrap_or(""),
@@ -422,8 +427,9 @@ pub async fn check_update() -> Result<Value, String> {
                     "current": current,
                     "latest": latest,
                     "tag": tag,
+                    "arch": std::env::consts::ARCH,
                     "has_update": !latest.is_empty() && is_newer(&latest, &current),
-                    "asset": Value::Null,
+                    "asset": fallback_android_asset(&latest, &tag),
                     "url": resolved.to_string(),
                     "name": "",
                     "published_at": "",
@@ -438,6 +444,27 @@ pub async fn check_update() -> Result<Value, String> {
     }
 
     Err(format!("GitHub update check failed (HTTP {status})"))
+}
+
+#[cfg(target_os = "android")]
+fn fallback_android_asset(latest: &str, tag: &str) -> Option<Value> {
+    if latest.is_empty() || tag.is_empty() {
+        return None;
+    }
+    let abi = match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        "x86_64" => "x86_64",
+        "arm" => "arm",
+        _ => "arm64",
+    };
+    let name = format!("AuraStream_{latest}_{abi}.apk");
+    let url = format!("https://github.com/{REPO}/releases/download/{tag}/{name}");
+    Some(json!({ "name": name, "url": url, "size": Value::Null }))
+}
+
+#[cfg(not(target_os = "android"))]
+fn fallback_android_asset(_latest: &str, _tag: &str) -> Option<Value> {
+    None
 }
 
 /// Open URL with system browser (http/https only).
@@ -985,27 +1012,37 @@ fn has_play_url(info: &Value) -> bool {
         .is_some_and(|s| !s.trim().is_empty())
 }
 
-#[tauri::command]
-pub async fn api_play(state: State<'_, Api>, id: i64, ep: u32) -> Result<Value, String> {
-    // Prioritize new playback API with legacy fallback.
-    let primary = state
-        .post(
-            &format!("/api/videos/{id}/episodes/{ep}/playback"),
-            Some(json!({})),
-        )
-        .await
-        .map(|mut info| {
-            normalize_play_info(&mut info);
-            info
-        });
+pub async fn resolve_episode_play(
+    origin: &str,
+    token: Option<&str>,
+    id: i64,
+    ep: u32,
+) -> Result<Value, String> {
+    let primary = edge(
+        origin,
+        "POST",
+        &format!("/api/videos/{id}/episodes/{ep}/playback"),
+        Some(json!({})),
+        token,
+    )
+    .await
+    .map(|mut info| {
+        normalize_play_info(&mut info);
+        info
+    });
     if let Ok(info) = &primary {
         if has_play_url(info) {
             return primary;
         }
     }
-    match state
-        .get(&format!("/api/videos/{id}/play?ep={ep}&page_texts=0"))
-        .await
+    match edge(
+        origin,
+        "GET",
+        &format!("/api/videos/{id}/play?ep={ep}&page_texts=0"),
+        None,
+        token,
+    )
+    .await
     {
         Ok(mut legacy) => {
             normalize_play_info(&mut legacy);
@@ -1017,6 +1054,15 @@ pub async fn api_play(state: State<'_, Api>, id: i64, ep: u32) -> Result<Value, 
         }
         Err(_) => primary,
     }
+}
+
+#[tauri::command]
+pub async fn api_play(state: State<'_, Api>, id: i64, ep: u32) -> Result<Value, String> {
+    let origin = base();
+    let token = state.session.token(&origin).filter(|_| {
+        !crate::network_policy::strict_security() || crate::net::trusted_auth_origin(&origin)
+    });
+    resolve_episode_play(&origin, token.as_deref(), id, ep).await
 }
 
 /* ------------------------- Comments / Interactions ------------------------- */

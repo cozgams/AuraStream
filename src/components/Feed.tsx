@@ -21,12 +21,13 @@ import SubtitleSheet from "./SubtitleSheet";
 import ExportSheet from "./ExportSheet";
 import BatchDownloadSheet from "./BatchDownloadSheet";
 import DownloadChoiceSheet from "./DownloadChoiceSheet";
-import type { SubtitleMode } from "../subtitles/types";
+import type { SubtitleMode, SubtitleTrackStatus } from "../subtitles/types";
 import { formatDramaAuthor, formatDramaDesc, formatDramaTag, formatDramaTitle } from "../subtitles/dramaTranslator";
-import { isVoiceDubEnabled, setVoiceDubEnabled, cancelVoiceDub } from "../subtitles/voiceDubService";
 import {
+  ensureOfflineSyncReady,
   isEpisodeDownloaded,
   startEpisodeDownload,
+  getOfflineCoverUrl,
   getOfflinePlaybackUrl,
   getOfflineEpisodes,
   revokeOfflinePlaybackUrls,
@@ -64,6 +65,7 @@ type Props = {
   kind?: "video" | "post";
   active: boolean;
   bottomInset: number;
+  offlineOnly?: boolean;
   onBack?: () => void;
   onNearEnd?: () => void;
   /** Resume playback from history: starting episode and timestamp */
@@ -75,7 +77,7 @@ const RATES = [1, 1.25, 1.5, 2];
 
 const stripHtml = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
 
-export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind = "video", active, bottomInset, onBack, onNearEnd, startEp, startTime }: Props) {
+export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind = "video", active, bottomInset, offlineOnly = false, onBack, onNearEnd, startEp, startTime }: Props) {
   const store = useStore();
   const { isLiked, isFav, toggleLikeLocal, toggleFavLocal, toggleFollowLocal, muted, setMuted, volume, setVolume, toast, addHistory, history, user, setLoginOpen, swipeEp, setSwipeEp, preferHevc, setPreferHevc, t } = store;
   const isDesktop = !isMobile;
@@ -86,6 +88,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [renderIndex, setRenderIndex] = useState(startIndex);
   const [epMap, setEpMap] = useState<Record<number, number>>(() => (startEp ? { [videoIds[startIndex]]: startEp } : {}));
   const [details, setDetails] = useState<Record<number, Detail>>({});
+  const [offlineUrls, setOfflineUrls] = useState<Record<string, string>>({});
   const [playUrls, setPlayUrls] = useState<Record<string, string>>({});
   const [hevcUrls, setHevcUrls] = useState<Record<string, string>>({});
   const [proxyRetry, setProxyRetry] = useState(0);
@@ -147,7 +150,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     if (paused) {
       setIdle(false);
       window.clearTimeout(idleTimer.current);
-      cancelVoiceDub(videoRef.current?.el());
     }
   }, [paused]);
 
@@ -243,14 +245,15 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const historyItem = useMemo(() => history?.find((h) => h.id === curId), [history, curId]);
   const detail = details[curId];
   const curEp = epMap[curId] || 1;
-
-  useEffect(() => {
-    cancelVoiceDub(videoRef.current?.el());
-  }, [curId, curEp]);
   const playKey = `${curId}:${curEp}`;
+  const offlineUrl = offlineUrls[playKey] || "";
   const mainUrl = playUrls[playKey] || "";
   const hevcUrl = hevcUrls[playKey] || "";
-  const playUrl = preferHevc && hevcUrl ? hevcUrl : mainUrl;
+  const playUrl = offlineUrl || (preferHevc && hevcUrl ? hevcUrl : mainUrl);
+  const isPlayingOffline = Boolean(offlineUrl || playUrl.startsWith("blob:") || playUrl.includes("/offline/"));
+  const zeroDataMode = Boolean(
+    offlineOnly || isPlayingOffline || (typeof navigator !== "undefined" && navigator.onLine === false)
+  );
 
   useEffect(() => {
     const retry = () => {
@@ -274,9 +277,13 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     }
   }, [active]);
 
+  const [downloadProgressMap, setDownloadProgressMap] = useState<Map<string, ActiveDownloadProgress>>(new Map());
+  const [isDownloaded, setIsDownloaded] = useState<boolean>(() => isEpisodeDownloaded(curId, curEp));
+  const [offlineRev, setOfflineRev] = useState(0);
   const rawOfflineList = useMemo(() => {
+    void offlineRev;
     return getOfflineEpisodes().filter((e) => e.videoId === curId);
-  }, [curId]);
+  }, [curId, offlineRev]);
 
   const offlineEps = useMemo(() => {
     return rawOfflineList.map((e) => ({
@@ -289,30 +296,22 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
   const episodes = (detail?.episodes && detail.episodes.length > 0) ? detail.episodes : offlineEps;
   const post = posts[curId];
-
-  /* Offline storage state */
-  const [downloadProgressMap, setDownloadProgressMap] = useState<Map<string, ActiveDownloadProgress>>(new Map());
-  const [isDownloaded, setIsDownloaded] = useState<boolean>(() => isEpisodeDownloaded(curId, curEp));
   const [exportModalOpen, setExportModalOpen] = useState<boolean>(false);
   const [targetExportEpisode, setTargetExportEpisode] = useState<number | null>(null);
   const [batchDownloadOpen, setBatchDownloadOpen] = useState<boolean>(false);
+  const [batchPreselectAll, setBatchPreselectAll] = useState<boolean>(false);
   const [downloadChoiceOpen, setDownloadChoiceOpen] = useState<boolean>(false);
   const [sleepTimer, setLocalSleepTimer] = useState<SleepTimerOption>(getSleepTimerOption);
   const [dismissNextEp, setDismissNextEp] = useState<number | null>(null);
-  const [voiceDub, setVoiceDub] = useState<boolean>(() => isVoiceDubEnabled());
+  const [subtitleTrackInfo, setSubtitleTrackInfo] = useState<SubtitleTrackStatus>({
+    hasTrack: false,
+    source: "none",
+    cueCount: 0,
+  });
 
   useEffect(() => {
-    const onDubChange = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail && typeof detail.enabled === "boolean") {
-        setVoiceDub(detail.enabled);
-      } else {
-        setVoiceDub(isVoiceDubEnabled());
-      }
-    };
-    window.addEventListener("aurastream:voice-dub-changed", onDubChange);
-    return () => window.removeEventListener("aurastream:voice-dub-changed", onDubChange);
-  }, []);
+    setSubtitleTrackInfo({ hasTrack: false, source: "none", cueCount: 0 });
+  }, [curId, curEp]);
 
   useEffect(() => {
     setIsDownloaded(isEpisodeDownloaded(curId, curEp));
@@ -320,7 +319,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       setDownloadProgressMap(m);
       setIsDownloaded(isEpisodeDownloaded(curId, curEp));
     });
-    const onDownloadsChanged = () => setIsDownloaded(isEpisodeDownloaded(curId, curEp));
+    const onDownloadsChanged = () => {
+      setIsDownloaded(isEpisodeDownloaded(curId, curEp));
+      setOfflineRev((r) => r + 1);
+    };
     window.addEventListener("aurastream:downloads-changed", onDownloadsChanged);
 
     const unsubSleep = subscribeSleepTimer((rem, opt) => {
@@ -403,28 +405,33 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       lastSaveRef.current = now;
       saveHistory(curEp, t, duration);
     }
-    // Smart Downloads: when watching >= 75% of episode, prefetch & download next episode in background
-    if (duration > 0 && t / duration >= 0.75 && episodes.length > 0) {
-      void checkSmartDownloadNextEpisode(curId, curEp, episodes.length, {
-        title: formatDramaTitle(meta?.title) || `Episode ${curEp}`,
-        cover: posterUrl || meta?.cover || "",
-      });
-    }
-    // Instant Next Episode Preload: warm up next episode's m3u8 and first segments
-    if (t > 3 && episodes.some((e) => e.ep_num === curEp + 1)) {
-      void preloadEpisode(curId, curEp + 1, {
-        preferHevc,
-        title: formatDramaTitle(meta?.title),
-        maxSegments: 5,
-      });
-    }
-    // Instant Next Drama Preload: warm up next drama in feed (m3u8 & first 3 segments)
-    const nextDramaId = videoIds[index + 1];
-    if (t > 3 && nextDramaId && kind === "video") {
-      void preloadEpisode(nextDramaId, 1, {
-        preferHevc,
-        maxSegments: 3,
-      });
+    // Never trigger background downloads or network segment preloading during offline/zero-data playback
+    if (!zeroDataMode) {
+      if (
+        duration > 0 &&
+        t / duration >= 0.75 &&
+        episodes.length > 0 &&
+        !isEpisodeDownloaded(curId, curEp + 1)
+      ) {
+        void checkSmartDownloadNextEpisode(curId, curEp, episodes.length, {
+          title: formatDramaTitle(meta?.title) || `Episode ${curEp}`,
+          cover: posterUrl || meta?.cover || "",
+        });
+      }
+      if (t > 3 && episodes.some((e) => e.ep_num === curEp + 1) && !isEpisodeDownloaded(curId, curEp + 1)) {
+        void preloadEpisode(curId, curEp + 1, {
+          preferHevc,
+          title: formatDramaTitle(meta?.title),
+          maxSegments: 5,
+        });
+      }
+      const nextDramaId = videoIds[index + 1];
+      if (t > 3 && nextDramaId && kind === "video" && !isEpisodeDownloaded(nextDramaId, 1)) {
+        void preloadEpisode(nextDramaId, 1, {
+          preferHevc,
+          maxSegments: 3,
+        });
+      }
     }
   };
 
@@ -480,7 +487,13 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         episodes: (detail?.episodes && detail.episodes.length > 0) ? detail.episodes : offlineEps,
       };
 
-  const posterUrl = cover(meta.cover, 900);
+  const curOfflineEpMeta = rawOfflineList.find((e) => e.episode === curEp) || rawOfflineList[0];
+  const hasLocalPoster = Boolean(curOfflineEpMeta?.storage === "native" && curOfflineEpMeta?.hasLocalCover);
+  const posterUrl = hasLocalPoster
+    ? getOfflineCoverUrl(curOfflineEpMeta, 900)
+    : offlineOnly
+      ? ""
+      : cover(meta.cover, 900);
 
   const saveHistory = useCallback((ep?: number, currentT?: number, currentDur?: number) => {
     if (!curId) return;
@@ -609,10 +622,14 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* Fetch details and prefetch adjacent items */
+  /* Fetch details (skipped in offlineOnly mode; never prefetches adjacent online items while watching offline) */
   useEffect(() => {
+    if (offlineOnly || (typeof navigator !== "undefined" && navigator.onLine === false)) return;
     let alive = true;
-    const need = [videoIds[index], videoIds[index + 1], videoIds[index - 1]].filter(Boolean);
+    const playingOfflineNow = isPlayingOffline || isEpisodeDownloaded(curId, curEp);
+    const need = playingOfflineNow
+      ? [videoIds[index]].filter(Boolean)
+      : [videoIds[index], videoIds[index + 1], videoIds[index - 1]].filter(Boolean);
     need.forEach((id) => {
       if (details[id]) return;
       api.video(id).then((d) => {
@@ -626,11 +643,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [index, videoIds, proxyRetry]);
+  }, [index, videoIds, proxyRetry, offlineOnly, isPlayingOffline]);
 
   /* Fetch post details including video URL */
   useEffect(() => {
-    if (kind !== "post") return;
+    if (kind !== "post" || offlineOnly) return;
     let alive = true;
     [videoIds[index], videoIds[index + 1], videoIds[index - 1]].filter(Boolean).forEach((id) => {
       if (posts[id]) return;
@@ -638,52 +655,67 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, index, videoIds, proxyRetry]);
+  }, [kind, index, videoIds, proxyRetry, offlineOnly]);
 
-  /* Fetch related recommendations */
+  /* Fetch related recommendations (never during offline playback) */
   useEffect(() => {
-    if (!curId || kind !== "video") return;
+    if (!curId || kind !== "video" || zeroDataMode || isEpisodeDownloaded(curId, curEp)) return;
     let alive = true;
     setRelated([]);
     api.related(curId).then((r) => { if (alive) setRelated(r?.items || []); }).catch(() => {});
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [curId, kind]);
+  }, [curId, curEp, kind, zeroDataMode]);
 
-  /* Fetch playback stream info */
+  /* Resolve playback stream URL — strictly prefers local offline downloads with zero internet usage */
   useEffect(() => {
     if (!curId) return;
-    if (playUrls[playKey]) return;
     let alive = true;
 
-    // Check offline downloads first for instant zero-data playback
-    if (isEpisodeDownloaded(curId, curEp)) {
-      getOfflinePlaybackUrl(curId, curEp, "feed-active").then((localUrl) => {
-        if (!alive) return;
-        if (localUrl) {
-          logLine(`[play] id=${curId} ep=${curEp} playing from local offline cache`);
-          tracePlayback("play.resolve", {
-            video_id: curId, episode: curEp, resolved: true, kind: "offline", host: "localhost",
-            status: 200, msg: "Offline storage blob",
-          });
-          setPlayUrls((m) => ({ ...m, [playKey]: localUrl }));
-          saveHistory(curEp);
+    void (async () => {
+      await ensureOfflineSyncReady().catch(() => {});
+      if (!alive) return;
+
+      if (isEpisodeDownloaded(curId, curEp)) {
+        if (offlineUrls[playKey]) return;
+        try {
+          const localUrl = await getOfflinePlaybackUrl(curId, curEp, "feed-active");
+          if (!alive) return;
+          if (localUrl) {
+            logLine(`[play] id=${curId} ep=${curEp} playing from local offline cache`);
+            tracePlayback("play.resolve", {
+              video_id: curId, episode: curEp, resolved: true, kind: "offline", host: "localhost",
+              status: 200, msg: "Offline storage local media",
+            });
+            setOfflineUrls((m) => ({ ...m, [playKey]: localUrl }));
+            setPlayUrls((m) => ({ ...m, [playKey]: localUrl }));
+            setHevcUrls((m) => {
+              if (!m[playKey]) return m;
+              const next = { ...m };
+              delete next[playKey];
+              return next;
+            });
+            saveHistory(curEp);
+            return;
+          }
+        } catch {
+          // fall through to offline error / fallback below
+        }
+        if (offlineOnly || (typeof navigator !== "undefined" && navigator.onLine === false)) {
+          setErr("Offline episode file not found in storage. Please connect to internet to re-download.");
           return;
         }
         fetchOnlineStream(true);
-      }).catch(() => {
-        if (alive) fetchOnlineStream(true);
-      });
-      return () => {
-        alive = false;
-        setPlayUrls((m) => {
-          if (!m[playKey]?.startsWith("blob:")) return m;
-          const next = { ...m };
-          delete next[playKey];
-          return next;
-        });
-      };
-    }
+        return;
+      }
+
+      if (playUrls[playKey]) return;
+      if (offlineOnly) {
+        setErr("This episode has not been downloaded for offline playback.");
+        return;
+      }
+      fetchOnlineStream(false);
+    })();
 
     function fetchOnlineStream(fromOfflineFallback = false) {
       api.play(curId, curEp)
@@ -691,21 +723,17 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           if (!alive) return;
           const streamUrl = info?.streams?.main || info?.video_url;
           const hevcStream = info?.streams?.hevc || info?.video_url_hevc || "";
-          // Log stream diagnostics when streams are missing
-          // Record raw status and msg for troubleshooting
-          // Target stream source for playback engine
           const raw = info as unknown as Record<string, unknown>;
           const streams = (raw.streams ?? {}) as Record<string, unknown>;
-          const kind = streams.main ? "main" : info?.video_url ? "video_url" : streams.hevc ? "hevc" : "-";
+          const streamKind = streams.main ? "main" : info?.video_url ? "video_url" : streams.hevc ? "hevc" : "-";
           let host = "?";
           try { host = new URL(streamUrl || "").host || "?"; } catch { /* empty or invalid url */ }
           logLine(
-            `[play] id=${curId} ep=${curEp} src=${streamUrl ? "y" : "n"} kind=${kind} host=${host}` +
+            `[play] id=${curId} ep=${curEp} src=${streamUrl ? "y" : "n"} kind=${streamKind} host=${host}` +
             (streamUrl ? "" : ` status=${String(raw.status ?? "?")} msg=${String(raw.msg ?? "")}`),
           );
-          // Record stream diagnostics when endpoint returns empty stream
           tracePlayback("play.resolve", {
-            video_id: curId, episode: curEp, resolved: !!streamUrl, kind, host,
+            video_id: curId, episode: curEp, resolved: !!streamUrl, kind: streamKind, host,
             status: raw.status ?? null, msg: String(raw.msg ?? "") || null,
           });
           if (!streamUrl) throw new Error("No playback stream available");
@@ -723,21 +751,34 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         });
     }
 
-    fetchOnlineStream(false);
-
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+      setOfflineUrls((m) => {
+        if (!m[playKey]?.startsWith("blob:")) return m;
+        const next = { ...m };
+        delete next[playKey];
+        return next;
+      });
+      setPlayUrls((m) => {
+        if (!m[playKey]?.startsWith("blob:")) return m;
+        const next = { ...m };
+        delete next[playKey];
+        return next;
+      });
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [curId, curEp, proxyRetry]);
+  }, [curId, curEp, proxyRetry, offlineOnly, offlineRev]);
 
-  /* Episode warmup: pre-fetches next episode playlist for instant transition */
+  /* Episode warmup: strictly skipped in zeroDataMode or for already-downloaded episodes */
   useEffect(() => {
-    if (!curId || kind !== "video") return;
+    if (!curId || kind !== "video" || zeroDataMode || isEpisodeDownloaded(curId, curEp)) return;
     const ep = epMap[curId] || 1;
     const total = episodes.length;
     const want: number[] = [];
     if (ep > 1) want.push(ep - 1);
     if (total === 0 || ep < total) want.push(ep + 1);
     for (const e of want) {
+      if (isEpisodeDownloaded(curId, e)) continue;
       const k = `${curId}:${e}`;
       if (playUrls[k]) continue;
       api.play(curId, e)
@@ -746,7 +787,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           const h = info?.streams?.hevc || info?.video_url_hevc || "";
           if (u) setPlayUrls((m) => ({ ...m, [k]: u }));
           if (h) setHevcUrls((m) => ({ ...m, [k]: h }));
-          if (e === ep + 1) {
+          if (e === ep + 1 && !isEpisodeDownloaded(curId, e)) {
             void preloadEpisode(curId, e, {
               preferHevc,
               title: formatDramaTitle(meta?.title),
@@ -757,9 +798,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         .catch(() => { /* prefetch error ignored */ });
     }
 
-    // Next drama in feed preheat:
+    // Next drama in feed preheat (only if not downloaded):
     const nextDramaId = videoIds[index + 1];
-    if (nextDramaId && kind === "video") {
+    if (nextDramaId && kind === "video" && !isEpisodeDownloaded(nextDramaId, 1)) {
       const nextKey = `${nextDramaId}:1`;
       if (!playUrls[nextKey]) {
         api.play(nextDramaId, 1)
@@ -773,7 +814,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [curId, curEp, episodes.length, index, videoIds, kind]);
+  }, [curId, curEp, episodes.length, index, videoIds, kind, zeroDataMode]);
 
   /* Reset playback state on item/episode change */
   useEffect(() => {
@@ -1482,6 +1523,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     videoId={curId}
                     episode={curEp}
                     title={meta.title}
+                    streamUrl={playUrl}
                     mode={store.subtitleMode}
                     size={store.subtitleSize}
                     playbackClock={playbackClock}
@@ -1490,6 +1532,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     fs={fs}
                     bottomOffset={bottomInset}
                     videoEl={videoRef.current?.el()}
+                    onTrackStatus={setSubtitleTrackInfo}
                   />
 
                   {/* Double-tap Seek & Tap Play/Pause Ripple HUD */}
@@ -1636,17 +1679,28 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         <ICheck size={15} className="text-emerald-400" strokeWidth={2.8} />
                       </div>
                     ) : isDownloadingCurrent ? (
-                      <div className="relative w-[27px] h-[27px] flex items-center justify-center">
-                        <Loader className="w-5 h-5 spinner text-primary" />
-                        <span className="absolute text-[8px] font-bold text-white tabular-nums">
-                          {currentDownload?.progress}%
-                        </span>
+                      <div className="relative w-[28px] h-[28px] flex items-center justify-center">
+                        <svg className="w-[28px] h-[28px] -rotate-90" viewBox="0 0 28 28" aria-hidden="true">
+                          <circle cx="14" cy="14" r="11" fill="rgba(0,0,0,0.45)" stroke="rgba(255,255,255,0.22)" strokeWidth="2.5" />
+                          <circle
+                            cx="14"
+                            cy="14"
+                            r="11"
+                            fill="none"
+                            stroke="var(--p-primary, #60a5fa)"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            strokeDasharray={69.115}
+                            strokeDashoffset={69.115 * (1 - Math.max(0, Math.min(100, currentDownload?.progress ?? 0)) / 100)}
+                          />
+                        </svg>
+                        <IDownload size={12} className="absolute text-white" />
                       </div>
                     ) : (
                       <IDownload size={25} className="hg-ink hg-ov-shadow" />
                     )}
-                    <span className={`text-[11px] font-medium ${isDownloaded ? "text-emerald-400 font-semibold" : "hg-ink-2 hg-ov-shadow"}`}>
-                      {isDownloaded ? "Saved" : isDownloadingCurrent ? `${currentDownload?.progress}%` : "Download"}
+                    <span className={`text-[11px] font-medium tabular-nums ${isDownloaded ? "text-emerald-400 font-semibold" : "hg-ink-2 hg-ov-shadow"}`}>
+                      {isDownloaded ? "Saved" : isDownloadingCurrent ? `${currentDownload?.progress ?? 0}%` : "Download"}
                     </span>
                   </Button>
 
@@ -1754,13 +1808,18 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               <div className="desktop-video-meta">
                 <div className="flex items-center gap-2">
                   <span className="text-[16px] font-bold text-white tsh truncate">@{formatDramaAuthor(meta.author)}</span>
-                  {episodes.length > 0 && (
+                   {episodes.length > 0 && (
                     <span className="shrink-0 px-1.5 py-px rounded-md text-[12px] font-bold text-white"
                       style={{ background: "rgba(255,255,255,.16)" }}>
                       {t("player.episode_of", { cur: curEp, total: episodes.length })}
                     </span>
-                  )}
-                   {hevcUrl && (
+                   )}
+                   {isPlayingOffline && (
+                     <span className="shrink-0 px-1.5 py-px rounded-md text-[11px] font-bold bg-emerald-500/25 border border-emerald-400/40 text-emerald-300">
+                       Offline
+                     </span>
+                   )}
+                   {hevcUrl && !isPlayingOffline && (
                      <Button type="button" aria-pressed={preferHevc}
                        onClick={() => { setPreferHevc(!preferHevc); toast(preferHevc ? t("player.sd") : "HD HEVC", "ok"); }}
                        className={`shrink-0 h-[18px] px-1.5 rounded-md text-[12px] font-bold flex items-center pressable transition-colors ${preferHevc ? "bg-primary text-on-primary" : "text-white border border-white/30"}`}>
@@ -1856,6 +1915,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       className="pointer-events-auto flex items-center gap-0.5 text-[12px] font-medium hg-ink-3 hg-ov-shadow-strong pressable px-2.5 py-1 rounded-full bg-black/40 backdrop-blur-md border border-white/10">
                       {t("common.details")} · {t("player.episode_num", { num: curEp })}<IChevR size={11} />
                     </Button>
+                    {isPlayingOffline && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/35 text-emerald-300 text-[11px] font-bold tracking-tight">
+                        Offline
+                      </span>
+                    )}
                   </div>
                     <div ref={barRef} className="mx-4 mt-2 relative" style={{ height: 14, touchAction: "none" }}
                       onPointerDown={onBarDown} onPointerMove={onBarMove} onPointerUp={onBarUp} onPointerCancel={onBarUp}>
@@ -2333,6 +2397,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
             videoId={curId}
             episode={curEp}
             title={formatDramaTitle(meta?.title)}
+            streamUrl={playUrl}
+            trackInfo={subtitleTrackInfo}
           />
 
           {/* More playback options sheet - Warm Classic Light iOS Theme */}
@@ -2550,7 +2616,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       type="button"
                       onClick={() => {
                         store.setSubtitleMode("en");
-                        toast("Subtitles: English", "ok");
+                        toast(subtitleTrackInfo.hasTrack ? "Captions: On" : "Captions enabled (load .SRT/.VTT in Customize)", "ok");
                       }}
                       className={`py-2 rounded-lg text-[13px] font-bold flex items-center justify-center gap-2 transition-all ${
                         store.subtitleMode === "en"
@@ -2559,7 +2625,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       }`}
                     >
                       <ICaptions size={15} />
-                      <span>English (AI Synced)</span>
+                      <span>Captions On</span>
                     </button>
                     <button
                       type="button"
@@ -2575,52 +2641,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     >
                       <span>Off</span>
                     </button>
-                  </div>
-                </div>
-
-                {/* 3b. English Voice Dubbing Prototype */}
-                <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-s2 border border-border">
-                  <div className="flex items-center justify-between">
-                    <div className="flex flex-col">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[12px] font-bold text-on">English Voice Dubbing</span>
-                        <span className="text-[8.5px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400">Beta</span>
-                      </div>
-                      <span className="text-[10px] text-mut mt-0.5">Spoken English dialogue synced with scenes</span>
-                    </div>
-                    <div className="flex items-center gap-1 bg-s3 p-0.5 rounded-lg border border-border">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setVoiceDub(true);
-                          setVoiceDubEnabled(true);
-                          toast("English Voice Dubbing Prototype enabled", "ok");
-                        }}
-                        className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all ${
-                          voiceDub
-                            ? "bg-white dark:bg-neutral-800 text-on shadow-xs border border-black/5 dark:border-white/15"
-                            : "text-mut hover:text-on"
-                        }`}
-                      >
-                        On
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setVoiceDub(false);
-                          setVoiceDubEnabled(false);
-                          cancelVoiceDub(videoRef.current?.el());
-                          toast("Voice Dubbing disabled", "info");
-                        }}
-                        className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all ${
-                          !voiceDub
-                            ? "bg-white dark:bg-neutral-800 text-on shadow-xs border border-black/5 dark:border-white/15"
-                            : "text-mut hover:text-on"
-                        }`}
-                      >
-                        Off
-                      </button>
-                    </div>
                   </div>
                 </div>
 
@@ -2769,7 +2789,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         </>
       )}
       </div>
-      {!isDesktop && !controlsLocked && active && (!fs || !idle) && !panel && (
+      {!isDesktop && !controlsLocked && active && (!fs || !idle) && !clean && !panel && (
         <div className={`absolute z-40 flex items-center gap-1.5 ${fs ? "" : "right-3"}`}
           style={{
             top: rotated ? 12 : "calc(max(var(--sat, 0px), 36px) + 8px)",
@@ -2778,9 +2798,13 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           {!fs && !clean && (
             <Button
               onClick={() => {
+                if (!subtitleTrackInfo.hasTrack) {
+                  setPanel("captions");
+                  return;
+                }
                 if (store.subtitleMode === "off") {
                   store.setSubtitleMode("en");
-                  toast("Captions: English enabled (Tap again to customize)", "info");
+                  toast("Captions enabled (Tap again to customize)", "info");
                 } else {
                   setPanel("captions");
                 }
@@ -2790,13 +2814,15 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 setPanel("captions");
               }}
               aria-label={t("captions.title")}
-              title="Captions (Tap to customize)"
+              title={subtitleTrackInfo.hasTrack ? "Captions (Tap to customize)" : "No embedded captions (Tap to load .SRT/.VTT)"}
               className={`hg-chip w-9 h-9 rounded-full flex items-center justify-center relative pressable elev-1 ${
-                store.subtitleMode === "en" ? "text-white bg-black/60 border border-white/20" : "text-white/80"
+                store.subtitleMode === "en" && subtitleTrackInfo.hasTrack
+                  ? "text-white bg-black/60 border border-white/20"
+                  : "text-white/80"
               }`}
             >
               <ICaptions size={17} />
-              {store.subtitleMode === "en" && (
+              {store.subtitleMode === "en" && subtitleTrackInfo.hasTrack && (
                 <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-400 ring-1 ring-black/40" />
               )}
             </Button>
@@ -2815,12 +2841,29 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           )}
         </div>
       )}
+      {(() => {
+        const resolvedTotalEpisodes = Math.max(
+          episodes.length,
+          detail?.episodes?.length || 0,
+          detail?.episode_count || 0,
+          detail?.total_episodes || 0,
+          cards[curId]?.episode_count || 0,
+          cards[curId]?.total_episodes || 0,
+          historyItem?.episode_count || 0,
+          meta.episodes?.length || 0,
+          1
+        );
+        const resolvedEpisodeNumbers = episodes.length >= resolvedTotalEpisodes
+          ? episodes.map((e) => e.ep_num)
+          : Array.from({ length: resolvedTotalEpisodes }, (_, idx) => idx + 1);
+        return (
+          <>
       <DownloadChoiceSheet
         isOpen={downloadChoiceOpen}
         onClose={() => setDownloadChoiceOpen(false)}
         videoId={curId}
         currentEpisode={curEp}
-        totalEpisodes={episodes.length || detail?.episodes?.length || detail?.episode_count || detail?.total_episodes || meta.episodes?.length || 10}
+        totalEpisodes={resolvedTotalEpisodes}
         title={formatDramaTitle(meta?.title) || formatDramaTitle(detail?.title) || formatDramaTitle(title) || `Series #${curId}`}
         coverUrl={meta.cover || ""}
         isDownloaded={isDownloaded}
@@ -2848,7 +2891,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
             toast("Waiting for stream URL...", "info");
             return;
           }
-          toast(`Downloading Ep. ${epToDownload} for offline...`, "info");
+          toast(`Downloading Ep. ${epToDownload} in background...`, "info");
           try {
             await startEpisodeDownload(
               curId,
@@ -2860,12 +2903,14 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               prefQuality,
               isHevc
             );
-            toast("Downloaded! Ready for offline viewing", "ok");
           } catch (e) {
             toast((e as Error).message || "Download failed", "info");
           }
         }}
-        onOpenBatchDownload={() => setBatchDownloadOpen(true)}
+        onOpenBatchDownload={() => {
+          setBatchPreselectAll(true);
+          setBatchDownloadOpen(true);
+        }}
         onOpenExport={(targetEp?: number) => {
           setTargetExportEpisode(targetEp || curEp);
           setExportModalOpen(true);
@@ -2883,12 +2928,20 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       />
       <BatchDownloadSheet
         isOpen={batchDownloadOpen}
-        onClose={() => setBatchDownloadOpen(false)}
+        onClose={() => {
+          setBatchDownloadOpen(false);
+          setBatchPreselectAll(false);
+        }}
         videoId={curId}
         title={formatDramaTitle(meta?.title) || formatDramaTitle(detail?.title) || formatDramaTitle(title) || `Series #${curId}`}
         cover={meta.cover || ""}
-        totalEpisodes={episodes.length || detail?.episodes?.length || detail?.episode_count || detail?.total_episodes || meta.episodes?.length || 10}
+        totalEpisodes={resolvedTotalEpisodes}
+        episodeNumbers={resolvedEpisodeNumbers}
+        preselectAll={batchPreselectAll}
       />
+          </>
+        );
+      })()}
       <LinePicker open={lineOpen} onClose={() => setLineOpen(false)} />
       {controlsLocked && <PlaybackLock active={active} onUnlock={() => { setControlsLocked(false); wake(); }} />}
     </div>
