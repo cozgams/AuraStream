@@ -1268,22 +1268,15 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
   useEffect(() => {
     const onVisibility = () => {
-      const bridge = (window as any).AuraNativeExport;
       if (document.visibilityState === "hidden" && !inPip) {
         // Record whether playback was active or waiting to load before exiting to background
         wasPlayingBeforeHiddenRef.current = !paused || waiting;
-        try {
-          bridge?.setDownloadActive?.(true);
-        } catch {}
         // Allow the video to keep buffering the full episode from the background!
         // Mute video audio so sound doesn't blast when in background/other apps
         if (videoRef.current) {
           videoRef.current.mute(true);
         }
       } else if (document.visibilityState === "visible") {
-        try {
-          bridge?.setDownloadActive?.(false);
-        } catch {}
         // Restore user's original muted preference
         if (videoRef.current) {
           videoRef.current.mute(muted);
@@ -1301,9 +1294,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
-      try {
-        (window as any).AuraNativeExport?.setDownloadActive?.(false);
-      } catch {}
     };
   }, [inPip, waiting, paused, muted]);
 

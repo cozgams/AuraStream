@@ -105,8 +105,21 @@ function persistActiveDownloads() {
   }
 }
 
+function syncNativeDownloadCount() {
+  if (typeof window === "undefined") return;
+  const bridge = (window as any).AuraNativeExport;
+  if (!bridge) return;
+  const activeCount = Array.from(activeProgress.values()).filter((p) => p.status === "downloading").length;
+  if (typeof bridge.setDownloadActiveCount === "function") {
+    bridge.setDownloadActiveCount(activeCount);
+  } else if (typeof bridge.setDownloadActive === "function") {
+    bridge.setDownloadActive(activeCount > 0);
+  }
+}
+
 function notifyProgress() {
   persistActiveDownloads();
+  syncNativeDownloadCount();
   for (const listener of progressListeners) {
     try {
       listener(new Map(activeProgress));
@@ -284,6 +297,10 @@ if (typeof window !== "undefined") {
   });
   window.addEventListener("focus", () => {
     void syncOfflineEpisodesFromIndexedDB();
+  });
+  window.addEventListener("online", () => {
+    void syncOfflineEpisodesFromIndexedDB();
+    void resumeAllDownloads();
   });
 }
 
@@ -813,7 +830,7 @@ async function fetchSegmentData(
   }
 
   let lastError: any = null;
-  const maxAttempts = 3;
+  const maxAttempts = 5;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (signal?.aborted) throw new Error("aborted");
@@ -821,7 +838,7 @@ async function fetchSegmentData(
     const timeoutCtrl = new AbortController();
     const timeoutTimer = setTimeout(() => {
       timeoutCtrl.abort("timeout");
-    }, 45000);
+    }, 25000);
 
     let onAbort: (() => void) | null = null;
     if (signal) {
@@ -831,40 +848,19 @@ async function fetchSegmentData(
 
     try {
       const res = await fetch(targetUrl, { signal: timeoutCtrl.signal });
-      clearTimeout(timeoutTimer);
-      if (onAbort && signal) signal.removeEventListener("abort", onAbort);
 
       if (!res.ok) {
+        clearTimeout(timeoutTimer);
+        if (onAbort && signal) signal.removeEventListener("abort", onAbort);
         throw new Error(`HTTP ${res.status}`);
       }
 
-      if (res.body && typeof res.body.getReader === "function") {
-        const reader = res.body.getReader();
-        const chunks: Uint8Array[] = [];
-        let totalBytes = 0;
-        while (true) {
-          if (signal?.aborted) {
-            void reader.cancel();
-            throw new Error("aborted");
-          }
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value && value.byteLength > 0) {
-            chunks.push(value);
-            totalBytes += value.byteLength;
-            if (onChunk) onChunk(value.byteLength);
-          }
-        }
-        const merged = new Uint8Array(totalBytes);
-        let offset = 0;
-        for (const chunk of chunks) {
-          merged.set(chunk, offset);
-          offset += chunk.byteLength;
-        }
-        return merged.buffer;
-      }
-
+      // Segments are individual chunks (0.5 - 2MB). Using res.arrayBuffer() reads directly
+      // from the native WebResourceResponse bridge without ReadableStream pipeline stalls.
       const buf = await res.arrayBuffer();
+      clearTimeout(timeoutTimer);
+      if (onAbort && signal) signal.removeEventListener("abort", onAbort);
+
       if (onChunk && buf.byteLength > 0) {
         onChunk(buf.byteLength);
       }
@@ -877,7 +873,8 @@ async function fetchSegmentData(
       }
       lastError = err;
       if (attempt + 1 < maxAttempts) {
-        await new Promise((r) => setTimeout(r, 350 * (attempt + 1)));
+        const backoffMs = Math.min(3000, 300 * Math.pow(1.6, attempt));
+        await new Promise((r) => setTimeout(r, backoffMs));
       }
     }
   }
@@ -911,6 +908,21 @@ export async function startEpisodeDownload(
   // Guard battery on Android
   if (await isLowBattery()) {
     throw new Error("Battery is low (< 20%). Connect charger to download.");
+  }
+
+  // Guard storage space on device (ensure at least 120 MB free)
+  try {
+    if (typeof window !== "undefined" && typeof (window as any).AuraNativeExport?.getStorageInfo === "function") {
+      const raw = (window as any).AuraNativeExport.getStorageInfo();
+      const parsed = JSON.parse(raw);
+      if (parsed.primaryFreeBytes && parsed.primaryFreeBytes < 120 * 1024 * 1024) {
+        throw new Error("Device storage is critically low (< 120 MB free). Please free space before downloading.");
+      }
+    }
+  } catch (storageErr: any) {
+    if (storageErr?.message?.includes("Device storage is critically low")) {
+      throw storageErr;
+    }
   }
 
   // Cancel any existing controller for this item
@@ -1207,53 +1219,34 @@ export async function startEpisodeDownload(
         throw new Error(`Failed to download stream: HTTP ${response.status}`);
       }
 
-      const contentLength = Number(response.headers.get("content-length")) || 0;
       mime = response.headers.get("content-type") || "video/mp4";
-      const reader = response.body?.getReader();
+      const buf = await response.arrayBuffer();
+      chunks.push(new Uint8Array(buf));
+      receivedBytes = buf.byteLength;
 
-      if (reader) {
-        while (true) {
-          if (controller.signal.aborted) {
-            void reader.cancel();
-            return;
-          }
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value) {
-            chunks.push(value);
-            receivedBytes += value.length;
-            const pct = contentLength ? Math.min(99, Math.round((receivedBytes / contentLength) * 100)) : 50;
+      const { speedBytesPerSec, speedFormatted, etaSeconds, etaFormatted } = computeSpeedAndEta(
+        receivedBytes,
+        receivedBytes
+      );
 
-            const { speedBytesPerSec, speedFormatted, etaSeconds, etaFormatted } = computeSpeedAndEta(
-              receivedBytes,
-              contentLength || receivedBytes
-            );
-
-            activeProgress.set(id, {
-              id,
-              videoId,
-              episode,
-              title,
-              cover,
-              progress: pct,
-              downloadedBytes: receivedBytes,
-              totalBytes: contentLength || receivedBytes,
-              speedBytesPerSec,
-              speedFormatted,
-              etaSeconds,
-              etaFormatted,
-              status: "downloading",
-              streamUrl,
-            });
-            notifyProgress();
-            maybeNotifyNative(pct, speedFormatted, receivedBytes, contentLength || receivedBytes);
-          }
-        }
-      } else {
-        const blob = await response.blob();
-        chunks.push(new Uint8Array(await blob.arrayBuffer()));
-        receivedBytes = blob.size;
-      }
+      activeProgress.set(id, {
+        id,
+        videoId,
+        episode,
+        title,
+        cover,
+        progress: 99,
+        downloadedBytes: receivedBytes,
+        totalBytes: receivedBytes,
+        speedBytesPerSec,
+        speedFormatted,
+        etaSeconds,
+        etaFormatted,
+        status: "downloading",
+        streamUrl,
+      });
+      notifyProgress();
+      maybeNotifyNative(99, speedFormatted, receivedBytes, receivedBytes);
     }
 
     if (controller.signal.aborted) return;
@@ -1684,24 +1677,37 @@ export async function executeBatchDownload(
     batchState.currentEpisode = ep;
     notifyBatchProgress();
 
-    try {
-      const info = await api.play(videoId, ep);
-      const streamRes = resolveStreamUrlForQuality(info, qualityPreference);
-      if (!streamRes?.url) throw new Error("No stream URL");
+    let downloaded = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (batchCancelled) break;
+      try {
+        const info = await api.play(videoId, ep);
+        const streamRes = resolveStreamUrlForQuality(info, qualityPreference);
+        if (!streamRes?.url) throw new Error("No stream URL");
 
-      await startEpisodeDownload(
-        videoId,
-        ep,
-        title,
-        cover,
-        streamRes.url,
-        forceAllowCellular,
-        streamRes.quality,
-        streamRes.isHevc
-      );
-      success++;
-      batchState.completed = success;
-    } catch {
+        await startEpisodeDownload(
+          videoId,
+          ep,
+          title,
+          cover,
+          streamRes.url,
+          forceAllowCellular,
+          streamRes.quality,
+          streamRes.isHevc
+        );
+        downloaded = true;
+        success++;
+        batchState.completed = success;
+        break;
+      } catch (epErr) {
+        if (attempt === 0 && !batchCancelled) {
+          logLine(`[batch] retrying episode ${ep} once after pause`);
+          await new Promise((r) => setTimeout(r, 1200));
+        }
+      }
+    }
+
+    if (!downloaded && !batchCancelled) {
       failed++;
       batchState.failedCount = failed;
     }

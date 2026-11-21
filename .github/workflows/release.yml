@@ -93,6 +93,9 @@ jobs:
       - name: Generate Android project
         run: pnpm tauri android init --ci
 
+      - name: Sync Android source files and permissions
+        run: node scripts/sync-android-src.mjs
+
       - name: Patch Android performance flags (largeHeap & hardwareAccelerated)
         run: |
           MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
