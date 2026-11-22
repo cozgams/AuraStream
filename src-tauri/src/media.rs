@@ -806,7 +806,18 @@ async fn handle_offline_asset(path: &str, origin: &str, range: Option<&str>, hea
             || lower.ends_with(".webp");
 
         if is_playlist || is_image {
-            let Ok(bytes) = std::fs::read(&file_path) else {
+            let actual_path = if is_playlist && !file_path.exists() {
+                // If index.m3u8 is requested but download was saved as video.mp4
+                let mp4_fallback = file_path.with_file_name("video.mp4");
+                if mp4_fallback.exists() {
+                    return serve_offline_binary_file(&mp4_fallback, "video/mp4", range.as_deref(), head_only);
+                }
+                file_path
+            } else {
+                file_path
+            };
+
+            let Ok(bytes) = std::fs::read(&actual_path) else {
                 return respond(404, "text/plain", b"offline file not found".to_vec(), "no-store");
             };
             let resp = if is_playlist {
@@ -830,6 +841,30 @@ async fn handle_offline_asset(path: &str, origin: &str, range: Option<&str>, hea
             return ranged;
         }
 
+        let actual_path = if (lower.ends_with(".mp4") || lower.ends_with(".m4s")) && !file_path.exists() {
+            // If video.mp4 was requested but download is structured HLS
+            let m3u8_fallback = file_path.with_file_name("index.m3u8");
+            if m3u8_fallback.exists() {
+                if let Ok(bytes) = std::fs::read(&m3u8_fallback) {
+                    let text = std::str::from_utf8(&bytes).unwrap_or("");
+                    let resp = respond(
+                        200,
+                        "application/vnd.apple.mpegurl",
+                        rewrite_offline_playlist(&id, text, &origin).into_bytes(),
+                        "no-store",
+                    );
+                    let mut ranged = apply_byte_range(resp, range.as_deref());
+                    if head_only {
+                        ranged.body_mut().clear();
+                    }
+                    return ranged;
+                }
+            }
+            file_path
+        } else {
+            file_path
+        };
+
         let ctype = if lower.ends_with(".ts") {
             "video/mp2t"
         } else if lower.ends_with(".mp4") || lower.ends_with(".m4s") {
@@ -837,7 +872,7 @@ async fn handle_offline_asset(path: &str, origin: &str, range: Option<&str>, hea
         } else {
             "application/octet-stream"
         };
-        serve_offline_binary_file(&file_path, ctype, range.as_deref(), head_only)
+        serve_offline_binary_file(&actual_path, ctype, range.as_deref(), head_only)
     })
     .await
     .unwrap_or_else(|_| respond(500, "text/plain", b"offline worker failed".to_vec(), "no-store"))

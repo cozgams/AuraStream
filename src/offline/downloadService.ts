@@ -2932,6 +2932,7 @@ export async function getDetailedStorageStats(): Promise<DeviceStorageStats> {
   const offlineFormatted = formatBytes(offlineBytes);
 
   let nativeFreeBytes = 0;
+  let nativeTotalBytes = 0;
   const bridge = getNativeBridge();
   if (bridge && typeof bridge.getStorageInfo === "function") {
     try {
@@ -2940,15 +2941,18 @@ export async function getDetailedStorageStats(): Promise<DeviceStorageStats> {
       if (parsed.primaryFreeBytes && parsed.primaryFreeBytes > 0) {
         nativeFreeBytes = parsed.primaryFreeBytes;
       }
+      if (parsed.primaryTotalBytes && parsed.primaryTotalBytes > 0) {
+        nativeTotalBytes = parsed.primaryTotalBytes;
+      }
     } catch {
       // ignore
     }
   }
 
-  let quotaBytes: number | null = null;
+  let quotaBytes: number | null = nativeTotalBytes > 0 ? nativeTotalBytes : null;
   let usageBytes = offlineBytes;
 
-  if (typeof navigator !== "undefined" && navigator.storage && navigator.storage.estimate) {
+  if (!quotaBytes && typeof navigator !== "undefined" && navigator.storage && navigator.storage.estimate) {
     try {
       const est = await navigator.storage.estimate();
       if (est.quota && est.quota > 0) {
@@ -2967,13 +2971,15 @@ export async function getDetailedStorageStats(): Promise<DeviceStorageStats> {
       : null;
 
   const percentUsed: number | null =
-    nativeFreeBytes > 0
-      ? offlineBytes + nativeFreeBytes > 0
-        ? Math.min(100, Math.round((offlineBytes / (offlineBytes + nativeFreeBytes)) * 100))
-        : 0
-      : quotaBytes != null && quotaBytes > 0
-        ? Math.min(100, Math.round((usageBytes / quotaBytes) * 100))
-        : null;
+    nativeTotalBytes > 0
+      ? Math.min(100, Math.max(0, Math.round(((nativeTotalBytes - nativeFreeBytes) / nativeTotalBytes) * 100)))
+      : nativeFreeBytes > 0
+        ? offlineBytes + nativeFreeBytes > 0
+          ? Math.min(100, Math.round((offlineBytes / (offlineBytes + nativeFreeBytes)) * 100))
+          : 0
+        : quotaBytes != null && quotaBytes > 0
+          ? Math.min(100, Math.round((usageBytes / quotaBytes) * 100))
+          : null;
 
   return {
     offlineCount: list.length,

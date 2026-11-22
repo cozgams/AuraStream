@@ -28,6 +28,7 @@ import {
   ensureOfflineSyncReady,
   isEpisodeDownloaded,
   startEpisodeDownload,
+  deleteOfflineEpisode,
   getOfflineCoverUrl,
   getOfflinePlaybackUrl,
   getOfflineEpisodes,
@@ -216,14 +217,18 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   /* Scrub bar drag */
   const barRef = useRef<HTMLDivElement>(null);
   const barScrub = useRef(false);
+  const barWasPlayingRef = useRef(false);
   const [barPct, setBarPct] = useState<number | null>(null);
   const gesture = useRef<{
     x: number; y: number; left: number; startY: number; t: number; timer: number | null;
     mode: "idle" | "hold" | "scrub" | "pan" | "brightness" | "volume";
     base: number; width: number; playing: boolean; startVal: number;
   } | null>(null);
-  /* Single/Double Tap detection: Immediate single-tap, double-tap seeks or toggles play/pause with ripple HUD */
-  const lastTapRef = useRef<{ t: number }>({ t: 0 });
+  /* Single/Double Tap detection: Smooth debounced single-tap vs precise double-tap seek */
+  const lastTapRef = useRef<{ t: number; x: number; y: number }>({ t: 0, x: 0, y: 0 });
+  const singleTapTimerRef = useRef<number | null>(null);
+  const hasSkippedIntroRef = useRef<Record<string, boolean>>({});
+  const preloadedKeysRef = useRef<Set<string>>(new Set());
   const [seekRipple, setSeekRipple] = useState<{ dir: "left" | "right" | "center"; text: string; id: number } | null>(null);
   const seekRippleTimer = useRef<number | null>(null);
   const wasPlayingBeforeHiddenRef = useRef(false);
@@ -460,6 +465,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     liveRef.current = { id: curId, ep: curEp, dur: duration, t };
     playbackClock.publish(t);
     if (!isDesktop) setTime(t);
+    if (waiting && t > 0.1) {
+      setWaiting(false);
+    }
     const now = Date.now();
     if (duration > 0 && now - lastSaveRef.current > 5000) {
       lastSaveRef.current = now;
@@ -467,6 +475,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     }
     // Never trigger background downloads or network segment preloading during offline/zero-data playback
     if (!zeroDataMode) {
+      const nextEpObj = episodes.find((e) => e.ep_num === curEp + 1);
       if (
         duration > 0 &&
         t / duration >= 0.75 &&
@@ -479,7 +488,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           cover: meta?.cover || "",
         });
       }
-      if (t > 3 && nextEpObj && !isEpisodeDownloaded(curId, nextEpObj.ep_num)) {
+      const nextEpKey = `${curId}:${nextEpObj?.ep_num}`;
+      if (t > 3 && nextEpObj && !preloadedKeysRef.current.has(nextEpKey) && !isEpisodeDownloaded(curId, nextEpObj.ep_num)) {
+        preloadedKeysRef.current.add(nextEpKey);
         void preloadEpisode(curId, nextEpObj.ep_num, {
           preferHevc,
           title: formatDramaTitle(meta?.title),
@@ -487,7 +498,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         });
       }
       const nextDramaId = videoIds[index + 1];
-      if (t > 3 && nextDramaId && kind === "video" && !isEpisodeDownloaded(nextDramaId, 1)) {
+      const nextDramaKey = `${nextDramaId}:1`;
+      if (t > 3 && nextDramaId && kind === "video" && !preloadedKeysRef.current.has(nextDramaKey) && !isEpisodeDownloaded(nextDramaId, 1)) {
+        preloadedKeysRef.current.add(nextDramaKey);
         void preloadEpisode(nextDramaId, 1, {
           preferHevc,
           maxSegments: 3,
@@ -502,15 +515,20 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     liveRef.current = { ...liveRef.current, dur: d };
     const r = resumeRef.current;
     const skipSec = getAutoSkipIntroSec();
-    if (r && r.key === playKey && r.t > (skipSec > 0 ? skipSec : 1) && (!d || r.t < d - 3)) {
+    const alreadySkipped = hasSkippedIntroRef.current[playKey];
+
+    if (r && r.key === playKey && r.t > 1 && (!d || r.t < d - 3)) {
       resumeRef.current = null;
+      hasSkippedIntroRef.current[playKey] = true;
       videoRef.current?.seek(r.t, "history_resume");
       if (isDesktop) playbackClock.publish(r.t);
       else setTime(r.t);
-    } else {
+    } else if (!alreadySkipped) {
       resumeRef.current = null;
-      // Auto-skip intro if starting from the beginning or within intro window
-      if (skipSec > 0 && d > skipSec + 5) {
+      hasSkippedIntroRef.current[playKey] = true;
+      const cur = videoRef.current?.el()?.currentTime || 0;
+      // Auto-skip intro if starting from the beginning (< 1.5s)
+      if (skipSec > 0 && cur < 1.5 && d > skipSec + 5) {
         videoRef.current?.seek(skipSec, "auto_skip_intro");
         if (isDesktop) playbackClock.publish(skipSec);
         else setTime(skipSec);
@@ -1136,9 +1154,18 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       const now = Date.now();
       const screenWidth = g.width || (typeof window !== "undefined" ? window.innerWidth : 360);
       const ratio = (g.x - g.left) / screenWidth;
+      const prevTap = lastTapRef.current;
+      const isQuickDoubleTap =
+        prevTap.t > 0 &&
+        now - prevTap.t < 250 &&
+        Math.hypot(g.x - prevTap.x, g.y - prevTap.y) < 40;
 
-      if (lastTapRef.current.t > 0 && now - lastTapRef.current.t < 230) {
-        lastTapRef.current.t = 0;
+      if (isQuickDoubleTap) {
+        if (singleTapTimerRef.current) {
+          window.clearTimeout(singleTapTimerRef.current);
+          singleTapTimerRef.current = null;
+        }
+        lastTapRef.current = { t: 0, x: 0, y: 0 };
         flushSync(() => {
           setClean(false);
           if (!isDesktop && fs) setIdle(false);
@@ -1175,12 +1202,18 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           triggerSeekRipple("center", wasPaused ? "Play" : "Pause");
         }
       } else {
-        // Single tap immediately toggles clean chrome without waiting for double-tap timeout
-        lastTapRef.current.t = now;
-        flushSync(() => {
-          setClean((c) => !c);
-          if (!isDesktop && fs) setIdle((i) => !i);
-        });
+        if (singleTapTimerRef.current) {
+          window.clearTimeout(singleTapTimerRef.current);
+          singleTapTimerRef.current = null;
+        }
+        lastTapRef.current = { t: now, x: g.x, y: g.y };
+        singleTapTimerRef.current = window.setTimeout(() => {
+          singleTapTimerRef.current = null;
+          flushSync(() => {
+            setClean((c) => !c);
+            if (!isDesktop && fs) setIdle((i) => !i);
+          });
+        }, 220);
       }
     }
   };
@@ -1188,7 +1221,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   useEffect(() => {
     if (!active || controlsLocked) {
       onUp(true);
-      lastTapRef.current.t = 0;
+      if (singleTapTimerRef.current) {
+        window.clearTimeout(singleTapTimerRef.current);
+        singleTapTimerRef.current = null;
+      }
+      lastTapRef.current = { t: 0, x: 0, y: 0 };
     }
     // Cancel pending gestures when the page is hidden or controls are locked.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1196,7 +1233,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
   useEffect(() => () => {
     if (gesture.current?.timer) window.clearTimeout(gesture.current.timer);
-    lastTapRef.current.t = 0;
+    if (singleTapTimerRef.current) window.clearTimeout(singleTapTimerRef.current);
+    if (hudTimerRef.current) window.clearTimeout(hudTimerRef.current);
+    if (seekRippleTimer.current) window.clearTimeout(seekRippleTimer.current);
+    window.clearTimeout(swipeTimer.current);
+    lastTapRef.current = { t: 0, x: 0, y: 0 };
     gesture.current = null;
     holdRef.current = false;
     lockArmedRef.current = false;
@@ -1345,6 +1386,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     e.stopPropagation();
     videoRef.current?.trace("seek.input.down", { input: "mobile_bar" });
     barScrub.current = true;
+    barWasPlayingRef.current = videoRef.current?.el()?.paused === false;
+    if (barWasPlayingRef.current) {
+      videoRef.current?.pause();
+    }
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* ignore */ }
     barSeekTo(e.clientX, e.clientY);
   };
@@ -1368,6 +1413,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       }
     }
     setBarPct(null);
+    if (barWasPlayingRef.current && active) {
+      videoRef.current?.play();
+      barWasPlayingRef.current = false;
+    }
   };
 
   useEffect(() => {
@@ -1607,6 +1656,30 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                             setErr("");
                             setPreferHevc(false);
                             toast("HD playback unavailable, switched to SD", "info");
+                            return;
+                          }
+                          if (isPlayingOffline && (typeof navigator === "undefined" || navigator.onLine)) {
+                            toast("Offline file error, switching to online stream", "info");
+                            try {
+                              deleteOfflineEpisode(curId, curEp);
+                            } catch { /* ignore */ }
+                            setOfflineUrls((m) => {
+                              const copy = { ...m };
+                              delete copy[playKey];
+                              return copy;
+                            });
+                            setPlayUrls((m) => {
+                              const copy = { ...m };
+                              delete copy[playKey];
+                              return copy;
+                            });
+                            setHevcUrls((m) => {
+                              const copy = { ...m };
+                              delete copy[playKey];
+                              return copy;
+                            });
+                            setErr("");
+                            setProxyRetry((v) => v + 1);
                             return;
                           }
                           setErr(localizeError(m, store.language));
@@ -1942,7 +2015,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               {!fs && !clean && !isDesktop && !panel && (
                 <div className="absolute inset-x-0 z-20 pointer-events-none" style={{ bottom: `calc(var(--sab, 48px) + ${bottomInset}px)` }}>
                   {/* Floating Action Pill / Card (Skip Intro or Up Next Countdown) */}
-                  {time > 0.8 && time < 14 && duration > 25 && (
+                  {time > 0.8 && time < 14 && duration > 25 && (!hasSkippedIntroRef.current[playKey] || time < 5) && (
                     <div className="px-4 pb-2 flex items-center pointer-events-auto">
                       <Button
                         type="button"
@@ -2093,7 +2166,17 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         onClick={() => {
                           setErr("");
                           setWaiting(true);
+                          setOfflineUrls((m) => {
+                            const copy = { ...m };
+                            delete copy[playKey];
+                            return copy;
+                          });
                           setPlayUrls((m) => {
+                            const copy = { ...m };
+                            delete copy[playKey];
+                            return copy;
+                          });
+                          setHevcUrls((m) => {
                             const copy = { ...m };
                             delete copy[playKey];
                             return copy;

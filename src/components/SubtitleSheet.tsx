@@ -12,6 +12,7 @@ import type {
   SubtitleTrackStatus,
 } from "../subtitles/types";
 import { platform } from "../api";
+import { readClipboardText } from "../clipboard";
 import { useStore } from "../store";
 import {
   isAndroidCaptionSettingsSupported,
@@ -184,7 +185,7 @@ export default function SubtitleSheet({
 
   const handlePasteClipboard = async () => {
     try {
-      const clip = await navigator.clipboard?.readText?.();
+      const clip = await readClipboardText();
       if (clip && clip.trim()) {
         setPasteText(clip);
         toast("Pasted clipboard text", "info");

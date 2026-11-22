@@ -106,6 +106,7 @@ export default function BatchDownloadSheet({
     const preset = () => new Set(preselectAll ? undownloaded : undownloaded.slice(0, 5));
     if (justOpened || videoChangedWhileOpen) {
       setSelectedEps(preset());
+      setDownloadQuality(getDownloadQualityPreference());
     } else if (isOpen) {
       // Episode list may resolve asynchronously: drop stale picks and refill if empty
       const valid = new Set(allEpisodes);
@@ -187,12 +188,21 @@ export default function BatchDownloadSheet({
   };
 
   const selectNext = (count: number) => {
-    const undownloaded = allEpisodes.filter((ep) => {
+    const candidatePool = allEpisodes.filter((ep) => {
       if (downloadedSet.has(ep)) return false;
       const st = activeMap.get(`${videoId}_${ep}`)?.status;
       return st !== "downloading" && st !== "queued";
     });
-    setSelectedEps(new Set(undownloaded.slice(0, count)));
+    const unselected = candidatePool.filter((ep) => !selectedEps.has(ep));
+    if (unselected.length > 0) {
+      const next = new Set(selectedEps);
+      for (const ep of unselected.slice(0, count)) {
+        next.add(ep);
+      }
+      setSelectedEps(next);
+    } else {
+      setSelectedEps(new Set(candidatePool.slice(0, count)));
+    }
   };
 
   const selectAllUnsaved = () => {

@@ -125,6 +125,7 @@ export function parseAss(content: string): SubtitleCue[] {
     const rawText = parts
       .slice(textIdx)
       .join(",")
+      .replace(/<br\s*\/?>/gi, "\n")
       .replace(/\{[^}]*\}/g, "")
       .replace(/\\N/g, "\n")
       .replace(/\\n/g, "\n")
@@ -168,65 +169,89 @@ export function parseVtt(content: string): SubtitleCue[] {
   }
   const cues: SubtitleCue[] = [];
   const normalized = content.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const blocks = normalized.split(/\n\s*\n/);
+  const rawLines = normalized.split("\n");
 
-  for (const block of blocks) {
-    const lines = block.trim().split("\n");
-    if (!lines.length) continue;
-
-    // Skip "WEBVTT", "NOTE", "STYLE", "REGION" header/metadata blocks
-    const head = lines[0].trim().toUpperCase();
+  let i = 0;
+  while (i < rawLines.length) {
+    const line = rawLines[i].trim();
     if (
-      head.startsWith("WEBVTT") ||
-      head === "NOTE" ||
-      head.startsWith("NOTE ") ||
-      head === "STYLE" ||
-      head.startsWith("STYLE ") ||
-      head === "REGION" ||
-      head.startsWith("REGION ")
+      !line ||
+      line.toUpperCase().startsWith("WEBVTT") ||
+      line.toUpperCase().startsWith("NOTE") ||
+      line.toUpperCase().startsWith("STYLE") ||
+      line.toUpperCase().startsWith("REGION")
     ) {
+      i++;
       continue;
     }
 
-    let timeLineIdx = 0;
-    if (!lines[0].includes("-->") && lines.length > 1 && lines[1].includes("-->")) {
-      timeLineIdx = 1;
-    }
-
-    if (!lines[timeLineIdx] || !lines[timeLineIdx].includes("-->")) {
+    // Check if this line is a timestamp line (e.g. 00:00:01.000 --> 00:00:04.000)
+    // or if line is index number followed immediately by a timestamp line
+    let timeLine = "";
+    if (line.includes("-->")) {
+      timeLine = line;
+      i++;
+    } else if (i + 1 < rawLines.length && rawLines[i + 1].includes("-->")) {
+      timeLine = rawLines[i + 1].trim();
+      i += 2;
+    } else {
+      i++;
       continue;
     }
 
-    const timeParts = lines[timeLineIdx].split("-->");
+    const timeParts = timeLine.split("-->");
     const parsedStart = tryParseTimestamp(timeParts[0]);
     if (parsedStart === null) continue;
     const start = parsedStart;
     const parsedEnd = tryParseTimestamp((timeParts[1] || "").trim().split(/\s+/)[0] || "");
     const end = parsedEnd !== null && parsedEnd > start ? parsedEnd : start + 1.0;
 
-    const textLines = lines
-      .slice(timeLineIdx + 1)
-      .map((l) => decodeHtmlEntities(l.replace(/\{[^}]*\}/g, "").replace(/<[^>]+>/g, "").trim()))
-      .filter(Boolean);
+    const textLines: string[] = [];
+    while (i < rawLines.length) {
+      const cur = rawLines[i].trim();
+      // If we encounter a timestamp line, this cue has ended and the next has started
+      if (cur.includes("-->")) {
+        break;
+      }
+      // If we encounter a lone number followed by a timestamp line on the next line, next cue started
+      if (/^\d+$/.test(cur) && i + 1 < rawLines.length && rawLines[i + 1].includes("-->")) {
+        break;
+      }
+      if (cur) {
+        textLines.push(
+          decodeHtmlEntities(
+            cur.replace(/<br\s*\/?>/gi, "\n").replace(/\{[^}]*\}/g, "").replace(/<[^>]+>/g, "").trim()
+          )
+        );
+      } else if (textLines.length > 0) {
+        // Empty line separates cues in standard format
+        i++;
+        break;
+      }
+      i++;
+    }
+
     if (!textLines.length) continue;
 
     const enLines: string[] = [];
     const zhLines: string[] = [];
 
     // Preserve multi-line dialogue cleanly without corrupting monolingual or bilingual cues
-    for (const line of textLines) {
-      if (/^(\[EN\]|EN:)/i.test(line)) {
-        const cleaned = line.replace(/^(\[EN\]|EN:)\s*/i, "").trim();
-        if (cleaned) enLines.push(cleaned);
-      } else if (/^(\[ZH\]|ZH:)/i.test(line)) {
-        const cleaned = line.replace(/^(\[ZH\]|ZH:)\s*/i, "").trim();
-        if (cleaned) zhLines.push(cleaned);
-      } else {
-        const hasChinese = /[\u4e00-\u9fa5]/.test(line);
-        if (hasChinese) {
-          zhLines.push(line);
+    for (const tl of textLines) {
+      for (const line of tl.split("\n").filter(Boolean)) {
+        if (/^(\[EN\]|EN:)/i.test(line)) {
+          const cleaned = line.replace(/^(\[EN\]|EN:)\s*/i, "").trim();
+          if (cleaned) enLines.push(cleaned);
+        } else if (/^(\[ZH\]|ZH:)/i.test(line)) {
+          const cleaned = line.replace(/^(\[ZH\]|ZH:)\s*/i, "").trim();
+          if (cleaned) zhLines.push(cleaned);
         } else {
-          enLines.push(line);
+          const hasChinese = /[\u4e00-\u9fa5]/.test(line);
+          if (hasChinese) {
+            zhLines.push(line);
+          } else {
+            enLines.push(line);
+          }
         }
       }
     }

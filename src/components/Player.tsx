@@ -243,7 +243,8 @@ export default function Player({
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
-      } else if (video) {
+      }
+      if (video) {
         try {
           video.pause();
           video.removeAttribute("src");
@@ -357,7 +358,7 @@ export default function Player({
         onEnded={() => { if (activity.isActive()) onEnded?.(); }}
         onError={() => {
           const err = videoRef.current?.error ?? null;
-          if (!err) return;
+          if (!err || err.code === 1) return;
           const hls = hlsRef.current;
           if (hls && err.code === 3 && recoverCountRef.current < 4 && activity.isActive()) {
             recoverCountRef.current += 1;
@@ -371,9 +372,11 @@ export default function Player({
             hls.destroy();
             hlsRef.current = null;
           }
+          const msg = mediaErrorMessage(err);
+          if (!msg) return;
           setWaiting(false);
           setPlaying(false);
-          setErrMsg(mediaErrorMessage(err));
+          setErrMsg(msg);
         }}
       />
 

@@ -101,6 +101,10 @@ class AuraDownloadService : Service() {
 
     @Volatile
     private var nativeTotalQueuedCount: Int = 0
+    @Volatile
+    private var sessionCompletedCount: Int = 0
+    @Volatile
+    private var sessionInitialTotal: Int = 0
 
     @JvmStatic
     fun ensureSilentChannels(context: Context) {
@@ -247,6 +251,9 @@ class AuraDownloadService : Service() {
       eta: String = "",
       speedBps: Long = 0L
     ) {
+      if (activeDownloads.isEmpty() && sessionInitialTotal == 0) {
+        sessionInitialTotal = 1
+      }
       activeDownloads[id] = DownloadItem(
         id = id,
         title = title,
@@ -267,17 +274,24 @@ class AuraDownloadService : Service() {
         activeDownloads[item.id] = item
       }
       nativeTotalQueuedCount = queuedCount
+      val totalNow = items.size + queuedCount
+      if (totalNow > sessionInitialTotal) {
+        sessionInitialTotal = totalNow
+      }
     }
 
     @Synchronized
     fun removeDownload(id: Int) {
       activeDownloads.remove(id)
+      sessionCompletedCount++
     }
 
     @Synchronized
     fun clearDownloads() {
       activeDownloads.clear()
       nativeTotalQueuedCount = 0
+      sessionCompletedCount = 0
+      sessionInitialTotal = 0
     }
 
     @Synchronized
@@ -669,7 +683,12 @@ class AuraDownloadService : Service() {
       val combinedSpeed = formatSpeedBps(sumSpeed).ifEmpty {
         lead.speed.takeIf { it.isNotEmpty() && it != "Queued" && it != "--" } ?: ""
       }
-      val avgProgress = if (activeItems.isNotEmpty()) {
+      val completedWeight = sessionCompletedCount * 100
+      val currentActiveWeight = activeItems.sumOf { it.progress }
+      val batchTotal = maxOf(sessionInitialTotal, sessionCompletedCount + items.size)
+      val avgProgress = if (batchTotal > 1) {
+        ((completedWeight + currentActiveWeight) / batchTotal).coerceIn(0, 100)
+      } else if (activeItems.isNotEmpty()) {
         (activeItems.sumOf { it.progress } / activeItems.size).coerceIn(0, 100)
       } else {
         lead.progress.coerceIn(0, 100)
@@ -792,6 +811,15 @@ class AuraDownloadService : Service() {
   override fun onDestroy() {
     stopDiskPoller()
     releaseLocks()
+    try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        stopForeground(STOP_FOREGROUND_REMOVE)
+      } else {
+        @Suppress("DEPRECATION")
+        stopForeground(true)
+      }
+      (getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager)?.cancel(NOTIFICATION_ID)
+    } catch (_: Exception) {}
     isRunning = false
     isInForeground = false
     instance = null

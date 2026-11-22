@@ -531,29 +531,36 @@ class MainActivity : TauriActivity() {
         var hasRemovableSd = false
         var sdCardPath = ""
         var sdFreeBytes = 0L
+        var sdTotalBytes = 0L
         for (i in 1 until dirs.size) {
           val d = dirs[i]
           if (d != null && Environment.isExternalStorageRemovable(d)) {
             hasRemovableSd = true
             sdCardPath = d.absolutePath
             sdFreeBytes = d.freeSpace
+            sdTotalBytes = d.totalSpace
             break
           }
         }
         val primaryDir = dirs.getOrNull(0) ?: activity.filesDir
         val primaryFree = primaryDir.freeSpace
+        val primaryTotal = primaryDir.totalSpace
         JSONObject().apply {
           put("hasSdCard", hasRemovableSd)
           put("sdCardPath", sdCardPath)
           put("sdFreeBytes", sdFreeBytes)
+          put("sdTotalBytes", sdTotalBytes)
           put("primaryFreeBytes", primaryFree)
+          put("primaryTotalBytes", primaryTotal)
         }.toString()
       } catch (_: Exception) {
         JSONObject().apply {
           put("hasSdCard", false)
           put("sdCardPath", "")
           put("sdFreeBytes", 0L)
+          put("sdTotalBytes", 0L)
           put("primaryFreeBytes", 0L)
+          put("primaryTotalBytes", 0L)
         }.toString()
       }
     }

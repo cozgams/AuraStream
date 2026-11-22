@@ -469,6 +469,13 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
       : eps.sort((a, b) => a.episode - b.episode);
   }, [selectedSeriesGroup, episodeOrder]);
 
+  const visibleDownloadItems = useMemo(() => {
+    if (view === "seriesDetail" && selectedSeriesGroup) {
+      return displayEpisodes;
+    }
+    return sortedDramaGroups.flatMap((g) => g.episodes);
+  }, [view, selectedSeriesGroup, displayEpisodes, sortedDramaGroups]);
+
   useEffect(() => {
     if (view === "seriesDetail" && selectedSeriesGroup) {
       const stillExists = dramaGroups.find((g) => g.videoId === selectedSeriesGroup.videoId);
@@ -696,11 +703,24 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                   <button
                     type="button"
                     onClick={() => {
-                      if (selectedKeys.size === downloads.length) setSelectedKeys(new Set());
-                      else setSelectedKeys(new Set(downloads.map((d) => `${d.videoId}_${d.episode}`)));
+                      const visibleKeys = visibleDownloadItems.map((d) => `${d.videoId}_${d.episode}`);
+                      const allVisibleSelected = visibleKeys.length > 0 && visibleKeys.every((k) => selectedKeys.has(k));
+                      if (allVisibleSelected) {
+                        setSelectedKeys((prev) => {
+                          const next = new Set(prev);
+                          visibleKeys.forEach((k) => next.delete(k));
+                          return next;
+                        });
+                      } else {
+                        setSelectedKeys((prev) => {
+                          const next = new Set(prev);
+                          visibleKeys.forEach((k) => next.add(k));
+                          return next;
+                        });
+                      }
                     }}
                     className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 pressable font-bold"
-                    title={selectedKeys.size === downloads.length ? "Deselect All" : "Select All"}
+                    title="Toggle Select All"
                     aria-label="Select all toggle"
                   >
                     <IMore size={16} className="rotate-90" />
@@ -738,21 +758,24 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
           </>
         ) : view === "seriesDetail" && selectedSeriesGroup ? (
           <>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
               <button
                 type="button"
                 onClick={() => setView("downloads")}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 active:scale-95 transition-all"
+                className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 active:scale-95 transition-all shrink-0"
                 aria-label="Back to Downloads"
               >
                 <IBack size={20} strokeWidth={2.4} />
               </button>
+              <h1 className="text-[17px] font-bold text-[#0f172a] dark:text-neutral-100 truncate">
+                {formatDramaTitle(selectedSeriesGroup.title)}
+              </h1>
             </div>
 
             <button
               type="button"
               onClick={() => setSeriesMenuOpen(true)}
-              className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 pressable font-bold"
+              className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 pressable font-bold shrink-0"
               aria-label="Series options"
             >
               <IMore size={16} className="rotate-90" />
@@ -2160,6 +2183,23 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                       <div className="w-8 h-8 rounded-full bg-[#e0edff] dark:bg-blue-500/20 text-[#1a73e8] dark:text-blue-400 flex items-center justify-center">
                         <IPlayF size={10} />
                       </div>
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (window.confirm(`Delete Episode ${item.episode}?`)) {
+                            await deleteOfflineEpisode(item.videoId, item.episode);
+                            setDownloads(getOfflineEpisodes());
+                            void getDetailedStorageStats().then(setStorageStats);
+                            toast(`Deleted Episode ${item.episode}`, "ok");
+                          }
+                        }}
+                        className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-red-500 pressable transition-colors"
+                        aria-label="Delete Episode"
+                        title="Delete Episode"
+                      >
+                        <ITrash size={13} />
+                      </button>
                       <button
                         type="button"
                         onClick={(e) => {

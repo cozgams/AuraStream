@@ -278,7 +278,8 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
-      } else if (video) {
+      }
+      if (video) {
         try {
           video.pause();
           video.removeAttribute("src");
@@ -382,6 +383,17 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
           } catch { /* ignore */ }
         }
       }
+
+      // > 14s stall watchdog: report error if video remains stuck
+      if (stalledDuration >= 14000 && stallStageRef.current < 3) {
+        stallStageRef.current = 3;
+        trace("playback.stall_watchdog.fatal", {
+          currentTime: curTime,
+          stalledDuration,
+          readyState: video.readyState,
+        });
+        onErrorRef.current?.("Video playback stalled. Please retry.");
+      }
     }, 1000);
 
     return () => {
@@ -397,7 +409,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
 
   const handleVideoError = () => {
     const err = videoRef.current?.error ?? null;
-    if (!err) return;
+    if (!err || err.code === 1) return;
     const hls = hlsRef.current;
     if (hls && err.code === 3 && recoverCountRef.current < 4 && activity.isActive()) {
       recoverCountRef.current += 1;
@@ -412,7 +424,8 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
       hls.destroy();
       hlsRef.current = null;
     }
-    onErrorRef.current?.(mediaErrorMessage(err));
+    const msg = mediaErrorMessage(err);
+    if (msg) onErrorRef.current?.(msg);
   };
 
   return (
@@ -466,7 +479,6 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
       onPlay={() => {
         isBufferingRef.current = true;
         lastAdvanceTimeRef.current = Date.now();
-        if (activity.isActive()) onPlaying?.();
       }}
       onPause={() => {
         isBufferingRef.current = false;

@@ -2,6 +2,9 @@ import { isLinux } from "./api";
 
 export function mediaErrorMessage(error: MediaError | null): string {
   switch (error?.code) {
+    case 1:
+      // MEDIA_ERR_ABORTED: Playback aborted by user action or source swap; non-fatal
+      return "";
     case 2:
       return "Network error. Failed to load video, please check your network and retry.";
     case 3:
