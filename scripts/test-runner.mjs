@@ -23,6 +23,12 @@ const suites = [
   { name: "Mobile Viewport Layout", script: "scripts/test-mobile-layout.mjs" },
   { name: "Offline & Download Enhancements", script: "scripts/test-download-enhancements.mjs" },
   { name: "Theme Accents & Media Session", script: "scripts/test-accent-and-mediasession.mjs" },
+  { name: "CC, OTA, Vault & Zero-Emoji", script: "scripts/test-cc-and-ota.mjs" },
+  { name: "API Loading & Skeletons", script: "scripts/test-api-loading.mjs" },
+  { name: "Score Badge Position", script: "scripts/test-score-badge-position.mjs" },
+  { name: "iOS Overlays & Focus Trap", script: "scripts/test-ios-overlays.mjs" },
+  { name: "Category Links", script: "scripts/test-category-links.mjs" },
+  { name: "Linux Media Policy", script: "scripts/test-linux-media-policy.mjs" },
 ];
 
 console.log("=== RUNNING AURASTREAM TEST RUNNER ===");

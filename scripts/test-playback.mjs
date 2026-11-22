@@ -148,29 +148,70 @@ async function speedMenuKeyboardChecks(page, paused) {
 async function gestureChecks(page) {
   await loadPlayer(page);
   const video = page.locator('video');
-  const tap = () => page.evaluate(() => {
+  const tap = (xRatio = 0.5) => page.evaluate((ratio) => {
     const surface = document.querySelector('video').parentElement.parentElement;
     const bounds = surface.getBoundingClientRect();
     for (const type of ['pointerdown','pointerup']) surface.dispatchEvent(new PointerEvent(type, {
-      bubbles:true, pointerId:91, pointerType:'touch', button:0, clientX:bounds.x+100, clientY:bounds.y+100,
+      bubbles:true, pointerId:91, pointerType:'touch', button:0, clientX:bounds.x + bounds.width * ratio, clientY:bounds.y + bounds.height * 0.5,
     }));
-  });
+  }, xRatio);
+  const doubleTap = (xRatio = 0.5, gapMs = 70) => page.evaluate(({ ratio, gap }) => new Promise((resolve) => {
+    const surface = document.querySelector('video').parentElement.parentElement;
+    const dispatchTap = () => {
+      const bounds = surface.getBoundingClientRect();
+      for (const type of ['pointerdown', 'pointerup']) {
+        surface.dispatchEvent(new PointerEvent(type, {
+          bubbles: true, pointerId: 91, pointerType: 'touch', button: 0,
+          clientX: bounds.x + bounds.width * ratio, clientY: bounds.y + bounds.height * 0.5,
+        }));
+      }
+    };
+    dispatchTap();
+    setTimeout(() => {
+      dispatchTap();
+      resolve();
+    }, gap);
+  }), { ratio: xRatio, gap: gapMs });
   const clean = () => page.locator('.player-root').getAttribute('data-clean');
-  const start = Date.now();
-  await tap();
-  await page.waitForFunction(() => document.querySelector('.player-root')?.dataset.clean === 'true');
-  const singleTapMs = Date.now()-start;
-  console.log("DEBUG singleTapMs:", singleTapMs);
-  assert(singleTapMs < 230, 'First tap must update before the old double-tap waiting window');
+  const singleTapMs = await page.evaluate(() => new Promise((resolve) => {
+    const root = document.querySelector('.player-root');
+    const started = performance.now();
+    const mo = new MutationObserver(() => {
+      if (root.dataset.clean === 'true') {
+        mo.disconnect();
+        resolve(Math.round(performance.now() - started));
+      }
+    });
+    mo.observe(root, { attributes: true, attributeFilter: ['data-clean'] });
+    const surface = document.querySelector('video').parentElement.parentElement;
+    const bounds = surface.getBoundingClientRect();
+    for (const type of ['pointerdown', 'pointerup']) {
+      surface.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, pointerId: 91, pointerType: 'touch', button: 0,
+        clientX: bounds.x + bounds.width * 0.5, clientY: bounds.y + bounds.height * 0.5,
+      }));
+    }
+  }));
+  assert(singleTapMs < 230, `First tap must update before the old double-tap waiting window (got ${singleTapMs}ms)`);
   await page.waitForTimeout(250);
-  await tap();
+  await tap(0.5);
   await page.waitForFunction(() => document.querySelector('.player-root')?.dataset.clean === 'false');
   await page.waitForTimeout(250);
   const wasPaused = await video.evaluate(v=>v.paused);
-  await tap(); await tap();
+  await doubleTap(0.5);
   await page.waitForFunction(paused => document.querySelector('video').paused !== paused, wasPaused);
   assert.equal(await clean(), 'false', 'Double tap restores chrome and toggles playback once');
-  return {singleTapMs};
+  await page.waitForTimeout(250);
+  const beforeForward = await video.evaluate(v => v.currentTime);
+  await doubleTap(0.85);
+  await page.waitForFunction(t => document.querySelector('video').currentTime >= t + 8, beforeForward);
+  assert.equal(await clean(), 'false', 'Right double-tap forward seek restores chrome');
+  await page.waitForTimeout(250);
+  const beforeBack = await video.evaluate(v => v.currentTime);
+  await doubleTap(0.15);
+  await page.waitForFunction(t => document.querySelector('video').currentTime <= Math.max(0, t - 6), beforeBack);
+  assert.equal(await clean(), 'false', 'Left double-tap rewind seek restores chrome');
+  return { singleTapMs, doubleTapZonesVerified: true };
 }
 
 async function seekChecks(page, legacy) {

@@ -2137,7 +2137,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                           toast("Removed from watch history", "info");
                         }
                       }}
-                      className="absolute top-2.5 right-2.5 z-10 w-6 h-6 rounded-full bg-black/65 hover:bg-red-500/90 text-white flex items-center justify-center shadow-sm pressable transition-colors"
+                      className={`absolute ${Number(c.score) > 0 ? "top-11" : "top-2.5"} right-2.5 z-10 w-6 h-6 rounded-full bg-black/65 hover:bg-red-500/90 text-white flex items-center justify-center shadow-sm pressable transition-colors`}
                     >
                       <IClose size={11} />
                     </button>

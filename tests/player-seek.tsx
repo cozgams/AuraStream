@@ -11,13 +11,28 @@ import Hls from "hls.js";
 
 // Maps custom media protocols to local test server; real implementations for player, HLS, and mouse.
 const proxy = new URLSearchParams(location.search).get("proxy") || "http://127.0.0.1:17779";
+const rewriteProxyUrl = (raw: string) => {
+  const url = new URL(raw, location.href);
+  if (url.hostname === "hg.localhost" || (url.hostname === "localhost" && url.protocol === "hg:")) {
+    return `${proxy}${url.pathname}${url.search}`;
+  }
+  return raw;
+};
 const open = XMLHttpRequest.prototype.open;
 XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, method: string, target: string | URL, async: boolean = true, user?: string | null, credential?: string | null) {
-  const url = new URL(String(target), location.href);
-  if (url.hostname === "hg.localhost" || (url.hostname === "localhost" && url.protocol === "hg:")) {
-    target = `${proxy}${url.pathname}${url.search}`;
+  const rewritten = rewriteProxyUrl(String(target));
+  return open.call(this, method, rewritten, async, user, credential);
+};
+const origFetch = window.fetch.bind(window);
+window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+  if (typeof input === "string" || input instanceof URL) {
+    return origFetch(rewriteProxyUrl(String(input)), init);
   }
-  return open.call(this, method, target, async, user, credential);
+  const rewritten = rewriteProxyUrl(input.url);
+  if (rewritten !== input.url) {
+    return origFetch(new Request(rewritten, input), init);
+  }
+  return origFetch(input, init);
 };
 
 const fixture = {

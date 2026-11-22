@@ -431,12 +431,12 @@ export default function SubtitleSheet({
               <div
                 className="absolute inset-x-0 flex items-center justify-center px-4 transition-all duration-150 pointer-events-none"
                 style={{
-                  bottom: `${Math.max(6, Math.min(84, currentPercent))}%`,
-                  transform: "translateY(50%)",
+                  bottom: `${Math.max(8, Math.min(88, currentPercent))}%`,
+                  transform: `translateY(${Math.round(Math.max(0, Math.min(100, ((currentPercent - 10) / 75) * 100)))}%)`,
                 }}
               >
                 <div
-                  className={`font-semibold text-center px-3 py-1 rounded-md shadow-[0_2px_8px_rgba(0,0,0,0.85)] transition-all leading-snug max-w-[85%] ${previewFontSize}`}
+                  className={`font-semibold text-center px-3 py-1 rounded-md shadow-[0_2px_8px_rgba(0,0,0,0.85)] transition-all leading-snug max-w-[90%] ${previewFontSize}`}
                   style={{
                     color: previewTextColor,
                     textShadow: previewShadow,

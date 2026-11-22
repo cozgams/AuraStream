@@ -1,6 +1,7 @@
 import { Button, Image, SegmentedControl, Surface } from "./ios/controls";
 import { Loader } from "./ios/effects";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { api, APP_VERSION, cover, fmt, fmtTime, isMobile, logLine, mediaUrl } from "../api";
 import type { Detail, Episode, Post, VideoCard } from "../types";
@@ -77,6 +78,12 @@ const RATES = [1, 1.25, 1.5, 2];
 
 const stripHtml = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
 
+const setNativeOrientation = (landscape: boolean) => {
+  if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+    invoke("set_orientation", { landscape }).catch(() => {});
+  }
+};
+
 export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind = "video", active, bottomInset, offlineOnly = false, onBack, onNearEnd, startEp, startTime }: Props) {
   const store = useStore();
   const { isLiked, isFav, toggleLikeLocal, toggleFavLocal, toggleFollowLocal, muted, setMuted, volume, setVolume, toast, addHistory, history, user, setLoginOpen, swipeEp, setSwipeEp, preferHevc, setPreferHevc, t } = store;
@@ -149,11 +156,13 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     return () => window.clearTimeout(idleTimer.current);
   }, [isDesktop, active, wake]);
   useEffect(() => {
-    if (paused) {
+    if (paused || waiting) {
       setIdle(false);
       window.clearTimeout(idleTimer.current);
+    } else if (isDesktop && active) {
+      wake();
     }
-  }, [paused]);
+  }, [paused, waiting, isDesktop, active, wake]);
 
   /* Keep Android Screen Awake while actively playing video */
   useEffect(() => {
@@ -208,12 +217,12 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const barScrub = useRef(false);
   const [barPct, setBarPct] = useState<number | null>(null);
   const gesture = useRef<{
-    x: number; y: number; startY: number; t: number; timer: number | null;
+    x: number; y: number; left: number; startY: number; t: number; timer: number | null;
     mode: "idle" | "hold" | "scrub" | "pan" | "brightness" | "volume";
     base: number; width: number; playing: boolean; startVal: number;
   } | null>(null);
-  /* Single/Double Tap detection: Double-tap seeks or toggles play/pause with ripple HUD */
-  const lastTapRef = useRef<{ timer: number | null }>({ timer: null });
+  /* Single/Double Tap detection: Immediate single-tap, double-tap seeks or toggles play/pause with ripple HUD */
+  const lastTapRef = useRef<{ t: number }>({ t: 0 });
   const [seekRipple, setSeekRipple] = useState<{ dir: "left" | "right" | "center"; text: string; id: number } | null>(null);
   const seekRippleTimer = useRef<number | null>(null);
   const wasPlayingBeforeHiddenRef = useRef(false);
@@ -244,6 +253,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const pinchRef = useRef<{ d0: number; mx0: number; my0: number; s0: number; x0: number; y0: number } | null>(null);
 
   const curId = videoIds[index];
+  const historyRef = useRef(history);
+  historyRef.current = history;
   const historyItem = useMemo(() => history?.find((h) => h.id === curId), [history, curId]);
   const detail = details[curId];
   const curEp = epMap[curId] || 1;
@@ -511,8 +522,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     addHistory(
       curId,
       ep ?? curEp,
-      currentT ?? time,
-      currentDur ?? duration,
+      currentT,
+      currentDur,
       {
         title: formatDramaTitle(meta?.title),
         cover: meta?.cover,
@@ -521,7 +532,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         is_finished: detail?.is_finished,
       }
     );
-  }, [curId, curEp, time, duration, meta, episodes, detail, addHistory]);
+  }, [curId, curEp, meta, episodes, detail, addHistory]);
   const saveHistoryRef = useRef(saveHistory);
   saveHistoryRef.current = saveHistory;
   const hasVideo = kind === "video" || !!post?.video_url;
@@ -642,8 +653,14 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       api.video(id).then((d) => {
         if (alive) {
           setDetails((m) => ({ ...m, [id]: d }));
-          if (id === curId && (d?.cover || d?.title)) {
-            saveHistoryRef.current?.(curEp);
+          if (id === curId && (d?.cover || d?.title) && historyRef.current.some((h) => h.id === id)) {
+            addHistory(id, undefined, undefined, undefined, {
+              title: formatDramaTitle(d.title),
+              cover: d.cover,
+              tags: d.tags,
+              episode_count: d.episodes?.length || d.episode_count,
+              is_finished: d.is_finished,
+            });
           }
         }
       }).catch(() => {});
@@ -921,10 +938,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     }
     if (gesture.current || e.button !== 0) return;
     const el = e.currentTarget;
-    const width = el.clientWidth || 1;
+    const rect = el.getBoundingClientRect();
+    const width = rect.width || el.clientWidth || 1;
     try { el.setPointerCapture(e.pointerId); } catch { /* ignore */ }
     const g = {
-      x: e.clientX, y: e.clientY, startY: e.clientY, t: Date.now(), base: time, width,
+      x: e.clientX, y: e.clientY, left: rect.left, startY: e.clientY, t: Date.now(), base: time, width,
       mode: "idle" as "idle" | "hold" | "scrub" | "pan" | "brightness" | "volume",
       startVal: 1,
       playing: videoRef.current?.el()?.paused === false,
@@ -1086,38 +1104,54 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       }
     }
     if (!cancelled && g.mode === "idle" && Date.now() - g.t < 260) {
-      const tapX = g.x;
+      const now = Date.now();
       const screenWidth = g.width || (typeof window !== "undefined" ? window.innerWidth : 360);
-      const ratio = tapX / screenWidth;
+      const ratio = (g.x - g.left) / screenWidth;
 
-      if (lastTapRef.current.timer) {
-        window.clearTimeout(lastTapRef.current.timer);
-        lastTapRef.current.timer = null;
+      if (lastTapRef.current.t > 0 && now - lastTapRef.current.t < 230) {
+        lastTapRef.current.t = 0;
+        flushSync(() => {
+          setClean(false);
+          if (!isDesktop && fs) setIdle(false);
+        });
 
-        if (ratio < 0.35) {
+        const liveVideo = videoRef.current?.el();
+        const liveTime = liveVideo && Number.isFinite(liveVideo.currentTime)
+          ? liveVideo.currentTime
+          : (Number.isFinite(time) ? time : 0);
+        const liveDur = liveVideo && Number.isFinite(liveVideo.duration) && liveVideo.duration > 0
+          ? liveVideo.duration
+          : (typeof duration === "number" && Number.isFinite(duration) && duration > 0 ? duration : Infinity);
+
+        if (ratio < 0.28) {
           // Double tap left: Seek backward 10s (works in both portrait & landscape)
-          const target = Math.max(0, time - 10);
+          const target = Math.max(0, liveTime - 10);
           videoRef.current?.seek(target, "double-tap-back");
+          setTime(target);
+          playbackClock.publish(target);
           triggerSeekRipple("left", "-10s");
-        } else if (ratio > 0.65) {
+        } else if (ratio > 0.72) {
           // Double tap right: Seek forward 10s (works in both portrait & landscape)
-          const maxDur = typeof duration === "number" && Number.isFinite(duration) && duration > 0 ? duration : Infinity;
-          const target = Math.max(0, Math.min(maxDur, (Number.isFinite(time) ? time : 0) + 10));
+          const target = Math.max(0, Math.min(liveDur, liveTime + 10));
           if (Number.isFinite(target)) {
             videoRef.current?.seek(target, "double-tap-forward");
+            setTime(target);
+            playbackClock.publish(target);
             triggerSeekRipple("right", "+10s");
           }
         } else {
-          // Double tap center: Star & Favorite the drama with radiant gold burst!
-          onFav();
-          triggerSeekRipple("center", "star");
+          // Double tap center: Toggle play/pause on mobile
+          const wasPaused = videoRef.current?.el()?.paused ?? paused;
+          videoRef.current?.toggle();
+          triggerSeekRipple("center", wasPaused ? "Play" : "Pause");
         }
       } else {
-        lastTapRef.current.timer = window.setTimeout(() => {
-          lastTapRef.current.timer = null;
+        // Single tap immediately toggles clean chrome without waiting for double-tap timeout
+        lastTapRef.current.t = now;
+        flushSync(() => {
           setClean((c) => !c);
           if (!isDesktop && fs) setIdle((i) => !i);
-        }, 250) as unknown as number;
+        });
       }
     }
   };
@@ -1125,8 +1159,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   useEffect(() => {
     if (!active || controlsLocked) {
       onUp(true);
-      if (lastTapRef.current.timer) window.clearTimeout(lastTapRef.current.timer);
-      lastTapRef.current.timer = null;
+      lastTapRef.current.t = 0;
     }
     // Cancel pending gestures when the page is hidden or controls are locked.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1134,8 +1167,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
   useEffect(() => () => {
     if (gesture.current?.timer) window.clearTimeout(gesture.current.timer);
-    if (lastTapRef.current.timer) window.clearTimeout(lastTapRef.current.timer);
-    lastTapRef.current.timer = null;
+    lastTapRef.current.t = 0;
     gesture.current = null;
     holdRef.current = false;
     lockArmedRef.current = false;
@@ -1160,7 +1192,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     wake();
     if (wasPlaying) keepAlive();
     if (!isDesktop) {
-      try { void invoke("set_orientation", { landscape }); } catch { /* ignore */ }
+      setNativeOrientation(landscape);
       if (landscape) {
         try {
           (screen.orientation as unknown as { lock?: (o: string) => Promise<void> })?.lock?.("landscape")?.catch(() => {});
@@ -1175,21 +1207,21 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     setFs(false);
     if (wasPlaying) keepAlive();
     if (!isDesktop) {
-      try { void invoke("set_orientation", { landscape: false }); } catch { /* ignore */ }
+      setNativeOrientation(false);
       try { screen.orientation?.unlock?.(); } catch { /* ignore */ }
     }
   }, [isDesktop, keepAlive, setClean, setFs]);
 
   useEffect(() => {
     if (isDesktop || fs) return;
-    try { void invoke("set_orientation", { landscape: false }); } catch { /* ignore */ }
+    setNativeOrientation(false);
     try { screen.orientation?.unlock?.(); } catch { /* ignore */ }
   }, [isDesktop, fs]);
 
   /* Re-request landscape orientation if video dimensions resolve after fullscreen entry */
   useEffect(() => {
     if (isDesktop || !fs || !landscapeVideo) return;
-    try { void invoke("set_orientation", { landscape: true }); } catch { /* ignore */ }
+    setNativeOrientation(true);
     try {
       (screen.orientation as unknown as { lock?: (o: string) => Promise<void> })?.lock?.("landscape")?.catch(() => {});
     } catch { /* ignore */ }
@@ -1584,10 +1616,14 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         </div>
                       )}
                       {seekRipple.dir === "center" && (
-                        <div className="w-20 h-20 rounded-full bg-black/80 backdrop-blur-md border border-amber-400/40 flex flex-col items-center justify-center text-amber-400 a-pop shadow-[0_8px_32px_rgba(251,191,36,0.35)]">
-                          <IStarF size={36} className="text-amber-400 drop-shadow-[0_2px_12px_rgba(251,191,36,0.7)]" />
-                          <span className="text-[10px] font-bold text-amber-300 uppercase tracking-wider mt-1">
-                            {isFav(curId) ? "Saved" : "Removed"}
+                        <div className="w-20 h-20 rounded-full bg-black/80 backdrop-blur-md border border-white/25 flex flex-col items-center justify-center text-white a-pop shadow-2xl">
+                          {seekRipple.text === "Play" ? (
+                            <IPlayF size={30} className="text-primary ml-0.5" />
+                          ) : (
+                            <IPauseF size={30} className="text-primary" />
+                          )}
+                          <span className="text-[11px] font-bold text-white/95 tracking-tight mt-1">
+                            {seekRipple.text}
                           </span>
                         </div>
                       )}
@@ -2110,32 +2146,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       )}
                     </div>
                   )}
-                  {err ? (
-                    <div className="absolute inset-0 z-20 flex items-center justify-center p-6">
-                      <div
-                        className="rounded-2xl p-6 flex flex-col items-center gap-3 text-center max-w-sm backdrop-blur-xl border border-white/10 shadow-2xl"
-                        style={{ background: "rgba(18, 18, 22, 0.90)" }}
-                      >
-                        <div className="w-12 h-12 rounded-full bg-red-500/15 flex items-center justify-center text-red-400 mb-1">
-                          <IPlayF size={22} className="opacity-80" />
-                        </div>
-                        <span className="text-[15px] font-bold text-white tracking-tight">{t("player.load_error")}</span>
-                        <span className="text-[12.5px] text-zinc-300 leading-relaxed max-w-[260px] break-words">{localizeError(err, store.language)}</span>
-                        <div className="flex items-center gap-2 mt-2 w-full">
-                          <Button
-                            className="flex-1 h-9 rounded-xl bg-white/10 hover:bg-white/15 text-white text-[13px] font-semibold pressable"
-                            onClick={() => {
-                              setErr("");
-                              setWaiting(true);
-                              setProxyRetry((v) => v + 1);
-                            }}
-                          >
-                            {t("cat.retry")}
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
+                  {!err && (
                     <div className="absolute inset-0 z-10 flex flex-col items-center justify-center pointer-events-none px-4">
                       <div className="w-12 h-12 rounded-full bg-black/60 backdrop-blur-md flex items-center justify-center border border-white/15 shadow-[0_8px_24px_rgba(0,0,0,0.5)]">
                         <Loader className="w-6 h-6 spinner text-primary" />
@@ -2220,8 +2231,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
             if (speedLock) { setSpeedLock(false); toast("Speed lock released", "info"); }
             else if (rate !== 1 && !holdSpeed) setRate(1);
           }}
-          className={`absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 px-3.5 h-8 rounded-full backdrop-blur-md text-[13px] font-bold elev-2 pressable ${speedLock ? "bg-primary text-on-primary" : "hg-chip hg-gold"}`}
-          style={{ top: "calc(var(--sat, 0px) + 54px)" }}>
+          className={`absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 px-3.5 h-8 rounded-full backdrop-blur-md whitespace-nowrap max-w-[calc(100vw-32px)] text-[12px] font-bold elev-2 pressable ${speedLock ? "bg-primary text-on-primary" : "hg-chip hg-gold"}`}
+          style={{ top: rotated ? 56 : "calc(max(var(--sat, 0px), 36px) + 54px)" }}>
           <IBoltF size={13} />
           {effRate}x {speedLock ? "Locked · Tap to unlock" : holdSpeed ? "2.0x · Release to restore" : "Speed"}
         </Button>

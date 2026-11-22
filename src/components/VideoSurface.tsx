@@ -180,7 +180,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         enableWorker: platform !== "ios",
         // Prefer standard MSE on macOS; hls.js handles MMS-only fallback and seek recovery.
         preferManagedMediaSource: false,
-        autoStartLoad: activity.isActive(),
+        autoStartLoad: false,
         startFragPrefetch: true,
         progressive: true,
         capLevelToPlayerSize: true,
@@ -216,10 +216,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
       });
       hls.on(Hls.Events.ERROR, (_e, data) => {
         if (!data.fatal) {
-          if (
-            data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR ||
-            data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR
-          ) {
+          if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR && activity.isActive()) {
             try { hls.startLoad(video.currentTime || -1); } catch { /* ignore */ }
           }
           return;
@@ -227,7 +224,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         if (!activity.isActive()) return;
         const retry = () => {
           recoverCountRef.current += 1;
-          const delay = 250 * recoverCountRef.current;
+          const delay = 500 * Math.pow(2, recoverCountRef.current - 1);
           if (recoverTimerRef.current) window.clearTimeout(recoverTimerRef.current);
           recoverTimerRef.current = window.setTimeout(() => {
             recoverTimerRef.current = null;

@@ -66,6 +66,7 @@ export default function LoginModal() {
 
   useEffect(() => {
     if (!loginOpen) {
+      setMode("login");
       setErr("");
       setErrField(null);
       setPassword("");

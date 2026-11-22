@@ -172,10 +172,7 @@ export default function Player({
       });
       hls.on(Hls.Events.ERROR, (_e, data) => {
         if (!data.fatal) {
-          if (
-            data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR ||
-            data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR
-          ) {
+          if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR && activity.isActive()) {
             try { hls.startLoad(video.currentTime || -1); } catch { /* ignore */ }
           }
           return;
@@ -183,7 +180,7 @@ export default function Player({
         if (!activity.isActive()) return;
         const retry = () => {
           recoverCountRef.current += 1;
-          const delay = 250 * recoverCountRef.current;
+          const delay = 500 * Math.pow(2, recoverCountRef.current - 1);
           if (recoverTimerRef.current) window.clearTimeout(recoverTimerRef.current);
           recoverTimerRef.current = window.setTimeout(() => {
             recoverTimerRef.current = null;
@@ -379,7 +376,7 @@ export default function Player({
       )}
 
       {controls && (
-        <div className={`player-inline-controls absolute inset-x-0 bottom-0 z-20 px-3 pb-2 pt-8 transition-opacity ${!playing || controlsVisible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"}`}>
+        <div className={`player-inline-controls absolute inset-x-0 bottom-0 z-20 px-3 pb-2 pt-8 transition-opacity ${!playing || controlsVisible ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
           <Input aria-label="Playback progress" type="range" {...seek.inputProps}
             onPointerDown={(e) => { if (isMobile) flashControls(); seek.inputProps.onPointerDown?.(e); }}
             className="hg-range w-full" style={{ ...seek.inputProps.style, "--fill": `${pct}%` } as React.CSSProperties} />

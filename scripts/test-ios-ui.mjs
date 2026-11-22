@@ -1,5 +1,5 @@
-/** Real application smoke coverage for the iOS material UI. No live account or media is used.
- * Run: BROWSER_EXECUTABLE=/opt/google/chrome/chrome node scripts/test-ios-ui.mjs
+/** Real application smoke coverage for the AuraStream UI. No live account or media is used.
+ * Run: BROWSER_EXECUTABLE=/usr/bin/chromium node scripts/test-ios-ui.mjs
  * Screenshots and a machine-readable report are written below test-results/ios-ui/.
  */
 import assert from "node:assert/strict";
@@ -31,11 +31,16 @@ const cases = [
 const caseName = test => `${test.width}x${test.height}-${test.theme}${test.android ? "-android" : ""}${test.minimumFontSize ? `-font${test.minimumFontSize}` : ""}`;
 const selectedCases = process.env.IOS_UI_CASE ? cases.filter(test => caseName(test) === process.env.IOS_UI_CASE) : cases;
 assert(selectedCases.length, "IOS_UI_CASE must match one of the defined scenarios");
-const titles = ["城市与晚风", "重逢在夏日以后", "星河旅人", "无声的答案", "我的奇妙假期", "晴天来信"];
+const titles = [
+  "City and Evening Breeze",
+  "Reunion After Summer",
+  "Galaxy Traveler",
+  "Silent Answer",
+  "My Wonderful Vacation",
+  "Letters on a Sunny Day",
+];
 const titlePattern = new RegExp(`^(${titles.join("|")})$`);
 let vite, browser;
-
-// Passed directly to addInitScript so every reload starts with isolated fixture data.
 
 try {
   vite = await createServer({ root, server: { host: "127.0.0.1", port: 0 } });
@@ -47,7 +52,8 @@ try {
     const name = caseName(test);
     const result = { ...test, name, checks: [], screenshots: [], passed: false };
     report.cases.push(result);
-    const caseBrowser = test.minimumFontSize ? await chromium.launch({ ...browserOptions,
+    const caseBrowser = test.minimumFontSize ? await chromium.launch({
+      ...browserOptions,
       args: [`--blink-settings=minimumFontSize=${test.minimumFontSize},minimumLogicalFontSize=${test.minimumFontSize}`],
     }) : browser;
     const context = await caseBrowser.newContext({
@@ -58,6 +64,7 @@ try {
     await context.addInitScript(installFixture, { theme: test.theme, titles });
     const page = await context.newPage();
     page.setDefaultTimeout(12000);
+    page.setDefaultNavigationTimeout(30000);
     page.on("pageerror", error => report.errors.push({ case: name, message: error.message }));
     await page.route("**/*", route => {
       const url = new URL(route.request().url());
@@ -71,7 +78,6 @@ try {
     });
     const check = label => result.checks.push(label);
     const shot = async label => {
-      // Playwright finishes finite CSS transitions; infinite loaders cannot stall the run.
       const filename = `${name}-${label}.png`;
       await page.screenshot({ path: fileURLToPath(new URL(filename, output)), animations: "disabled" });
       result.screenshots.push(filename);
@@ -94,8 +100,10 @@ try {
         const buttons = [...el.querySelectorAll(".ios-segmented-items > button")];
         const selected = buttons.findIndex(button => button.getAttribute("aria-pressed") === "true");
         const rectangle = element => { const { x, y, width, height } = element.getBoundingClientRect(); return { x, y, width, height }; };
-        return { count: buttons.length, selected, declaredCount: el.style.getPropertyValue("--segment-count"),
-          indicator: rectangle(el.querySelector(".ios-segmented-indicator")), button: selected >= 0 ? rectangle(buttons[selected]) : null };
+        return {
+          count: buttons.length, selected, declaredCount: el.style.getPropertyValue("--segment-count"),
+          indicator: rectangle(el.querySelector(".ios-segmented-indicator")), button: selected >= 0 ? rectangle(buttons[selected]) : null,
+        };
       });
       (result.segmented ??= []).push({ label, ...geometry });
       assert.equal(geometry.count, count, `${label}: expected option count`);
@@ -111,41 +119,47 @@ try {
     try {
       await page.goto(origin);
       if (test.minimumFontSize) assert(await page.evaluate(minimum => {
-        const probe = document.createElement("span"); probe.style.fontSize = "12px"; probe.textContent = "字号";
+        const probe = document.createElement("span"); probe.style.fontSize = "12px"; probe.textContent = "Text";
         document.body.append(probe); const size = parseFloat(getComputedStyle(probe).fontSize); probe.remove();
         return size >= minimum;
       }, test.minimumFontSize), "Chromium applies the enlarged minimum text size");
-      const nav = page.getByRole("navigation", { name: "主导航" });
-      for (const label of ["首页", "搜索", "分类", "我的"]) await nav.getByRole("button", { name: label, exact: true }).waitFor();
+      const nav = page.getByRole("navigation", { name: /Main Navigation/i });
+      for (const pattern of [/^Home$/, /^Search$/, /^(Categories|Browse)$/, /^Profile$/]) {
+        await nav.getByRole("button", { name: pattern }).waitFor();
+      }
       await page.waitForFunction(theme => document.documentElement.dataset.theme === theme, test.theme);
       if (test.android) await page.waitForFunction(() => window.__IOS_UI_FIXTURE__.hasHardwareBack());
       check("original navigation and persisted appearance");
       if (test.mobile) {
-        const videoNav = page.locator('nav[aria-label="主导航"]');
+        const videoNav = page.locator('nav[aria-label="Main Navigation"]');
         await videoNav.waitFor();
-        const navBackground = await videoNav.evaluate(nav => nav.getAttribute("data-over-video"));
+        const navBackground = await videoNav.evaluate(el => el.getAttribute("data-over-video"));
         assert.equal(navBackground, "true", "Home navigation declares its video background");
-        await nav.getByRole("button", { name: "首页", exact: true }).click();
+        await nav.getByRole("button", { name: "Home", exact: true }).click();
         const homeVideoMaterial = await page.evaluate(() => {
-          const nav = document.querySelector('nav[aria-label="主导航"]');
-          const selected = nav?.querySelector('[aria-current="page"]');
-          const unselected = nav?.querySelector('button:not([aria-current="page"])');
-          const glass = nav?.querySelector(".hg-glass");
-          return { video: nav?.getAttribute("data-over-video"), selected: selected && getComputedStyle(selected).color,
-            unselected: unselected && getComputedStyle(unselected).color, background: glass && getComputedStyle(glass).backgroundColor };
+          const navEl = document.querySelector('nav[aria-label="Main Navigation"]');
+          const selected = navEl?.querySelector('[aria-current="page"]');
+          const unselected = navEl?.querySelector('button:not([aria-current="page"])');
+          const glass = navEl?.querySelector(".hg-glass");
+          return {
+            video: navEl?.getAttribute("data-over-video"),
+            selected: selected && getComputedStyle(selected).color,
+            unselected: unselected && getComputedStyle(unselected).color,
+            background: glass && getComputedStyle(glass).backgroundColor,
+          };
         });
         assert.equal(homeVideoMaterial.selected, "rgb(25, 25, 25)", "Home selection uses dark ink over the selected light surface");
         assert.equal(homeVideoMaterial.unselected, "rgb(242, 240, 235)", "Home navigation labels stay bright over dark video");
         assert.equal(homeVideoMaterial.background, "rgba(28, 28, 32, 0.94)", "Home navigation keeps an opaque dark glass surface over black video");
         check("home navigation text contrast on video in both themes");
       }
-      await nav.getByRole("button", { name: "搜索", exact: true }).click();
 
-      const hotSearch = page.getByRole("region", { name: "热搜榜", exact: true });
-      await hotSearch.getByRole("button", { name: "播放 城市与晚风", exact: true }).waitFor();
+      await nav.getByRole("button", { name: "Search", exact: true }).click();
+      const hotSearch = page.getByRole("region", { name: "Trending Searches", exact: true });
+      await hotSearch.getByRole("button", { name: `Play ${titles[0]}`, exact: true }).waitFor();
       assert.equal(await hotSearch.locator("ol > li").count(), titles.length, "Hot searches retain upstream rank order");
-      assert.equal(await hotSearch.locator("ol > li").first().innerText(), "01\n城市与晚风\n550.1w播放量");
-      await hotSearch.getByRole("button", { name: "播放 城市与晚风", exact: true }).click();
+      assert.equal(await hotSearch.locator("ol > li").first().innerText(), `01\n${titles[0]}\n550.1M plays`);
+      await hotSearch.getByRole("button", { name: `Play ${titles[0]}`, exact: true }).click();
       const playbackPositionSelector = test.mobile ? ".feed-position-pill" : ".desktop-context-header small";
       await page.waitForFunction(selector => [...document.querySelectorAll(selector)].some(el => {
         const bounds = el.getBoundingClientRect();
@@ -161,37 +175,42 @@ try {
       await page.keyboard.press("Escape");
       check("official hot video titles, play counts, rank order, and direct playback");
 
-      const query = page.getByRole("textbox", { name: "搜索短剧、帖子、题材…" });
-      await query.fill("都市"); await query.press("Enter");
+      const query = page.getByRole("textbox", { name: "Search dramas, actors, genres..." });
+      await query.fill("Urban");
+      await query.press("Enter");
       await page.getByRole("button", { name: titles[0], exact: true }).waitFor();
       assert.equal(await page.getByRole("button", { name: titlePattern }).count(), titles.length);
       assert.equal(await page.getByRole("button", { name: titles[0], exact: true }).locator("img").getAttribute("loading"), "eager");
       assert.equal(await page.getByRole("button", { name: titles[0], exact: true }).locator("img").getAttribute("fetchpriority"), "high");
       assert.equal(await page.getByRole("button", { name: titles[2], exact: true }).locator("img").getAttribute("loading"), "lazy");
-      await shot("search"); check("search results and responsive poster grid"); check("first-screen covers load eagerly at high priority; remaining covers stay lazy");
+      await shot("search");
+      check("search results and responsive poster grid");
+      check("first-screen covers load eagerly at high priority; remaining covers stay lazy");
       if (test.android) {
         await page.getByRole("button", { name: titles[0], exact: true }).click();
         const position = page.locator(".feed-position-pill").first();
         await position.waitFor();
         const topControls = await position.evaluate(el => {
           const counter = el.getBoundingClientRect();
-          const mute = document.querySelector('[aria-label="静音"], [aria-label="取消静音"]')?.getBoundingClientRect();
-          return { counter: { left: counter.left, right: counter.right, top: counter.top, bottom: counter.bottom },
-            mute: mute ? { left: mute.left, right: mute.right, top: mute.top, bottom: mute.bottom } : null };
+          const mute = document.querySelector('[aria-label="Mute"], [aria-label="Unmute"]')?.getBoundingClientRect();
+          return {
+            counter: { left: counter.left, right: counter.right, top: counter.top, bottom: counter.bottom },
+            mute: mute ? { left: mute.left, right: mute.right, top: mute.top, bottom: mute.bottom } : null,
+          };
         });
         assert(topControls.mute, "Playback mute control is visible");
         assert.equal(topControls.counter.left < topControls.mute.right && topControls.counter.right > topControls.mute.left
           && topControls.counter.top < topControls.mute.bottom && topControls.counter.bottom > topControls.mute.top, false,
         "Playback position and mute control do not overlap");
         await page.keyboard.press("Escape");
-        await nav.getByRole("button", { name: "搜索", exact: true }).waitFor();
+        await query.waitFor();
         check("Android player counter clears the mute control");
       }
 
       const searchPage = page.locator(".ios-page").filter({ has: query });
-      await searchPage.getByRole("button", { name: "排行榜", exact: true }).click();
-      const rankSegment = page.getByRole("group", { name: "榜单类型", exact: true });
-      for (const [index, label] of ["热播榜", "推荐榜", "潜力榜"].entries()) {
+      await searchPage.getByRole("button", { name: "Rankings", exact: true }).click();
+      const rankSegment = page.getByRole("group", { name: "Ranking Type", exact: true });
+      for (const [index, label] of ["Top Hits", "Recommended", "Rising"].entries()) {
         await rankSegment.getByRole("button", { name: label, exact: true }).click();
         await assertSlider(rankSegment, 3, index, `rank:${label}`);
         await page.locator(".ios-rank-row").first().waitFor();
@@ -202,13 +221,17 @@ try {
       await query.waitFor();
       check("all three rank choices move the shared indicator into the selected button bounds");
 
-      await nav.getByRole("button", { name: "分类", exact: true }).click();
-      await page.getByRole("button").filter({ has: page.getByText("专题", { exact: true }) }).click();
-      const topic = page.getByRole("button").filter({ has: page.getByText("本周精选", { exact: true }) });
+      await nav.getByRole("button", { name: /^(Categories|Browse)$/ }).click();
+      await page.getByRole("button").filter({ has: page.getByText("Topics", { exact: true }) }).click();
+      const topic = page.getByRole("button").filter({ has: page.getByText("Weekly Highlights", { exact: true }) });
       await topic.waitFor();
       const topicShape = await topic.evaluate(el => {
         const style = getComputedStyle(el), bounds = el.getBoundingClientRect();
-        return { radii: [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius], width: bounds.width, height: bounds.height };
+        return {
+          radii: [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius],
+          width: bounds.width,
+          height: bounds.height,
+        };
       });
       result.topicShape = topicShape;
       assert.deepEqual(topicShape.radii, ["16px", "16px", "16px", "16px"], "Topic cards keep four 16px corners");
@@ -216,92 +239,98 @@ try {
       await topic.click();
       await page.getByRole("button", { name: titles[0], exact: true }).waitFor();
       assert.equal(await topic.count(), 0, "Covered topic-list controls are removed from the accessibility tree");
-      assert.equal(await page.getByRole("button", { name: "返回", exact: true }).count(), 1, "Only the top page's back control is accessible");
+      assert.equal(await page.getByRole("button", { name: "Back", exact: true }).count(), 1, "Only the top page's back control is accessible");
       await shot("topic");
       await page.keyboard.press("Escape");
-      await topic.waitFor(); // Wait for React to commit before a second Escape.
+      await topic.waitFor();
       await page.keyboard.press("Escape");
-      await page.getByRole("button").filter({ has: page.getByText("专题", { exact: true }) }).waitFor();
+      await page.getByRole("button").filter({ has: page.getByText("Topics", { exact: true }) }).waitFor();
       check("topic navigation, inert background, and sequential Escape");
 
-      await nav.getByRole("button", { name: "我的", exact: true }).click();
+      await nav.getByRole("button", { name: "Profile", exact: true }).click();
+      await page.getByText("My Library", { exact: true }).waitFor();
+      await page.getByRole("button", { name: /Favorites/ }).first().click();
       await page.getByRole("button", { name: titles[0], exact: true }).waitFor();
       assert.equal(await page.getByRole("button", { name: titlePattern }).count(), titles.length);
-      await page.getByRole("button", { name: /未登录/ }).click();
-      const profileLogin = page.getByRole("dialog", { name: "登录 HGhubX", exact: true });
-      await profileLogin.getByLabel("账号", { exact: true }).fill("profile-fixture");
-      await profileLogin.getByLabel("密码", { exact: true }).fill("test-password");
-      await profileLogin.getByRole("button", { name: "登录", exact: true }).last().click();
-      const profileLinks = page.locator(".ios-profile-links");
-      await profileLinks.getByRole("button", { name: /^我的关注/ }).waitFor();
-      await profileLinks.getByRole("button", { name: /^我的主页/ }).waitFor();
-      await profileLogin.waitFor({ state: "hidden" });
       await page.getByRole("button", { name: titles[0], exact: true }).locator(".ios-score-badge").waitFor();
       assert.equal(await page.getByRole("button", { name: titles[0], exact: true }).locator(".ios-score-badge").innerText(), "8.5");
       assert.equal(await page.getByRole("button", { name: titles[1], exact: true }).locator(".ios-score-badge").count(), 0, "Unrated videos do not show an empty score badge");
       const scorePosition = await page.getByRole("button", { name: titles[0], exact: true }).evaluate(el => {
         const art = el.querySelector(".ios-poster-art");
         const score = el.querySelector(".ios-score-badge");
+        const remove = el.parentElement?.querySelector('[aria-label^="Remove "]');
         if (!art || !score) return null;
         const artBounds = art.getBoundingClientRect();
         const scoreBounds = score.getBoundingClientRect();
-        return { top: scoreBounds.top - artBounds.top, right: artBounds.right - scoreBounds.right,
-          artWidth: artBounds.width, scoreWidth: scoreBounds.width };
+        const removeBounds = remove?.getBoundingClientRect();
+        const overlapsRemove = Boolean(
+          removeBounds &&
+          scoreBounds.left < removeBounds.right &&
+          scoreBounds.right > removeBounds.left &&
+          scoreBounds.top < removeBounds.bottom &&
+          scoreBounds.bottom > removeBounds.top
+        );
+        return {
+          top: scoreBounds.top - artBounds.top,
+          right: artBounds.right - scoreBounds.right,
+          artWidth: artBounds.width,
+          scoreWidth: scoreBounds.width,
+          hasRemove: Boolean(removeBounds),
+          overlapsRemove,
+        };
       });
       assert(scorePosition, "Rated poster exposes a positioned score badge");
+      assert(scorePosition.hasRemove && !scorePosition.overlapsRemove, "Score badge and remove button do not overlap");
       assert(Math.abs(scorePosition.top - 9) < 1.1, "Score badge stays in the cover's top corner");
       assert(Math.abs(scorePosition.right - 9) < 1.1, "Score badge stays in the cover's right corner");
-      assert(scorePosition.top < scorePosition.artWidth * .25, "Score badge is not vertically centered on the cover");
+      assert(scorePosition.top < scorePosition.artWidth * 0.25, "Score badge is not vertically centered on the cover");
       result.posterWidth = Math.round(await page.getByRole("button", { name: titles[0], exact: true }).evaluate(el => el.getBoundingClientRect().width));
       await shot("favorites");
-      const profileSegment = page.getByRole("group", { name: "我的内容", exact: true });
-      await assertSlider(profileSegment, 2, 0, "profile:我的收藏");
-      const linkGeometry = () => profileLinks.evaluate(el => {
-        const parent = el.getBoundingClientRect();
-        return { x: parent.x, width: parent.width, height: parent.height, columns: [...el.children].map(child => {
-          const bounds = child.getBoundingClientRect();
-          return { left: bounds.x - parent.x, top: bounds.y - parent.y, width: bounds.width, height: bounds.height };
-        }) };
-      });
-      const linksBefore = await linkGeometry();
-      assert.equal(linksBefore.columns.length, 2, "Logged-in profile shows both shortcuts");
-      const [followingColumn, homepageColumn] = linksBefore.columns;
-      assert(followingColumn.width > 0 && Math.abs(followingColumn.width - homepageColumn.width) < 1
-        && Math.abs(followingColumn.top - homepageColumn.top) < 1 && homepageColumn.left >= followingColumn.left + followingColumn.width,
-      "Following and homepage shortcuts form two equal, adjacent columns");
-      const assertStableLinks = async label => {
-        const after = await linkGeometry();
-        for (const property of ["x", "width", "height"]) assert(Math.abs(after[property] - linksBefore[property]) < 1, `${label}: shortcut group keeps its ${property}`);
-        for (const [index, column] of after.columns.entries()) for (const property of ["left", "top", "width", "height"])
-          assert(Math.abs(column[property] - linksBefore.columns[index][property]) < 1, `${label}: shortcut ${index + 1} keeps its ${property}`);
-        return after;
-      };
-      await profileSegment.getByRole("button", { name: "观看历史", exact: true }).click();
-      await assertSlider(profileSegment, 2, 1, "profile:观看历史");
-      await page.getByText("第 3 集 · 0:55", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "Back to Overview", exact: true }).click();
+      await page.getByRole("button", { name: "View all" }).first().click();
+      await page.getByText("Ep. 3 · 0:55", { exact: true }).waitFor();
       assert.equal(await page.getByRole("button", { name: titlePattern }).count(), 1);
-      const linksHistory = await assertStableLinks("History switch");
-      await profileSegment.getByRole("button", { name: "我的收藏", exact: true }).click();
-      await assertSlider(profileSegment, 2, 0, "profile:我的收藏 restored");
-      await page.getByRole("button", { name: titles[1], exact: true }).waitFor();
-      const linksRestored = await assertStableLinks("Collection switch");
-      result.profileLinks = { before: linksBefore, history: linksHistory, restored: linksRestored };
-      await page.getByRole("button", { name: "退出登录", exact: true }).click();
-      await page.getByRole("button", { name: /未登录/ }).waitFor();
-      check("local favorites, score badges, preserved playback progress, two-way slider, and stable profile shortcut columns");
+      await page.getByRole("button", { name: "Back to Overview", exact: true }).click();
+      check("local favorites, score badges, and preserved playback progress");
 
-      const accountButton = page.getByRole("button", { name: /未登录/ });
-      await accountButton.click();
-      const dialog = page.getByRole("dialog", { name: "登录 HGhubX", exact: true });
+      const signInBtn = page.getByRole("button", { name: "Sign In", exact: true });
+      await signInBtn.click();
+      let dialog = page.getByRole("dialog", { name: "Sign In with Email", exact: true });
       await dialog.waitFor();
-      const username = dialog.getByLabel("账号", { exact: true });
-      const password = dialog.getByLabel("密码", { exact: true });
-      await username.fill("sample"); await password.fill("test-password");
-      await dialog.getByRole("button", { name: "登录", exact: true }).last().click();
+      let actionTabs = dialog.getByRole("group", { name: "Account Action", exact: true });
+      await assertSlider(actionTabs, 3, 0, "auth:Sign In");
+      await actionTabs.getByRole("button", { name: "Register", exact: true }).click();
+      const regDialog = page.getByRole("dialog", { name: "Create Account", exact: true });
+      await regDialog.waitFor();
+      actionTabs = regDialog.getByRole("group", { name: "Account Action", exact: true });
+      await assertSlider(actionTabs, 3, 1, "auth:Register");
+      await regDialog.getByLabel("Email", { exact: true }).fill("fixture@aurastream.invalid");
+      await regDialog.getByLabel("Password", { exact: true }).fill("test-password");
+      await regDialog.getByLabel("Display Name", { exact: true }).fill("Sample User");
+      await regDialog.getByRole("button", { name: "Create Account", exact: true }).click();
+      await regDialog.waitFor({ state: "hidden" });
+      const sampleHeading = page.getByRole("heading", { name: "Sample User", exact: true });
+      await sampleHeading.waitFor();
+      await sampleHeading.click();
+      const accountModal = page.getByRole("dialog", { name: "My Local Library", exact: true });
+      await accountModal.waitFor();
+      await accountModal.getByRole("button", { name: "Sign Out", exact: true }).click();
+      await accountModal.waitFor({ state: "hidden" });
+      await signInBtn.waitFor();
+      await signInBtn.click();
+      dialog = page.getByRole("dialog", { name: "Sign In with Email", exact: true });
+      await dialog.waitFor();
+      actionTabs = dialog.getByRole("group", { name: "Account Action", exact: true });
+      await assertSlider(actionTabs, 3, 0, "auth:Sign In restored");
+      const emailInput = dialog.getByLabel("Email", { exact: true });
+      const passwordInput = dialog.getByLabel("Password", { exact: true });
+      await emailInput.fill("fixture@aurastream.invalid");
+      await passwordInput.fill("wrong-password");
+      await dialog.getByRole("button", { name: "Sign In", exact: true }).last().click();
       await dialog.getByRole("alert").waitFor();
-      assert.equal(await dialog.getByRole("alert").textContent(), "账号或密码不正确");
-      assert.equal(await username.inputValue(), "sample", "An unsuccessful login preserves the account input");
-      assert.equal(await page.getByRole("button", { name: "观看历史", exact: true }).count(), 0, "The login dialog makes its background inert");
+      assert.equal(await dialog.getByRole("alert").textContent(), "Incorrect email or password.");
+      assert.equal(await emailInput.inputValue(), "fixture@aurastream.invalid", "An unsuccessful login preserves the email input");
+      assert.equal(await page.getByRole("heading", { name: "Profile", exact: true }).count(), 0, "The login dialog makes its background inert");
       await dialog.evaluate(el => {
         const items = [...el.querySelectorAll("button:not(:disabled), input:not(:disabled)")].filter(item => item.tabIndex >= 0 && item.getClientRects().length);
         items.at(-1).focus();
@@ -313,15 +342,17 @@ try {
       await shot("login");
       await page.keyboard.press("Escape");
       await dialog.waitFor({ state: "hidden" });
-      await page.waitForFunction(el => el === document.activeElement, await accountButton.elementHandle());
-      await accountButton.click(); await dialog.waitFor();
-      await returnFromOverlay(); await dialog.waitFor({ state: "hidden" });
-      await accountButton.waitFor();
-      check("visible form labels, login errors, focus trap, Escape, and overlay back");
+      await page.waitForFunction(el => el === document.activeElement, await signInBtn.elementHandle());
+      await signInBtn.click();
+      await dialog.waitFor();
+      await returnFromOverlay();
+      await dialog.waitFor({ state: "hidden" });
+      await signInBtn.waitFor();
+      check("visible form labels, vault signup/errors, focus trap, Escape, and overlay back");
 
-      await page.getByRole("button", { name: "设置", exact: true }).click();
-      const security = page.getByRole("switch", { name: "严格安全模式", exact: true });
-      const appearance = page.getByRole("group", { name: "外观模式", exact: true });
+      await page.getByRole("button", { name: /Settings/ }).first().click();
+      const security = page.getByRole("switch", { name: "Strict Security Mode", exact: true });
+      const appearance = page.getByRole("group", { name: "Appearance Mode", exact: true });
       await security.waitFor();
       await page.locator(".ios-setting-group").first().waitFor();
       await page.waitForTimeout(550);
@@ -353,7 +384,7 @@ try {
       result.switches = [];
       for (const item of await switches.all()) {
         await item.scrollIntoViewIfNeeded();
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(180);
         const bounds = await item.boundingBox();
         const target = await item.evaluate(el => ({ width: el.offsetWidth, height: el.offsetHeight }));
         const visual = await item.evaluate(el => {
@@ -364,13 +395,22 @@ try {
           const shell = el.closest(".plat-android");
           const activeIndicator = document.querySelector(".ios-mobile-nav .hg-drop .ios-liquid-fill");
           const activeTab = document.querySelector('.ios-mobile-nav-item[aria-current="page"]');
-          return { platform: el.dataset.platform, trackWidth: track.width, trackHeight: track.height,
-            trackRadius: track.borderRadius, trackBorder: track.borderTopWidth, trackBackground: track.backgroundImage,
-            thumbBackground: thumb.backgroundImage, thumbRadius: thumb.borderRadius,
-            thumbWidth: thumbBounds.width, thumbLeft: thumbBounds.left - rail.left, thumbRight: rail.right - thumbBounds.right,
+          return {
+            platform: el.dataset.platform,
+            trackWidth: track.width,
+            trackHeight: track.height,
+            trackRadius: track.borderRadius,
+            trackBorder: track.borderTopWidth,
+            trackBackground: track.backgroundImage,
+            thumbBackground: thumb.backgroundImage,
+            thumbRadius: thumb.borderRadius,
+            thumbWidth: thumbBounds.width,
+            thumbLeft: thumbBounds.left - rail.left,
+            thumbRight: rail.right - thumbBounds.right,
             activeIndicator: activeIndicator ? getComputedStyle(activeIndicator).backgroundColor : null,
             activeTabColor: activeTab ? getComputedStyle(activeTab).color : null,
-            androidShell: !!shell };
+            androidShell: !!shell,
+          };
         });
         result.switches.push({ label: await item.getAttribute("aria-label"), width: target.width, height: target.height, visualBounds: bounds, ...visual });
         assert(target.width >= 44 && target.height >= (test.android ? 48 : 44), "Switch touch target meets the platform minimum");
@@ -403,22 +443,27 @@ try {
         assert(Math.abs(off.right - expectedRight) < 1.1, `${visual.platform} switch thumb clears the correct track edge`);
         const wasOn = await item.getAttribute("aria-checked") === "true";
         const targetState = !wasOn;
-        await item.evaluate((el, on) => { el.dataset.state = on ? "on" : "off"; }, targetState);
-        await page.waitForTimeout(360);
+        await item.evaluate(async (el, on) => {
+          el.dataset.state = on ? "on" : "off";
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          await Promise.all(el.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => undefined)));
+        }, targetState);
         const moved = await item.evaluate(el => {
           const rail = el.querySelector(".ios-switch-track").getBoundingClientRect();
           const thumb = el.querySelector(".ios-switch-thumb").getBoundingClientRect();
           return { left: thumb.left - rail.left, right: rail.right - thumb.right };
         });
-        const turnedOn = targetState;
-        const movedLeft = turnedOn ? (test.android ? 25 : 27) : (test.android ? 0 : 3);
-        const movedRight = turnedOn ? (test.android ? 1 : 3) : (test.android ? 26 : 27);
+        const movedLeft = targetState ? (test.android ? 25 : 27) : (test.android ? 0 : 3);
+        const movedRight = targetState ? (test.android ? 1 : 3) : (test.android ? 26 : 27);
         assert(Math.abs(moved.left - movedLeft) < 1.1 && Math.abs(moved.right - movedRight) < 1.1,
           `${visual.platform} switch reaches both travel endpoints after activation`);
         const actualState = await item.getAttribute("aria-checked") === "true";
         assert.equal(actualState, wasOn, "Layout probe leaves the application switch state unchanged");
-        await item.evaluate((el, on) => { el.dataset.state = on ? "on" : "off"; }, wasOn);
-        await page.waitForTimeout(360);
+        await item.evaluate(async (el, on) => {
+          el.dataset.state = on ? "on" : "off";
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          await Promise.all(el.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => undefined)));
+        }, wasOn);
       }
       const switchTravel = await security.evaluate(el => {
         const rail = el.querySelector(".ios-switch-track").getBoundingClientRect();
@@ -429,14 +474,14 @@ try {
       assert.equal(switchTravel.left, strictState ? (test.android ? 25 : 27) : (test.android ? 0 : 3), "Security switch thumb matches its state");
       const androidShell = page.locator(".plat-android").first();
       const material = await page.locator(".ios-setting-group").first().evaluate(el => {
-        const root = getComputedStyle(document.documentElement);
+        const rootStyle = getComputedStyle(document.documentElement);
         const group = getComputedStyle(el);
         return {
           blur: group.backdropFilter || group.webkitBackdropFilter,
-          surface: root.getPropertyValue("--glass-card-bg").trim(),
-          background: root.getPropertyValue("--p-bg").trim(),
-          text: root.getPropertyValue("--p-on").trim(),
-          muted: root.getPropertyValue("--p-mut").trim(),
+          surface: rootStyle.getPropertyValue("--glass-card-bg").trim(),
+          background: rootStyle.getPropertyValue("--p-bg").trim(),
+          text: rootStyle.getPropertyValue("--p-on").trim(),
+          muted: rootStyle.getPropertyValue("--p-mut").trim(),
         };
       });
       assert.match(material.blur, new RegExp(`blur\\(${test.theme === "light" ? 28 : 22}px\\)`), "Glass panels use the theme-specific blur");
@@ -458,35 +503,48 @@ try {
         };
         assert(contrast(material.text, material.background) >= 4.5, "Light primary text meets WCAG AA contrast");
         assert(contrast(material.muted, material.background) >= 4.5, "Light secondary text meets WCAG AA contrast");
-        assert.match(material.surface, /\/\s*\.8[0-9]/, "Light glass remains dense enough to separate from media");
+        assert.match(material.surface, /\/\s*\.[89][0-9]/, "Light glass remains dense enough to separate from media");
       }
-      await appearance.getByRole("button", { name: test.theme === "dark" ? "浅色" : "深色", exact: true }).click();
+      await appearance.scrollIntoViewIfNeeded();
+      await appearance.getByRole("button", { name: test.theme === "dark" ? "Light" : "Dark", exact: true }).click();
       await assertSlider(appearance, 3, test.theme === "dark" ? 1 : 2, "appearance:opposite");
       const oppositeTheme = test.theme === "dark" ? "light" : "dark";
       await page.waitForFunction(theme => document.documentElement.dataset.theme === theme, oppositeTheme);
       const beforeThemeBounds = test.android ? await androidShell.boundingBox() : null;
-      await appearance.getByRole("button", { name: test.theme === "dark" ? "深色" : "浅色", exact: true }).click();
+      if (!test.reduced) {
+        await page.evaluate(() => {
+          window.__sawThemeTransition = false;
+          const mo = new MutationObserver(() => {
+            if (document.documentElement.classList.contains("theme-transitioning")) {
+              window.__sawThemeTransition = true;
+              mo.disconnect();
+            }
+          });
+          mo.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+        });
+      }
+      await appearance.getByRole("button", { name: test.theme === "dark" ? "Dark" : "Light", exact: true }).click();
       await page.waitForFunction(theme => document.documentElement.dataset.theme === theme, test.theme);
-      if (!test.reduced) assert(await page.locator("html").evaluate(el => el.classList.contains("theme-transitioning")), "Theme swap starts its transition wash");
+      if (!test.reduced) assert(await page.evaluate(() => window.__sawThemeTransition || document.documentElement.classList.contains("theme-transitioning")), "Theme swap starts its transition wash");
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       const lightBounds = test.android ? await androidShell.boundingBox() : null;
       if (test.android) assert.deepEqual(lightBounds, beforeThemeBounds, "Android page geometry stays stable during theme change");
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), "Theme change does not cause horizontal layout overflow");
-      await appearance.getByRole("button", { name: "深色", exact: true }).click();
+      await appearance.getByRole("button", { name: "Dark", exact: true }).click();
       await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
-      await assertSlider(appearance, 3, 2, "appearance:深色");
-      await appearance.getByRole("button", { name: "跟随", exact: true }).click();
-      await assertSlider(appearance, 3, 0, "appearance:跟随");
+      await assertSlider(appearance, 3, 2, "appearance:Dark");
+      await appearance.getByRole("button", { name: "System", exact: true }).click();
+      await assertSlider(appearance, 3, 0, "appearance:System");
       await page.emulateMedia({ colorScheme: "light" });
       await page.waitForFunction(() => document.documentElement.dataset.theme === "light");
       await page.emulateMedia({ colorScheme: "dark" });
       await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
-      await appearance.getByRole("button", { name: "浅色", exact: true }).scrollIntoViewIfNeeded();
       await appearance.scrollIntoViewIfNeeded();
       await shot("settings");
-      const clearCache = page.getByRole("button").filter({ has: page.getByText("清理缓存", { exact: true }) });
+      const clearCache = page.getByRole("button").filter({ has: page.getByText("Clear Cache", { exact: true }) });
+      await clearCache.scrollIntoViewIfNeeded();
       await clearCache.click();
-      const confirmation = page.getByRole("dialog");
+      const confirmation = page.getByRole("dialog", { name: "Clear Cache", exact: true });
       await confirmation.waitFor();
       await returnFromOverlay();
       await confirmation.waitFor({ state: "hidden" });

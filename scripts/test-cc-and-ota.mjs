@@ -58,6 +58,7 @@ try {
   console.log("PASS: Static zero-emoji and zero-voiceDub checks passed");
 
   // 2. Runtime browser tests against Vite modules
+  const pkgVersion = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
   vite = await createServer({
     root,
     server: { host: "127.0.0.1", port: 0, strictPort: false },
@@ -95,7 +96,7 @@ try {
   await page.goto(origin);
   await page.waitForLoadState("networkidle");
 
-  const results = await page.evaluate(async () => {
+  const results = await page.evaluate(async (ver) => {
     const vttMod = await import("/src/subtitles/vttParser.ts");
     const subMod = await import("/src/subtitles/aiSubtitleService.ts");
     const otaMod = await import("/src/otaUpdater.ts");
@@ -128,10 +129,10 @@ try {
     // E. OTA ABI asset resolution + fallback release URLs
     const rateLimitedInfo = {
       current: "0.1.29",
-      latest: "0.1.30",
-      tag: "v0.1.30",
+      latest: ver,
+      tag: `v${ver}`,
       has_update: true,
-      url: "https://github.com/cozgams/AuraStream/releases/tag/v0.1.30",
+      url: `https://github.com/cozgams/AuraStream/releases/tag/v${ver}`,
       asset: null,
     };
     const arm64Asset = otaMod.resolveBestUpdateAsset(rateLimitedInfo, "arm64");
@@ -236,7 +237,7 @@ try {
       sleepRemAtExpire,
       sleepTriggeredCount,
     };
-  });
+  }, pkgVersion);
 
   assert.equal(results.parsedCount, 1);
   assert.ok(results.parsedEn.includes("First line of dialogue"), "Line 1 preserved");
@@ -251,15 +252,15 @@ try {
   assert.equal(results.fetchedRemovedSource, "none");
   assert.equal(
     results.arm64Url,
-    "https://github.com/cozgams/AuraStream/releases/download/v0.1.30/AuraStream_0.1.30_arm64.apk"
+    `https://github.com/cozgams/AuraStream/releases/download/v${pkgVersion}/AuraStream_${pkgVersion}_arm64.apk`
   );
   assert.equal(
     results.armUrl,
-    "https://github.com/cozgams/AuraStream/releases/download/v0.1.30/AuraStream_0.1.30_arm.apk"
+    `https://github.com/cozgams/AuraStream/releases/download/v${pkgVersion}/AuraStream_${pkgVersion}_arm.apk`
   );
   assert.equal(
     results.x86Url,
-    "https://github.com/cozgams/AuraStream/releases/download/v0.1.30/AuraStream_0.1.30_x86_64.apk"
+    `https://github.com/cozgams/AuraStream/releases/download/v${pkgVersion}/AuraStream_${pkgVersion}_x86_64.apk`
   );
   assert.equal(results.smartDefault, false, "Smart Auto-Download must default OFF to save data");
   assert.equal(results.preloadedDownloaded, false, "preloadEpisode must skip already-downloaded episodes");

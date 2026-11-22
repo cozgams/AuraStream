@@ -43,7 +43,7 @@ export function usePlaybackActivity(
       // Include pauses made through native/PiP controls, which bypass our buttons.
       if (v.readyState >= 2) wanted.current = !v.paused;
       v.pause();
-      // Allow background buffering so video finishes loading while user is in another app or tab
+      if (hls?.levels.length) hls.stopLoad();
       latest.current.trace("page.suspended", { play_wanted: wanted.current });
     } else if (!previous.current) {
       if (hls?.levels.length && !hls.loadingEnabled) hls.startLoad(v.currentTime > 0 ? v.currentTime : -1);
@@ -60,7 +60,7 @@ export function usePlaybackActivity(
       if (latest.current.active) return;
       latest.current.trace("play.blocked", { source: "media_event", inactive: true });
       v.pause();
-      // Do not stop HLS fragment loading to allow background buffering
+      if (hlsRef.current?.levels.length) hlsRef.current.stopLoad();
     };
     v.addEventListener("play", guard);
     v.addEventListener("playing", guard);

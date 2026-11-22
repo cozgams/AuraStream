@@ -376,7 +376,6 @@ class MainActivity : TauriActivity() {
     WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
     currentWebView = webView
     webView.settings.domStorageEnabled = true
-    webView.settings.databaseEnabled = true
     webView.settings.mediaPlaybackRequiresUserGesture = false
     webView.addJavascriptInterface(AuraExportBridge(this), "AuraNativeExport")
   }
@@ -428,12 +427,12 @@ class MainActivity : TauriActivity() {
     }
 
     @JavascriptInterface
-    fun enterPictureInPictureWithAspect(num: Int, den: Int): Boolean {
+    fun enterPictureInPictureWithAspect(@Suppress("UNUSED_PARAMETER") num: Int, @Suppress("UNUSED_PARAMETER") den: Int): Boolean {
       return false
     }
 
     @JavascriptInterface
-    fun setAutoPip(enabled: Boolean) {
+    fun setAutoPip(@Suppress("UNUSED_PARAMETER") enabled: Boolean) {
       activity.autoPipEnabled = false
     }
 
@@ -642,7 +641,12 @@ class MainActivity : TauriActivity() {
     @JavascriptInterface
     fun vibrateHaptic(type: String) {
       try {
-        val vibrator = activity.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+          (activity.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager)?.defaultVibrator
+        } else {
+          @Suppress("DEPRECATION")
+          activity.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        } ?: return
         if (!vibrator.hasVibrator()) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
           val effect = when (type) {
