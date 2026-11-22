@@ -50,6 +50,7 @@ import {
   resumeAllDownloads,
   getActiveDownloadsSummary,
   formatBytes,
+  formatDownloadError,
   syncOfflineEpisodesFromIndexedDB,
   subscribeBatchProgress,
   cancelBatchDownload,
@@ -823,8 +824,8 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
           Main Body Content
           ========================================================================= */}
       <div
-        className="ios-page-body flex-1 scroll-y px-4 pt-0"
-        style={{ paddingBottom: "calc(var(--sab, 48px) + 84px)" }}
+        className="ios-page-body flex-1 scroll-y overflow-x-hidden px-4 pt-0"
+        style={{ paddingBottom: "calc(var(--sab, 48px) + 120px)" }}
       >
         {/* =====================================================================
             1. Overview Page (AuraStream Profile / You Tab)
@@ -1225,7 +1226,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
           /* =====================================================================
               2. Downloads Hub View (Image 2 & Image 3 Screen 1)
               ===================================================================== */
-          <div className="flex flex-col gap-3.5 a-rise">
+          <div className="flex flex-col gap-3.5 a-rise min-w-0 w-full overflow-x-hidden">
             {/* Search Input Bar (when search is toggled in top bar) */}
             {downloadSearchOpen && (
               <div className="relative flex items-center bg-white/95 dark:bg-neutral-900/95 border border-blue-200/90 dark:border-blue-500/30 rounded-full px-3.5 py-2 shadow-xs a-fade-in">
@@ -1299,31 +1300,37 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
             {activeDownloads.length > 0 && (() => {
               const downloadingItemsCount = activeDownloads.filter((d) => d.status === "downloading").length;
               const queuedItemsCount = activeDownloads.filter((d) => d.status === "queued").length;
+              const failedItemsCount = activeDownloads.filter((d) => d.status === "error").length;
+              const pausedItemsCount = activeDownloads.filter((d) => d.status === "paused").length;
+              const statusParts: string[] = [];
+              if (downloadingItemsCount > 0) statusParts.push(`${downloadingItemsCount} downloading`);
+              if (queuedItemsCount > 0) statusParts.push(`${queuedItemsCount} queued`);
+              if (failedItemsCount > 0) statusParts.push(`${failedItemsCount} failed`);
+              if (pausedItemsCount > 0) statusParts.push(`${pausedItemsCount} paused`);
+              if (statusParts.length === 0) statusParts.push(`${activeDownloads.length} active`);
+              const hasFailedOnly = failedItemsCount > 0 && pausedItemsCount === 0;
               return (
-              <div className="flex flex-col gap-2.5 mb-1">
-                <div className="flex items-center justify-between px-0.5 gap-2">
-                  <div className="text-[12px] font-black text-[#0f172a] dark:text-neutral-100 uppercase tracking-wider flex items-center gap-2 min-w-0">
-                    <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse shrink-0" />
-                    <span className="truncate">
-                      Downloading ({downloadingItemsCount || activeDownloads.length})
-                      {queuedItemsCount > 0 ? ` · ${queuedItemsCount} queued` : ""}
-                    </span>
+              <div className="flex flex-col gap-2.5 mb-1 min-w-0 w-full">
+                <div className="flex flex-wrap items-center justify-between px-0.5 gap-x-2 gap-y-1.5 min-w-0">
+                  <div className="text-[11.5px] font-black text-[#0f172a] dark:text-neutral-100 uppercase tracking-wider flex items-center gap-2 min-w-0">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${downloadingItemsCount > 0 ? "bg-blue-500 animate-pulse" : failedItemsCount > 0 ? "bg-red-500" : "bg-amber-500"}`} />
+                    <span className="break-words">{statusParts.join(" · ")}</span>
                   </div>
-                  <div className="flex items-center gap-2.5 shrink-0">
-                    {activeDownloads.some((d) => d.status === "paused" || d.status === "error") && (
+                  <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                    {(failedItemsCount > 0 || pausedItemsCount > 0) && (
                       <button
                         type="button"
                         onClick={() => void resumeAllDownloads()}
-                        className="text-[11.5px] font-bold text-[#16a34a] dark:text-emerald-400 hover:underline pressable"
+                        className="px-2 py-0.5 rounded-full bg-emerald-500/12 text-[11px] font-bold text-[#16a34a] dark:text-emerald-400 hover:bg-emerald-500/20 pressable whitespace-nowrap"
                       >
-                        Resume All
+                        {hasFailedOnly ? "Retry Failed" : "Resume All"}
                       </button>
                     )}
-                    {activeDownloads.some((d) => d.status === "downloading" || d.status === "queued") && (
+                    {(downloadingItemsCount > 0 || queuedItemsCount > 0) && (
                       <button
                         type="button"
                         onClick={() => pauseAllDownloads()}
-                        className="text-[11.5px] font-bold text-[#1a73e8] dark:text-blue-400 hover:text-[#1557b0] pressable"
+                        className="px-2 py-0.5 rounded-full bg-blue-500/12 text-[11px] font-bold text-[#1a73e8] dark:text-blue-400 hover:bg-blue-500/20 pressable whitespace-nowrap"
                       >
                         Pause All
                       </button>
@@ -1331,7 +1338,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                     <button
                       type="button"
                       onClick={() => cancelAllDownloads()}
-                      className="text-[11.5px] font-bold text-red-500 hover:underline pressable"
+                      className="px-2 py-0.5 rounded-full bg-red-500/12 text-[11px] font-bold text-red-500 hover:bg-red-500/20 pressable whitespace-nowrap"
                     >
                       Cancel All
                     </button>
@@ -1341,9 +1348,9 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                 {activeDownloads.map((item) => (
                   <div
                     key={item.id}
-                    className="bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md rounded-2xl border border-blue-100 dark:border-blue-500/25 shadow-[0_4px_20px_-2px_rgba(37,99,235,0.08)] p-3 flex flex-col gap-2.5"
+                    className="bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md rounded-2xl border border-blue-100 dark:border-blue-500/25 shadow-[0_4px_20px_-2px_rgba(37,99,235,0.08)] p-3 flex flex-col gap-2.5 overflow-hidden min-w-0"
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
                       <div className="w-12 aspect-[3/4] rounded-xl overflow-hidden shrink-0 shadow-xs border border-black/5 dark:border-white/10 bg-slate-100 dark:bg-neutral-800 relative flex items-center justify-center">
                         {(() => {
                           const coverSrc = getOfflineCoverUrl({ id: item.id, cover: item.cover || "" }, 160);
@@ -1368,6 +1375,22 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                         </div>
                         <div className="text-[11px] text-[#64748b] dark:text-neutral-400 mt-0.5 flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
                           <span className="shrink-0">Episode {item.episode}</span>
+                          {(item.status === "downloading" || item.status === "paused" || item.status === "error") && item.progress > 0 && (
+                            <>
+                              <span className="shrink-0">·</span>
+                              <span
+                                className={`shrink-0 font-semibold tabular-nums ${
+                                  item.status === "error"
+                                    ? "text-red-500"
+                                    : item.status === "paused"
+                                    ? "text-slate-500 dark:text-neutral-400"
+                                    : "text-blue-600 dark:text-blue-400"
+                                }`}
+                              >
+                                {item.progress}%
+                              </span>
+                            </>
+                          )}
                           <span className="shrink-0">·</span>
                           <span
                             className={`font-semibold truncate ${
@@ -1394,9 +1417,9 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                             {item.status === "queued"
                               ? "Waiting in background queue"
                               : item.totalBytes > 0
-                              ? `${formatBytes(item.downloadedBytes)} / ${formatBytes(item.totalBytes)} (${item.progress}%)`
+                              ? `${formatBytes(item.downloadedBytes)} / ${formatBytes(item.totalBytes)}`
                               : item.downloadedBytes > 0
-                              ? `${formatBytes(item.downloadedBytes)} (${item.progress}%)`
+                              ? `${formatBytes(item.downloadedBytes)}`
                               : "Preparing..."}
                           </span>
                           {item.status === "downloading" && item.etaFormatted && item.etaFormatted !== "--" && (
@@ -1444,15 +1467,29 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                     </div>
 
                     {/* Live Progress Bar */}
-                    <div className="w-full h-1.5 rounded-full bg-blue-100 dark:bg-blue-950/60 overflow-hidden">
+                    <div
+                      className={`w-full h-1.5 rounded-full overflow-hidden ${
+                        item.status === "error"
+                          ? "bg-red-100 dark:bg-red-950/50"
+                          : item.status === "paused"
+                          ? "bg-slate-200 dark:bg-neutral-800"
+                          : "bg-blue-100 dark:bg-blue-950/60"
+                      }`}
+                    >
                       <div
-                        className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-300"
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          item.status === "error"
+                            ? "bg-red-500"
+                            : item.status === "paused"
+                            ? "bg-slate-400 dark:bg-neutral-500"
+                            : "bg-gradient-to-r from-blue-500 to-indigo-500"
+                        }`}
                         style={{ width: `${item.status === "queued" ? 0 : Math.max(2, item.progress)}%` }}
                       />
                     </div>
                     {item.error && (
-                      <div className="text-[11px] text-red-500 font-medium">
-                        {item.error}
+                      <div className="px-2.5 py-1.5 rounded-xl bg-red-500/8 border border-red-500/15 text-[11px] text-red-600 dark:text-red-400 font-medium leading-snug break-words [overflow-wrap:anywhere]">
+                        {formatDownloadError(item.error)}
                       </div>
                     )}
                   </div>
@@ -1557,19 +1594,24 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
 
             {/* Grouped Downloaded Shows */}
             {sortedDramaGroups.length > 0 ? (
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-3 min-w-0">
                 {sortedDramaGroups.map((group) => {
                   const isExpanded = !collapsedDramas.has(group.videoId);
-                  const totalMB = (group.totalBytes / (1024 * 1024)).toFixed(0);
 
                   const allGroupKeys = group.episodes.map((e) => `${e.videoId}_${e.episode}`);
                   const allSelected = allGroupKeys.every((k) => selectedKeys.has(k));
                   const someSelected = allGroupKeys.some((k) => selectedKeys.has(k));
 
+                  const seriesQueue = activeDownloads.filter((d) => d.videoId === group.videoId);
+                  const runningCount = seriesQueue.filter((d) => d.status === "downloading" || d.status === "queued").length;
+                  const incompleteCount = seriesQueue.filter((d) => d.status === "error" || d.status === "paused").length;
+                  const totalKnown = detailCache[group.videoId]?.episodes?.length || detailCache[group.videoId]?.episode_count || 0;
+                  const maxSavedEp = group.episodes.reduce((m, e) => Math.max(m, e.episode), 0);
+
                   return (
                     <div
                       key={group.videoId}
-                      className="bg-white/90 dark:bg-neutral-900/90 backdrop-blur-md rounded-2xl border border-white/70 dark:border-white/10 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-3 flex flex-col gap-2.5"
+                      className="bg-white/90 dark:bg-neutral-900/90 backdrop-blur-md rounded-2xl border border-white/70 dark:border-white/10 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-3 flex flex-col gap-2.5 overflow-hidden min-w-0"
                     >
                       <div className="flex items-center gap-2.5">
                         {selectMode ? (
@@ -1673,19 +1715,39 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                             {formatDramaTitle(group.title)}
                           </div>
                           <div className="text-[11.5px] text-[#64748b] dark:text-neutral-400 mt-0.5 tabular-nums">
-                            {group.episodes.length} {group.episodes.length === 1 ? "episode" : "episodes"} · {totalMB} MB
+                            {group.episodes.length} {group.episodes.length === 1 ? "episode" : "episodes"} · {formatBytes(group.totalBytes)}
                           </div>
                           <div className="flex items-center gap-1.5 mt-1">
-                            {(() => {
-                              const totalKnown = detailCache[group.videoId]?.episodes?.length || detailCache[group.videoId]?.episode_count || 0;
-                              const isPartial = totalKnown > 0 && group.episodes.length < totalKnown;
-                              return (
-                                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#16a34a] dark:text-emerald-400">
-                                  <ICheck size={11} strokeWidth={3} />
-                                  <span>{isPartial ? `${group.episodes.length} of ${totalKnown} Saved` : "All Downloaded"}</span>
-                                </span>
-                              );
-                            })()}
+                            {runningCount > 0 ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#1a73e8] dark:text-blue-400">
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                                <span>Downloading · {group.episodes.length} saved</span>
+                              </span>
+                            ) : incompleteCount > 0 ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-600 dark:text-amber-400">
+                                <span>{group.episodes.length} saved · {incompleteCount} incomplete</span>
+                              </span>
+                            ) : totalKnown > 0 && group.episodes.length < totalKnown ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#16a34a] dark:text-emerald-400">
+                                <ICheck size={11} strokeWidth={3} />
+                                <span>{group.episodes.length} of {totalKnown} Saved</span>
+                              </span>
+                            ) : totalKnown > 0 && group.episodes.length >= totalKnown ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#16a34a] dark:text-emerald-400">
+                                <ICheck size={11} strokeWidth={3} />
+                                <span>All Downloaded</span>
+                              </span>
+                            ) : maxSavedEp > group.episodes.length ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#16a34a] dark:text-emerald-400">
+                                <ICheck size={11} strokeWidth={3} />
+                                <span>{group.episodes.length} Episodes Saved</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#16a34a] dark:text-emerald-400">
+                                <ICheck size={11} strokeWidth={3} />
+                                <span>{group.episodes.length} {group.episodes.length === 1 ? "Episode" : "Episodes"} Saved</span>
+                              </span>
+                            )}
                           </div>
                         </button>
 
@@ -1725,10 +1787,10 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
 
                       {/* Mini Episode Thumbnails Row (Collapsible) */}
                       {isExpanded && (
-                        <div className="flex gap-2.5 overflow-x-auto scrollbar-none pt-1 border-t border-slate-100 dark:border-white/10">
+                        <div className="flex gap-2.5 overflow-x-auto snap-x snap-mandatory pr-1 scrollbar-none pt-1.5 border-t border-slate-100 dark:border-white/10">
                           {group.episodes.map((ep) => {
                             const isChecked = selectedKeys.has(`${ep.videoId}_${ep.episode}`);
-                            const epMB = (ep.sizeBytes / (1024 * 1024)).toFixed(1);
+                            const epSize = formatBytes(ep.sizeBytes);
 
                             return (
                               <div
@@ -1749,7 +1811,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                                     });
                                   }
                                 }}
-                                className="w-28 shrink-0 flex flex-col gap-1 cursor-pointer pressable active:scale-95 transition-all"
+                                className="w-[104px] shrink-0 snap-start flex flex-col gap-1 cursor-pointer pressable active:scale-95 transition-all"
                               >
                                 <div className="w-full aspect-[16/10] rounded-lg overflow-hidden relative border border-black/5 bg-slate-200 dark:bg-neutral-800">
                                   {(() => {
@@ -1777,7 +1839,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                                   Ep. {ep.episode}
                                 </div>
                                 <div className="text-[10px] text-[#64748b] dark:text-neutral-400 tabular-nums">
-                                  {epMB} MB
+                                  {epSize}
                                 </div>
                               </div>
                             );
@@ -1803,6 +1865,9 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                     <div className="text-[11.5px] text-[#64748b] dark:text-neutral-400">Enjoy your offline content!</div>
                   </div>
                 </div>
+
+                {/* Safe bottom scroll margin so floating bottom tabs never obstruct list */}
+                <div className="h-16 shrink-0 pointer-events-none" aria-hidden="true" />
               </div>
             ) : (
               <div className="p-8 text-center flex flex-col items-center justify-center gap-2 bg-white/80 dark:bg-neutral-900/80 rounded-2xl border border-white/60 dark:border-white/10 shadow-xs">
@@ -1904,16 +1969,42 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                   {formatDramaTitle(selectedSeriesGroup.title)}
                 </h2>
                 <div className="text-[12.5px] text-[#64748b] dark:text-neutral-400 mt-0.5 tabular-nums">
-                  {selectedSeriesGroup.episodes.length} {selectedSeriesGroup.episodes.length === 1 ? "episode" : "episodes"} · {(selectedSeriesGroup.totalBytes / (1024 * 1024 * 1024) >= 1 ? `${(selectedSeriesGroup.totalBytes / (1024 * 1024 * 1024)).toFixed(1)} GB` : `${(selectedSeriesGroup.totalBytes / (1024 * 1024)).toFixed(0)} MB`)}
+                  {selectedSeriesGroup.episodes.length} {selectedSeriesGroup.episodes.length === 1 ? "episode" : "episodes"} · {formatBytes(selectedSeriesGroup.totalBytes)}
                 </div>
                 <div className="flex items-center gap-1.5 mt-1">
                   {(() => {
+                    const seriesQueue = activeDownloads.filter((d) => d.videoId === selectedSeriesGroup.videoId);
+                    const runningCount = seriesQueue.filter((d) => d.status === "downloading" || d.status === "queued").length;
+                    const incompleteCount = seriesQueue.filter((d) => d.status === "error" || d.status === "paused").length;
                     const totalKnown = detailCache[selectedSeriesGroup.videoId]?.episodes?.length || detailCache[selectedSeriesGroup.videoId]?.episode_count || 0;
-                    const isPartial = totalKnown > 0 && selectedSeriesGroup.episodes.length < totalKnown;
+                    const maxSavedEp = selectedSeriesGroup.episodes.reduce((m, e) => Math.max(m, e.episode), 0);
+                    if (runningCount > 0) {
+                      return (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#1a73e8] dark:text-blue-400">
+                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                          <span>Downloading · {selectedSeriesGroup.episodes.length} saved</span>
+                        </span>
+                      );
+                    }
+                    if (incompleteCount > 0) {
+                      return (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-600 dark:text-amber-400">
+                          <span>{selectedSeriesGroup.episodes.length} saved · {incompleteCount} incomplete</span>
+                        </span>
+                      );
+                    }
+                    const label =
+                      totalKnown > 0 && selectedSeriesGroup.episodes.length < totalKnown
+                        ? `${selectedSeriesGroup.episodes.length} of ${totalKnown} Saved Offline`
+                        : totalKnown > 0 && selectedSeriesGroup.episodes.length >= totalKnown
+                        ? "All Downloaded"
+                        : maxSavedEp > selectedSeriesGroup.episodes.length
+                        ? `${selectedSeriesGroup.episodes.length} Episodes Saved Offline`
+                        : `${selectedSeriesGroup.episodes.length} ${selectedSeriesGroup.episodes.length === 1 ? "Episode" : "Episodes"} Saved Offline`;
                     return (
                       <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#16a34a] dark:text-emerald-400">
                         <ICheck size={12} strokeWidth={3} />
-                        <span>{isPartial ? `${selectedSeriesGroup.episodes.length} of ${totalKnown} Saved Offline` : "All Downloaded"}</span>
+                        <span>{label}</span>
                       </span>
                     );
                   })()}

@@ -176,6 +176,8 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         interstitialsController: undefined,
         contentSteeringController: undefined,
         enableInterstitialPlayback: false,
+        enableWebVTT: true,
+        enableCEA708Captions: true,
         // Disable worker in WKWebView for stability on iOS
         enableWorker: platform !== "ios",
         // Prefer standard MSE on macOS; hls.js handles MMS-only fallback and seek recovery.
@@ -184,14 +186,14 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         startFragPrefetch: true,
         progressive: true,
         capLevelToPlayerSize: true,
-        lowLatencyMode: true,
-        maxLoadingDelay: 1,
+        lowLatencyMode: false,
+        maxLoadingDelay: isOfflineLocal ? 0 : 0.5,
         startPosition: resume?.time ?? -1,
-        // Turbo Wi-Fi Buffer: Eagerly pre-buffers up to 120s online; standard buffer from local disk
-        maxBufferLength: isOfflineLocal ? 60 : (fullPreCache ? 120 : 60),
-        maxMaxBufferLength: isOfflineLocal ? 120 : (fullPreCache ? 240 : 120),
-        maxBufferSize: fullPreCache && !isOfflineLocal ? 80 * 1024 * 1024 : 40 * 1024 * 1024,
-        backBufferLength: 45,
+        // Turbo Buffer: Eagerly pre-buffers up to 120s online; full episode buffer for offline local disk
+        maxBufferLength: isOfflineLocal ? 120 : (fullPreCache ? 120 : 60),
+        maxMaxBufferLength: isOfflineLocal ? 240 : (fullPreCache ? 240 : 120),
+        maxBufferSize: isOfflineLocal ? 120 * 1024 * 1024 : (fullPreCache ? 80 * 1024 * 1024 : 40 * 1024 * 1024),
+        backBufferLength: isOfflineLocal ? 90 : 45,
         highBufferWatchdogPeriod: 2,
         maxBufferHole: 0.5,
         nudgeOffset: 0.25,
@@ -209,6 +211,13 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         if (!hls.loadingEnabled && activity.isActive()) hls.startLoad(resume?.time ?? -1);
         if (autoPlayRef.current && !resume) activity.play("manifest_autoplay", true);
+      });
+      hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
+        hls.subtitleDisplay = false;
+        if (hls.subtitleTracks?.length && hls.subtitleTrack === -1) {
+          const enIdx = hls.subtitleTracks.findIndex((tr) => /^en/i.test(tr.lang || tr.name || ""));
+          hls.subtitleTrack = enIdx >= 0 ? enIdx : 0;
+        }
       });
       hls.on(Hls.Events.FRAG_BUFFERED, () => {
         recoverCountRef.current = 0;
@@ -406,7 +415,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
       loop={loop}
       onClick={onClick}
       className={`w-full h-full bg-black ${fit === "cover" ? "object-cover" : "object-contain"} ${className}`}
-      style={{ opacity: ready ? 1 : 0, transition: "opacity .35s" }}
+      style={{ opacity: ready ? 1 : 0, transition: "opacity .15s" }}
       onLoadedData={(e) => {
         const v = e.target as HTMLVideoElement;
         setReady(true);

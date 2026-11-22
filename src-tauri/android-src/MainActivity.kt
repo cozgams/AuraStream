@@ -275,6 +275,10 @@ class MainActivity : TauriActivity() {
     super.onResume()
     isAppInForeground = true
     isForegroundGlobal = true
+    AuraDownloadService.clearCompletedSummary()
+    try {
+      androidx.core.app.NotificationManagerCompat.from(this).cancel(AuraDownloadService.COMPLETE_NOTIFICATION_ID)
+    } catch (_: Exception) {}
     try {
       currentWebView?.onResume()
       currentWebView?.resumeTimers()
@@ -345,18 +349,7 @@ class MainActivity : TauriActivity() {
   }
 
   private fun createDownloadNotificationChannel() {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager ?: return
-      val completeChannel = android.app.NotificationChannel(
-        AuraDownloadService.COMPLETE_CHANNEL_ID,
-        "Completed Downloads",
-        android.app.NotificationManager.IMPORTANCE_DEFAULT
-      ).apply {
-        description = "Alerts when offline episodes finish downloading"
-        setShowBadge(true)
-      }
-      manager.createNotificationChannel(completeChannel)
-    }
+    AuraDownloadService.ensureSilentChannels(this)
   }
 
   private fun requestNotificationPermission() {
@@ -503,37 +496,12 @@ class MainActivity : TauriActivity() {
             AuraDownloadService.instance?.refreshNotification(activity.activeDownloadCount)
           }
           val notifId = safeNotifId(id)
-          val notificationManager = androidx.core.app.NotificationManagerCompat.from(activity)
-          notificationManager.cancel(notifId)
-          // Never show popup or status notification while user is actively inside the app
+          androidx.core.app.NotificationManagerCompat.from(activity).cancel(notifId)
+          // Never show completion notification while user is actively inside the app
           if (activity.isAppInForeground) {
             return@runOnUiThread
           }
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-              activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            return@runOnUiThread
-          }
-          val intent = Intent(activity, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-          }
-          val pendingIntent = PendingIntent.getActivity(
-            activity,
-            notifId,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
-          )
-          val sizeStr = if (fileSizeFormatted.isNotEmpty()) " ($fileSizeFormatted)" else ""
-          val summary = "$subtitle$sizeStr saved for offline viewing · Ready to watch"
-          val builder = androidx.core.app.NotificationCompat.Builder(activity, AuraDownloadService.COMPLETE_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download_done)
-            .setContentTitle("Download Complete: $title")
-            .setContentText("$subtitle$sizeStr saved for offline viewing")
-            .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(summary))
-            .setContentIntent(pendingIntent)
-            .setOngoing(false)
-            .setAutoCancel(true)
-            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_DEFAULT)
-          notificationManager.notify(notifId, builder.build())
+          AuraDownloadService.showSilentCompletionBanner(activity, title, subtitle, fileSizeFormatted)
         } catch (e: Exception) {
           e.printStackTrace()
         }
@@ -1572,6 +1540,28 @@ class MainActivity : TauriActivity() {
       } catch (e: Exception) {
         e.printStackTrace()
         false
+      }
+    }
+
+    @JavascriptInterface
+    fun openCaptionSettings(): Boolean {
+      return try {
+        val intent = Intent(Settings.ACTION_CAPTIONING_SETTINGS).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        activity.startActivity(intent)
+        true
+      } catch (_: Exception) {
+        try {
+          val fallback = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          }
+          activity.startActivity(fallback)
+          true
+        } catch (e2: Exception) {
+          e2.printStackTrace()
+          false
+        }
       }
     }
   }

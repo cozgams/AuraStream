@@ -68,6 +68,7 @@ export interface NativeExportBridge {
   requestIgnoreBatteryOptimizations?(): boolean;
   requestLegacyStoragePermission?(): boolean;
   openAppSettings?(): boolean;
+  openCaptionSettings?(): boolean;
 }
 
 declare global {
@@ -163,6 +164,23 @@ export async function processSubtitleExport(
       error: e?.message || "Failed to export subtitle",
     };
   }
+}
+
+export function isAndroidCaptionSettingsSupported(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.AuraNativeExport?.openCaptionSettings === "function"
+  );
+}
+
+export function openAndroidCaptionSettings(): boolean {
+  if (
+    typeof window !== "undefined" &&
+    typeof window.AuraNativeExport?.openCaptionSettings === "function"
+  ) {
+    return window.AuraNativeExport.openCaptionSettings();
+  }
+  return false;
 }
 
 export function getDeviceStorageInfo(): StorageInfo {

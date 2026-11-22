@@ -34,13 +34,14 @@ type Props = {
   onFullscreen: () => void;
   onNext?: () => void;
   onToggleSwipe?: () => void;
+  onOpenCaptions?: () => void;
 };
 
 const formatClock = (s: number) => fmtTime(Math.max(0, s || 0)).padStart(5, "0");
 
 export default function PlayerControls({
   paused, clock, duration, buffered = 0, rate, muted, volume, theater = false, fullscreen = false,
-  visible = true, seekEnabled = true, seekKey, nextDisabled = false, nextTitle = "Next", swipeEp = false, onToggle, onSeek, onSeekInteraction, onRate, onMute, onVolume, onPip, onLock, onTheater, onFullscreen, onNext, onToggleSwipe,
+  visible = true, seekEnabled = true, seekKey, nextDisabled = false, nextTitle = "Next", swipeEp = false, onToggle, onSeek, onSeekInteraction, onRate, onMute, onVolume, onPip, onLock, onTheater, onFullscreen, onNext, onToggleSwipe, onOpenCaptions,
 }: Props) {
   const store = useStore();
   const { t } = store;
@@ -122,7 +123,7 @@ export default function PlayerControls({
           </Button>
           {ccOpen && (
             <div className="player-speed-menu player-cc-menu" role="menu" aria-label={t("captions.title")} onKeyDownCapture={event => {
-              const entries = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+              const entries = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"], [role="menuitem"]')];
               const index = entries.indexOf(document.activeElement as HTMLButtonElement);
               if (event.key === "Escape") {
                 event.preventDefault(); event.stopPropagation(); setCcOpen(false);
@@ -149,6 +150,14 @@ export default function PlayerControls({
                   <span>{item.label}</span>{store.subtitleMode === item.id && <ICheck size={14} />}
                 </Button>
               ))}
+              {onOpenCaptions && (
+                <Button role="menuitem" onClick={() => {
+                  setCcOpen(false);
+                  onOpenCaptions();
+                }}>
+                  <span>Customize / Import CC...</span>
+                </Button>
+              )}
             </div>
           )}
         </div>

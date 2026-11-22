@@ -308,7 +308,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 className="ios-appearance-picker mt-1"
                 aria-label="Caption Position"
                 activeIndex={(["bottom", "above_title", "middle", "top"] as const).indexOf(
-                  (subStyle.position === "custom" ? "bottom" : subStyle.position) || "bottom"
+                  subStyle.position as "bottom" | "above_title" | "middle" | "top"
                 )}
               >
                 {(
@@ -323,6 +323,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                     key={pos}
                     type="button"
                     aria-pressed={subStyle.position === pos}
+                    className="text-[11.5px] whitespace-nowrap px-1"
                     onClick={() => {
                       const updated: SubtitleStyleConfig = {
                         ...subStyle,

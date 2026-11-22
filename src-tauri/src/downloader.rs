@@ -19,7 +19,7 @@ use tokio::sync::Notify;
 
 const MAX_CONCURRENT_WIFI: usize = 2;
 const MAX_CONCURRENT_CELLULAR: usize = 1;
-const HLS_SEG_WORKERS_WIFI: usize = 6;
+const HLS_SEG_WORKERS_WIFI: usize = 4;
 const HLS_SEG_WORKERS_CELLULAR: usize = 3;
 
 static APP_HANDLE: Lazy<Mutex<Option<AppHandle>>> = Lazy::new(|| Mutex::new(None));
@@ -311,6 +311,8 @@ fn write_active_status_locked(st: &DownloadEngineState, root: &Path) {
                 "subtitle": format!("Episode {}", q.episode),
                 "progress": q.progress,
                 "speed": if q.status == "queued" { "Queued" } else { &q.speed_formatted },
+                "speedBps": if q.status == "downloading" { q.speed_bytes_per_sec.max(0.0) as u64 } else { 0 },
+                "eta": if q.status == "downloading" && q.eta_formatted != "--" { q.eta_formatted.as_str() } else { "" },
                 "size": size_text,
                 "status": q.status,
             })
@@ -833,33 +835,132 @@ pub fn select_best_variant_url(master_text: &str, master_url: &str) -> Option<St
     })
 }
 
-async fn resolve_fresh_episode_stream(item: &QueueDownloadItem, token: u64) -> Result<(String, String, bool), String> {
+async fn resolve_fresh_episode_stream(
+    item: &QueueDownloadItem,
+    token: u64,
+    cancel: &AtomicBool,
+) -> Result<(String, String, bool), String> {
     let origin = crate::net::base();
     let auth_tok = current_session_token(&origin);
-    let play = crate::api::resolve_episode_play(
-        &origin,
-        auth_tok.as_deref(),
-        item.video_id,
-        item.episode.max(1) as u32,
-    )
-    .await?;
-    let (url, q, hevc) = pick_stream_url_from_play_info(&play, &item.quality)
-        .ok_or_else(|| format!("No stream URL available for Episode {}", item.episode))?;
-    let url = unwrap_local_proxy_url(&url);
-    {
-        let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(q_item) = st.queue.iter_mut().find(|x| x.id == item.id && x.run_token == token) {
-            q_item.stream_url = Some(url.clone());
-            q_item.quality = q.clone();
-            q_item.is_hevc = hevc;
+    let backoffs_ms = [1200u64, 2500u64];
+    let mut last_err = String::new();
+
+    for attempt in 0..=backoffs_ms.len() {
+        if !is_owner_active(&item.id, token, cancel) {
+            return Err("__cancelled__".to_string());
+        }
+        match crate::api::resolve_episode_play(
+            &origin,
+            auth_tok.as_deref(),
+            item.video_id,
+            item.episode.max(1) as u32,
+        )
+        .await
+        {
+            Ok(play) => {
+                if let Some((raw_url, q, hevc)) = pick_stream_url_from_play_info(&play, &item.quality) {
+                    let url = unwrap_local_proxy_url(&raw_url);
+                    {
+                        let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+                        if let Some(q_item) = st.queue.iter_mut().find(|x| x.id == item.id && x.run_token == token) {
+                            q_item.stream_url = Some(url.clone());
+                            q_item.quality = q.clone();
+                            q_item.is_hevc = hevc;
+                        }
+                    }
+                    return Ok((url, q, hevc));
+                }
+                last_err = format!("No stream URL available for Episode {}", item.episode);
+            }
+            Err(e) => {
+                last_err = e;
+            }
+        }
+        if attempt < backoffs_ms.len() {
+            tokio::time::sleep(Duration::from_millis(backoffs_ms[attempt])).await;
         }
     }
-    Ok((url, q, hevc))
+
+    Err(last_err)
 }
 
 fn is_stale_cdn_error(err: &str) -> bool {
     let lower = err.to_ascii_lowercase();
     lower.contains("http 401") || lower.contains("http 403") || lower.contains("http 410")
+}
+
+fn is_transient_network_error(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    lower.contains("dns resolution")
+        || lower.contains("timed out")
+        || lower.contains("timeout")
+        || lower.contains("connection reset")
+        || lower.contains("broken pipe")
+        || lower.contains("eof")
+        || lower.contains("error sending request")
+        || lower.contains("client error (connect)")
+        || lower.contains("http 429")
+        || lower.contains("http 5")
+}
+
+fn strip_urls_for_display(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(pos) = rest.find("http://").or_else(|| rest.find("https://")) {
+        out.push_str(&rest[..pos]);
+        let after = &rest[pos..];
+        let end = after
+            .find(|c: char| c.is_whitespace() || c == ')' || c == ']' || c == '"' || c == '\'')
+            .unwrap_or(after.len());
+        rest = &after[end..];
+    }
+    out.push_str(rest);
+    out.replace("()", "")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn humanize_download_error(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return "Download failed. Tap Retry to try again.".to_string();
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.contains("dns resolution") || (lower.contains("dns") && lower.contains("timed out")) {
+        return "Network DNS timed out. Check connection and tap Retry.".to_string();
+    }
+    if lower.contains("timed out") || lower.contains("timeout") {
+        return "Connection timed out. Tap Retry to resume.".to_string();
+    }
+    if lower.contains("connection reset")
+        || lower.contains("broken pipe")
+        || lower.contains("eof")
+        || lower.contains("error sending request")
+        || lower.contains("client error (connect)")
+    {
+        return "Connection interrupted. Tap Retry to resume.".to_string();
+    }
+    if lower.contains("http 401") || lower.contains("http 403") || lower.contains("http 410") || lower.contains("expired") {
+        return "Download link expired. Tap Retry to refresh.".to_string();
+    }
+    if lower.contains("no stream url") || lower.contains("http 404") {
+        return "Episode stream temporarily unavailable. Tap Retry.".to_string();
+    }
+    if lower.contains("http 429") || lower.contains("http 5") {
+        return "Server busy. Wait a moment and tap Retry.".to_string();
+    }
+    let cleaned = strip_urls_for_display(trimmed);
+    if cleaned.is_empty() {
+        return "Network request failed. Tap Retry to try again.".to_string();
+    }
+    let mut chars = cleaned.chars();
+    let clipped: String = chars.by_ref().take(110).collect();
+    if chars.next().is_some() {
+        format!("{}...", clipped.trim_end())
+    } else {
+        clipped
+    }
 }
 
 async fn run_episode_download(mut item: QueueDownloadItem, cancel: Arc<AtomicBool>) {
@@ -883,7 +984,7 @@ async fn run_episode_download(mut item: QueueDownloadItem, cancel: Arc<AtomicBoo
             used_cached_url = true;
             (u, item.quality.clone(), item.is_hevc)
         } else {
-            resolve_fresh_episode_stream(&item, token).await?
+            resolve_fresh_episode_stream(&item, token, &cancel).await?
         };
         item.quality = final_quality.clone();
         item.is_hevc = final_hevc;
@@ -904,9 +1005,16 @@ async fn run_episode_download(mut item: QueueDownloadItem, cancel: Arc<AtomicBoo
 
         let total_bytes = match first_attempt {
             Ok(b) => b,
-            Err(err) if used_cached_url && is_stale_cdn_error(&err) && is_owner_active(&id, token, &cancel) => {
-                // Re-resolve expired signed CDN URL and retry once
-                let (fresh_url, q, hevc) = resolve_fresh_episode_stream(&item, token).await?;
+            Err(err)
+                if ((used_cached_url && is_stale_cdn_error(&err)) || is_transient_network_error(&err))
+                    && is_owner_active(&id, token, &cancel) =>
+            {
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+                if !is_owner_active(&id, token, &cancel) {
+                    return Err("__cancelled__".to_string());
+                }
+                // Re-resolve fresh CDN URL and retry once reusing completed partial segments
+                let (fresh_url, q, hevc) = resolve_fresh_episode_stream(&item, token, &cancel).await?;
                 stream_url = fresh_url;
                 final_quality = q.clone();
                 final_hevc = hevc;
@@ -1077,6 +1185,7 @@ async fn run_episode_download(mut item: QueueDownloadItem, cancel: Arc<AtomicBoo
 }
 
 fn mark_item_error(id: &str, token: u64, err: String) {
+    let clean_err = humanize_download_error(&err);
     {
         let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
         let Some(q) = st.queue.iter_mut().find(|x| x.id == id && x.run_token == token) else {
@@ -1086,7 +1195,7 @@ fn mark_item_error(id: &str, token: u64, err: String) {
             return;
         }
         q.status = "error".to_string();
-        q.error = Some(err);
+        q.error = Some(clean_err);
         q.auto_resume = false;
         q.speed_bytes_per_sec = 0.0;
         q.speed_formatted = "--".to_string();
@@ -1342,21 +1451,27 @@ async fn download_hls_to_dir(
             let len = match seg_len {
                 Some(existing_len) => existing_len,
                 None => {
-                    // net::fetch_bytes already retries transient failures up to 3x; only retry once if body was empty
-                    let data = match crate::net::fetch_bytes(&seg_url).await {
-                        Ok((_, b)) if !b.is_empty() => b,
-                        Ok(_) => {
-                            if !is_owner_active(&id, token, cancel_cl.as_ref()) || failed_cl.load(Ordering::Acquire) {
-                                return Err("__cancelled__".to_string());
+                    let backoffs_ms = [800u64, 2000u64];
+                    let mut attempt = 0usize;
+                    let data = loop {
+                        if !is_owner_active(&id, token, cancel_cl.as_ref()) || failed_cl.load(Ordering::Acquire) {
+                            return Err("__cancelled__".to_string());
+                        }
+                        match crate::net::fetch_bytes(&seg_url).await {
+                            Ok((_, b)) if !b.is_empty() => break b,
+                            Ok(_) => {
+                                if attempt >= backoffs_ms.len() {
+                                    return Err("Empty segment received (0 bytes)".to_string());
+                                }
                             }
-                            tokio::time::sleep(Duration::from_millis(300)).await;
-                            match crate::net::fetch_bytes(&seg_url).await {
-                                Ok((_, b)) if !b.is_empty() => b,
-                                Ok(_) => return Err("Empty segment received (0 bytes)".to_string()),
-                                Err(e) => return Err(e),
+                            Err(e) => {
+                                if attempt >= backoffs_ms.len() || !is_transient_network_error(&e) {
+                                    return Err(e);
+                                }
                             }
                         }
-                        Err(e) => return Err(e),
+                        tokio::time::sleep(Duration::from_millis(backoffs_ms[attempt])).await;
+                        attempt += 1;
                     };
                     if !is_owner_active(&id, token, cancel_cl.as_ref()) || failed_cl.load(Ordering::Acquire) {
                         return Err("__cancelled__".to_string());
@@ -2070,5 +2185,22 @@ mod tests {
         assert_eq!(parse_offline_asset_ref("http://hg.localhost/offline/../secret/cover.img"), None);
         assert!(validate_extm3u("\u{feff}#EXTM3U\n#EXTINF:4,\nseg.ts").is_ok());
         assert!(validate_extm3u("<html>403 Forbidden</html>").is_err());
+    }
+
+    #[test]
+    fn humanizes_and_sanitizes_download_errors() {
+        let raw_url_err = "error sending request for url (https://tp7.qnlycc.cn/videos5/abc/seg.ts?auth_key=1795-secret): client error (Connect) <- operation timed out";
+        assert_eq!(
+            humanize_download_error(raw_url_err),
+            "Connection timed out. Tap Retry to resume."
+        );
+        assert_eq!(
+            humanize_download_error("DNS resolution timed out for cdn.example"),
+            "Network DNS timed out. Check connection and tap Retry."
+        );
+        let fallback = humanize_download_error("unexpected failure on https://cdn.example/secret?token=xyz");
+        assert!(!fallback.contains("https://"));
+        assert!(!fallback.contains("token=xyz"));
+        assert!(fallback.contains("unexpected failure"));
     }
 }

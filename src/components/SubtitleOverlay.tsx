@@ -9,8 +9,7 @@ import type {
 } from "../subtitles/types";
 import { getSubtitlesForEpisode, getSubtitleStyleConfig } from "../subtitles/aiSubtitleService";
 import type { PlaybackClock } from "../playbackClock";
-import { formatSubtitleText } from "../subtitles/dramaTranslator";
-import { formatBalancedCaptionLines } from "../subtitles/vttParser";
+import { formatBalancedCaptionLines, normalizeCueText } from "../subtitles/vttParser";
 
 type Props = {
   videoId: number;
@@ -115,99 +114,6 @@ export default function SubtitleOverlay({
     };
   }, [videoEl, videoEl?.videoWidth, videoEl?.videoHeight]);
 
-  // Subscribe to playbackClock if provided, otherwise fallback to propTime
-  const clockTime = useSyncExternalStore(
-    playbackClock?.subscribe ?? (() => () => {}),
-    playbackClock?.getSnapshot ?? (() => 0),
-  );
-
-  // Direct video element time listener for sub-frame subtitle sync
-  const [videoTime, setVideoTime] = useState<number>(() => (videoEl ? videoEl.currentTime : 0));
-  useEffect(() => {
-    if (!videoEl) {
-      setVideoTime(0);
-      return;
-    }
-    const onTime = () => setVideoTime(videoEl.currentTime);
-    setVideoTime(videoEl.currentTime);
-    videoEl.addEventListener("timeupdate", onTime);
-    videoEl.addEventListener("seeking", onTime);
-    videoEl.addEventListener("seeked", onTime);
-    videoEl.addEventListener("play", onTime);
-    return () => {
-      videoEl.removeEventListener("timeupdate", onTime);
-      videoEl.removeEventListener("seeking", onTime);
-      videoEl.removeEventListener("seeked", onTime);
-      videoEl.removeEventListener("play", onTime);
-    };
-  }, [videoEl]);
-
-  // Native HTMLMediaElement TextTracks listener (embedded HLS / WebVTT tracks)
-  useEffect(() => {
-    if (!videoEl || !videoEl.textTracks) {
-      setNativeCues([]);
-      return;
-    }
-
-    const trackList = videoEl.textTracks;
-    let activeTrack: TextTrack | null = null;
-
-    const readNativeCues = () => {
-      const tracks = Array.from(trackList);
-      const chosen =
-        tracks.find((tr) => (tr.kind === "subtitles" || tr.kind === "captions") && /^en/i.test(tr.language || "")) ||
-        tracks.find((tr) => tr.kind === "subtitles" || tr.kind === "captions") ||
-        null;
-
-      if (!chosen) {
-        setNativeCues([]);
-        return;
-      }
-
-      const desiredMode: TextTrackMode = cues.length === 0 && mode !== "off" ? "hidden" : "disabled";
-      if (chosen.mode !== desiredMode) {
-        try {
-          chosen.mode = desiredMode;
-        } catch {
-          // ignore read-only textTrack mode
-        }
-      }
-
-      if (activeTrack !== chosen) {
-        if (activeTrack) activeTrack.removeEventListener("cuechange", readNativeCues);
-        activeTrack = chosen;
-        chosen.addEventListener("cuechange", readNativeCues);
-      }
-
-      const cueList = chosen.cues ? Array.from(chosen.cues) : [];
-      const extracted: SubtitleCue[] = [];
-      let idx = 1;
-      for (const c of cueList) {
-        const text = formatSubtitleText(((c as VTTCue).text || "").replace(/<[^>]+>/g, ""));
-        if (!text) continue;
-        extracted.push({
-          id: idx++,
-          start: c.startTime,
-          end: c.endTime > c.startTime ? c.endTime : c.startTime + 1.0,
-          en: text,
-          zh: text,
-        });
-      }
-      setNativeCues(extracted);
-    };
-
-    readNativeCues();
-    trackList.addEventListener("addtrack", readNativeCues);
-    trackList.addEventListener("change", readNativeCues);
-    return () => {
-      trackList.removeEventListener("addtrack", readNativeCues);
-      trackList.removeEventListener("change", readNativeCues);
-      if (activeTrack) {
-        activeTrack.removeEventListener("cuechange", readNativeCues);
-      }
-    };
-  }, [videoEl, cues.length, mode]);
-
   // Load real subtitles when videoId, episode, or streamUrl changes
   useEffect(() => {
     let canceled = false;
@@ -262,9 +168,103 @@ export default function SubtitleOverlay({
     };
   }, [videoId, episode]);
 
+  // Native HTMLMediaElement TextTracks listener (embedded HLS / WebVTT tracks)
+  useEffect(() => {
+    if (!videoEl || !videoEl.textTracks) {
+      setNativeCues([]);
+      return;
+    }
+
+    const trackList = videoEl.textTracks;
+    let activeTrack: TextTrack | null = null;
+
+    const readNativeCues = () => {
+      const tracks = Array.from(trackList);
+      const chosen =
+        tracks.find((tr) => (tr.kind === "subtitles" || tr.kind === "captions") && /^en/i.test(tr.language || "")) ||
+        tracks.find((tr) => tr.kind === "subtitles" || tr.kind === "captions") ||
+        null;
+
+      if (!chosen) {
+        setNativeCues([]);
+        return;
+      }
+
+      // Keep mode as "hidden" so cues remain loaded and track availability stays accurate even when CC UI is off
+      if (chosen.mode !== "hidden") {
+        try {
+          chosen.mode = "hidden";
+        } catch {
+          // ignore read-only textTrack mode
+        }
+      }
+
+      if (activeTrack !== chosen) {
+        if (activeTrack) activeTrack.removeEventListener("cuechange", readNativeCues);
+        activeTrack = chosen;
+        chosen.addEventListener("cuechange", readNativeCues);
+      }
+
+      const cueList = chosen.cues ? Array.from(chosen.cues) : [];
+      const extracted: SubtitleCue[] = [];
+      let idx = 1;
+      for (const c of cueList) {
+        const text = normalizeCueText(((c as VTTCue).text || "").replace(/\{[^}]*\}/g, "").replace(/<[^>]+>/g, ""));
+        if (!text) continue;
+        extracted.push({
+          id: idx++,
+          start: c.startTime,
+          end: c.endTime > c.startTime ? c.endTime : c.startTime + 1.0,
+          en: text,
+          zh: text,
+        });
+      }
+      setNativeCues(extracted);
+    };
+
+    readNativeCues();
+    trackList.addEventListener("addtrack", readNativeCues);
+    trackList.addEventListener("change", readNativeCues);
+    return () => {
+      trackList.removeEventListener("addtrack", readNativeCues);
+      trackList.removeEventListener("change", readNativeCues);
+      if (activeTrack) {
+        activeTrack.removeEventListener("cuechange", readNativeCues);
+      }
+    };
+  }, [videoEl]);
+
   const effectiveCues = cues.length > 0 ? cues : nativeCues;
   const effectiveSource: SubtitleTrack["source"] =
     cues.length > 0 ? trackSource : nativeCues.length > 0 ? "native_track" : "none";
+  const shouldTrackTime = mode !== "off" && effectiveCues.length > 0 && effectiveSource !== "none";
+
+  // Subscribe to playbackClock only when captions are active and a track exists
+  const clockTime = useSyncExternalStore(
+    (shouldTrackTime ? playbackClock?.subscribe : undefined) ?? (() => () => {}),
+    playbackClock?.getSnapshot ?? (() => 0),
+  );
+
+  // Direct video element time listener for sub-frame subtitle sync (only attached when active)
+  const [videoTime, setVideoTime] = useState<number>(() => (videoEl ? videoEl.currentTime : 0));
+  useEffect(() => {
+    if (!videoEl || !shouldTrackTime) {
+      setVideoTime(0);
+      return;
+    }
+    const onTime = () => setVideoTime(videoEl.currentTime);
+    setVideoTime(videoEl.currentTime);
+    videoEl.addEventListener("timeupdate", onTime);
+    videoEl.addEventListener("seeking", onTime);
+    videoEl.addEventListener("seeked", onTime);
+    videoEl.addEventListener("play", onTime);
+    return () => {
+      videoEl.removeEventListener("timeupdate", onTime);
+      videoEl.removeEventListener("seeking", onTime);
+      videoEl.removeEventListener("seeked", onTime);
+      videoEl.removeEventListener("play", onTime);
+    };
+  }, [videoEl, shouldTrackTime]);
 
   // Inform Feed / SubtitleSheet of genuine track availability
   useEffect(() => {
@@ -280,13 +280,15 @@ export default function SubtitleOverlay({
   const currentTime = Math.max(0, rawTime + (styleConfig.offsetSec || 0));
 
   // Find active cue
-  const activeCue = effectiveCues.find((c) => currentTime >= c.start && currentTime <= c.end);
+  const activeCue = shouldTrackTime
+    ? effectiveCues.find((c) => currentTime >= c.start && currentTime <= c.end)
+    : undefined;
 
-  if (mode === "off" || !effectiveCues.length || effectiveSource === "none") {
+  if (!shouldTrackTime) {
     return null;
   }
 
-  const rawEnglish = activeCue ? formatSubtitleText(activeCue.en || activeCue.zh) : "";
+  const rawEnglish = activeCue ? normalizeCueText(activeCue.en || activeCue.zh) : "";
   const balancedCaption = rawEnglish ? formatBalancedCaptionLines(rawEnglish, 42) : "";
   const isVisible = Boolean(activeCue && balancedCaption);
 
@@ -348,7 +350,7 @@ export default function SubtitleOverlay({
   if (position === "custom" && typeof styleConfig.customOffsetPercent === "number") {
     const pct = Math.max(5, Math.min(92, styleConfig.customOffsetPercent));
     positionStyle = {
-      bottom: `calc(var(--sab, 24px) + ${pct}%)`,
+      bottom: `min(calc(var(--sab, 16px) + ${pct}%), calc(100% - max(var(--sat, 36px), 36px) - 72px))`,
     };
   } else if (position === "middle") {
     positionStyle = {

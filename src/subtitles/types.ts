@@ -5,7 +5,7 @@
 export type SubtitleMode = "off" | "en";
 export type SubtitleSize = "sm" | "md" | "lg" | "xl";
 export type SubtitlePosition = "bottom" | "above_title" | "middle" | "top" | "custom";
-export type AICaptionProvider = "none" | "gemini" | "whisper" | "custom";
+export type AICaptionProvider = "none" | "gemini" | "groq" | "whisper" | "custom";
 
 export type SubtitleColor = "white" | "yellow" | "cyan" | "green";
 export type SubtitleEdgeStyle = "drop_shadow" | "raised" | "depressed" | "uniform" | "none";
@@ -26,8 +26,10 @@ export interface SubtitleStyleConfig {
 export interface AICaptionConfig {
   provider: AICaptionProvider;
   geminiKey?: string;
+  groqKey?: string;
   whisperKey?: string;
   customUrl?: string;
+  customModel?: string;
 }
 
 export interface SubtitleCue {
@@ -47,6 +49,7 @@ export interface SubtitleTrack {
     | "local_import"
     | "ai_whisper"
     | "ai_gemini"
+    | "ai_groq"
     | "upstream_vtt"
     | "native_track"
     | "cache"

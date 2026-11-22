@@ -772,6 +772,50 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
+ * Sanitizes raw Rust/network/URL error strings into short, readable messages.
+ */
+export function formatDownloadError(raw?: string | null): string {
+  const input = (raw || "").trim();
+  if (!input) return "Download failed. Tap Retry to try again.";
+
+  const lower = input.toLowerCase();
+  if (lower.includes("dns resolution") || (lower.includes("dns") && lower.includes("timed out"))) {
+    return "Network DNS timed out. Check connection and tap Retry.";
+  }
+  if (lower.includes("timed out") || lower.includes("timeout")) {
+    return "Connection timed out. Tap Retry to resume.";
+  }
+  if (
+    lower.includes("connection reset") ||
+    lower.includes("broken pipe") ||
+    lower.includes("eof") ||
+    lower.includes("error sending request") ||
+    lower.includes("client error (connect)")
+  ) {
+    return "Connection interrupted. Tap Retry to resume.";
+  }
+  if (lower.includes("401") || lower.includes("403") || lower.includes("410") || lower.includes("expired")) {
+    return "Download link expired. Tap Retry to refresh.";
+  }
+  if (lower.includes("no stream url") || lower.includes("404") || lower.includes("not found")) {
+    return "Episode stream temporarily unavailable. Tap Retry.";
+  }
+  if (lower.includes("429") || lower.includes("http 5")) {
+    return "Server busy. Wait a moment and tap Retry.";
+  }
+
+  const sanitized = input
+    .replace(/https?:\/\/[^\s)]+/gi, "")
+    .replace(/\(\s*\)/g, "")
+    .replace(/error sending request for url\s*/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!sanitized) return "Network request failed. Tap Retry to try again.";
+  return sanitized.length > 110 ? `${sanitized.slice(0, 107).trimEnd()}...` : sanitized;
+}
+
+/**
  * Detects whether the current device connection is on cellular (mobile data)
  */
 export function isCellularConnection(): boolean {

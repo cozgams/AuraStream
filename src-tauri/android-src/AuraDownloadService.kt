@@ -21,6 +21,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.Collections
+import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
@@ -29,7 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * Android Foreground Service for AuraStream background media downloads.
  * Polls Rust engine disk status directly (active_status.json) so downloads and
- * progress notifications continue uninterrupted even when WebView is backgrounded or locked.
+ * progress notifications continue silently and reliably when WebView is backgrounded.
  */
 class AuraDownloadService : Service() {
   private var wakeLock: PowerManager.WakeLock? = null
@@ -53,13 +54,23 @@ class AuraDownloadService : Service() {
     val progress: Int,
     val speed: String,
     val size: String,
-    val status: String = "downloading"
+    val status: String = "downloading",
+    val eta: String = "",
+    val speedBps: Long = 0L
   )
 
   companion object {
-    const val CHANNEL_ID = "aurastream_downloads_v2"
-    const val COMPLETE_CHANNEL_ID = "aurastream_downloads_complete_v2"
+    const val CHANNEL_ID = "aurastream_downloads_silent_v4"
+    const val COMPLETE_CHANNEL_ID = "aurastream_downloads_complete_silent_v4"
+    private const val LEGACY_SILENT_V3_CHANNEL_ID = "aurastream_downloads_silent_v3"
+    private const val LEGACY_SILENT_V3_COMPLETE_CHANNEL_ID = "aurastream_downloads_complete_silent_v3"
+    private const val LEGACY_CHANNEL_ID = "aurastream_downloads_v2"
+    private const val LEGACY_COMPLETE_CHANNEL_ID = "aurastream_downloads_complete_v2"
+    private const val LEGACY_OLD_CHANNEL_ID = "aurastream_downloads"
+
     const val NOTIFICATION_ID = 9001
+    const val COMPLETE_NOTIFICATION_ID = 9002
+
     const val ACTION_START = "com.aurastream.app.action.START_DOWNLOAD"
     const val ACTION_UPDATE = "com.aurastream.app.action.UPDATE_DOWNLOAD"
     const val ACTION_STOP = "com.aurastream.app.action.STOP_DOWNLOAD"
@@ -84,9 +95,137 @@ class AuraDownloadService : Service() {
 
     private val activeDownloads = LinkedHashMap<Int, DownloadItem>()
     private val notifiedCompleted = Collections.synchronizedSet(LinkedHashSet<String>())
+    private val recentCompletedSummary = ArrayList<String>()
 
     @Volatile
     private var nativeTotalQueuedCount: Int = 0
+
+    @JvmStatic
+    fun ensureSilentChannels(context: Context) {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+        try {
+          manager.deleteNotificationChannel(LEGACY_SILENT_V3_CHANNEL_ID)
+        } catch (_: Exception) {}
+        try {
+          manager.deleteNotificationChannel(LEGACY_SILENT_V3_COMPLETE_CHANNEL_ID)
+        } catch (_: Exception) {}
+        try {
+          manager.deleteNotificationChannel(LEGACY_CHANNEL_ID)
+        } catch (_: Exception) {}
+        try {
+          manager.deleteNotificationChannel(LEGACY_COMPLETE_CHANNEL_ID)
+        } catch (_: Exception) {}
+        try {
+          manager.deleteNotificationChannel(LEGACY_OLD_CHANNEL_ID)
+        } catch (_: Exception) {}
+
+        val progressChannel = NotificationChannel(
+          CHANNEL_ID,
+          "Active Downloads",
+          NotificationManager.IMPORTANCE_LOW
+        ).apply {
+          description = "Shows silent progress for active and queued downloads"
+          setShowBadge(false)
+          enableVibration(false)
+          vibrationPattern = longArrayOf(0L)
+          enableLights(false)
+          setSound(null, null)
+          lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+        }
+        manager.createNotificationChannel(progressChannel)
+
+        val completeChannel = NotificationChannel(
+          COMPLETE_CHANNEL_ID,
+          "Completed Downloads",
+          NotificationManager.IMPORTANCE_LOW
+        ).apply {
+          description = "Silently summarizes episodes saved for offline viewing"
+          setShowBadge(false)
+          enableVibration(false)
+          vibrationPattern = longArrayOf(0L)
+          enableLights(false)
+          setSound(null, null)
+          lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+        }
+        manager.createNotificationChannel(completeChannel)
+      }
+    }
+
+    @Synchronized
+    fun clearCompletedSummary() {
+      recentCompletedSummary.clear()
+    }
+
+    @Synchronized
+    private fun appendCompletedSummary(entry: String): List<String> {
+      recentCompletedSummary.remove(entry)
+      recentCompletedSummary.add(0, entry)
+      while (recentCompletedSummary.size > 12) {
+        recentCompletedSummary.removeAt(recentCompletedSummary.size - 1)
+      }
+      return recentCompletedSummary.toList()
+    }
+
+    @JvmStatic
+    fun showSilentCompletionBanner(context: Context, title: String, subtitle: String, size: String) {
+      try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+          context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+          return
+        }
+        ensureSilentChannels(context)
+        val sizeSuffix = if (size.isNotEmpty()) " ($size)" else ""
+        val entry = "$title · $subtitle$sizeSuffix"
+        val entries = appendCompletedSummary(entry)
+
+        val launchIntent = Intent(context, MainActivity::class.java).apply {
+          flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pi = PendingIntent.getActivity(
+          context,
+          COMPLETE_NOTIFICATION_ID,
+          launchIntent,
+          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, COMPLETE_CHANNEL_ID)
+          .setSmallIcon(android.R.drawable.stat_sys_download_done)
+          .setColor(0xFF1A73E8.toInt())
+          .setContentIntent(pi)
+          .setOngoing(false)
+          .setAutoCancel(true)
+          .setOnlyAlertOnce(true)
+          .setSilent(true)
+          .setSound(null)
+          .setVibrate(null)
+          .setDefaults(0)
+          .setPriority(NotificationCompat.PRIORITY_LOW)
+          .setCategory(NotificationCompat.CATEGORY_STATUS)
+          .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+
+        if (entries.size <= 1) {
+          builder
+            .setContentTitle("Saved for Offline Viewing")
+            .setContentText(entry)
+            .setSubText("Completed")
+        } else {
+          val inbox = NotificationCompat.InboxStyle()
+          entries.take(5).forEach { inbox.addLine(it) }
+          if (entries.size > 5) {
+            inbox.setSummaryText("+${entries.size - 5} more episodes saved")
+          }
+          builder
+            .setContentTitle("${entries.size} Episodes Saved Offline")
+            .setContentText(entries.first())
+            .setSubText("Completed")
+            .setNumber(entries.size)
+            .setStyle(inbox)
+        }
+
+        NotificationManagerCompat.from(context).notify(COMPLETE_NOTIFICATION_ID, builder.build())
+      } catch (_: Exception) {}
+    }
 
     @Synchronized
     fun upsertDownload(
@@ -96,7 +235,9 @@ class AuraDownloadService : Service() {
       progress: Int,
       speed: String,
       size: String,
-      status: String = "downloading"
+      status: String = "downloading",
+      eta: String = "",
+      speedBps: Long = 0L
     ) {
       activeDownloads[id] = DownloadItem(
         id = id,
@@ -105,7 +246,9 @@ class AuraDownloadService : Service() {
         progress = progress.coerceIn(0, 100),
         speed = speed,
         size = size,
-        status = status
+        status = status,
+        eta = eta,
+        speedBps = speedBps
       )
     }
 
@@ -167,8 +310,8 @@ class AuraDownloadService : Service() {
     fun computeNotifItemId(videoId: Int, episode: Int): Int {
       val key = "${videoId}_$episode"
       var h = key.hashCode() and 0x7fffffff
-      if (h == NOTIFICATION_ID || h == 0) {
-        h = (h + 1) and 0x7fffffff
+      if (h == NOTIFICATION_ID || h == COMPLETE_NOTIFICATION_ID || h == 0) {
+        h = (h + 2) and 0x7fffffff
       }
       return h
     }
@@ -181,7 +324,7 @@ class AuraDownloadService : Service() {
     instance = this
     isRunning = true
     acquireLocks()
-    createNotificationChannels()
+    ensureSilentChannels(this)
     startDiskPoller()
   }
 
@@ -231,33 +374,6 @@ class AuraDownloadService : Service() {
       }
     } catch (_: Exception) {}
     wifiLock = null
-  }
-
-  private fun createNotificationChannels() {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
-      val progressChannel = NotificationChannel(
-        CHANNEL_ID,
-        "Background Downloads",
-        NotificationManager.IMPORTANCE_LOW
-      ).apply {
-        description = "Shows active and queued episode downloads"
-        setShowBadge(false)
-        enableVibration(false)
-        setSound(null, null)
-      }
-      manager.createNotificationChannel(progressChannel)
-
-      val completeChannel = NotificationChannel(
-        COMPLETE_CHANNEL_ID,
-        "Completed Downloads",
-        NotificationManager.IMPORTANCE_DEFAULT
-      ).apply {
-        description = "Alerts when offline episodes finish downloading"
-        setShowBadge(true)
-      }
-      manager.createNotificationChannel(completeChannel)
-    }
   }
 
   private fun writeControlAction(action: String) {
@@ -326,12 +442,14 @@ class AuraDownloadService : Service() {
           progress = obj.optInt("progress", 0).coerceIn(0, 100),
           speed = obj.optString("speed", ""),
           size = obj.optString("size", ""),
-          status = obj.optString("status", "downloading")
+          status = obj.optString("status", "downloading"),
+          eta = obj.optString("eta", ""),
+          speedBps = obj.optLong("speedBps", 0L)
         )
       )
     }
 
-    // Emit completion notifications when running in background
+    // Update consolidated silent completion card when running in background
     val recentArr = json.optJSONArray("recentCompleted")
     if (recentArr != null) {
       for (i in 0 until recentArr.length()) {
@@ -351,9 +469,8 @@ class AuraDownloadService : Service() {
           if (first != null) notifiedCompleted.remove(first)
         }
         if (!MainActivity.isForegroundGlobal) {
-          showCompletionBanner(
-            vid = comp.optInt("videoId", 0),
-            ep = comp.optInt("episode", 1),
+          showSilentCompletionBanner(
+            context = this,
             title = comp.optString("title", "AuraStream"),
             subtitle = comp.optString("subtitle", "Episode 1"),
             size = comp.optString("size", "")
@@ -381,35 +498,6 @@ class AuraDownloadService : Service() {
         }
       }
     }
-  }
-
-  private fun showCompletionBanner(vid: Int, ep: Int, title: String, subtitle: String, size: String) {
-    try {
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-        checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-        return
-      }
-      val notifId = computeNotifItemId(vid, ep) + 1_000_000
-      val launchIntent = Intent(this, MainActivity::class.java).apply {
-        flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-      }
-      val pi = PendingIntent.getActivity(
-        this,
-        notifId,
-        launchIntent,
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-      )
-      val sizeSuffix = if (size.isNotEmpty()) " ($size)" else ""
-      val notification = NotificationCompat.Builder(this, COMPLETE_CHANNEL_ID)
-        .setSmallIcon(android.R.drawable.stat_sys_download_done)
-        .setContentTitle("Saved: $title")
-        .setContentText("$subtitle$sizeSuffix ready for offline viewing")
-        .setContentIntent(pi)
-        .setAutoCancel(true)
-        .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-        .build()
-      NotificationManagerCompat.from(this).notify(notifId, notification)
-    } catch (_: Exception) {}
   }
 
   private fun ensureForegroundStarted(notification: Notification) {
@@ -515,6 +603,16 @@ class AuraDownloadService : Service() {
     } catch (_: Exception) {}
   }
 
+  private fun formatSpeedBps(bps: Long): String {
+    if (bps <= 0L) return ""
+    val mb = 1024.0 * 1024.0
+    return if (bps >= 1024L * 1024L) {
+      String.format(Locale.US, "%.1f MB/s", bps / mb)
+    } else {
+      String.format(Locale.US, "%d KB/s", maxOf(1L, bps / 1024L))
+    }
+  }
+
   private fun buildForegroundNotification(
     fallbackTitle: String,
     fallbackSubtitle: String,
@@ -547,62 +645,98 @@ class AuraDownloadService : Service() {
     )
 
     val items = snapshotDownloads()
-    val activeItems = items.filter { it.status == "downloading" }.ifEmpty { items }
-    val displayCount = maxOf(reportedCount, items.size)
+    val activeItems = items.filter { it.status == "downloading" }
+    val queuedItems = items.filter { it.status == "queued" }
+    val totalQueuedCount = maxOf(queuedItems.size, nativeTotalQueuedCount)
 
     val contentTitle: String
     val contentText: String
-    val bigText: String
+    val subText: String
+    val style: NotificationCompat.Style
     val progressValue: Int
 
     if (items.size > 1) {
-      val activeItem = activeItems.first()
-      val p = activeItem.progress.coerceIn(0, 100)
-      contentTitle = "Downloading ${items.size} episodes"
-      val extra = listOf(activeItem.size, activeItem.speed).filter { it.isNotEmpty() }.joinToString(" · ")
-      contentText = "${activeItem.title} (${activeItem.subtitle}) · $p%${if (extra.isNotEmpty()) " · $extra" else ""}"
-      val lines = items.take(4).joinToString("\n") { item ->
+      val lead = activeItems.firstOrNull() ?: items.first()
+      val sumSpeed = activeItems.sumOf { it.speedBps }
+      val combinedSpeed = formatSpeedBps(sumSpeed).ifEmpty {
+        lead.speed.takeIf { it.isNotEmpty() && it != "Queued" && it != "--" } ?: ""
+      }
+      val avgProgress = if (activeItems.isNotEmpty()) {
+        (activeItems.sumOf { it.progress } / activeItems.size).coerceIn(0, 100)
+      } else {
+        lead.progress.coerceIn(0, 100)
+      }
+
+      val activeCount = activeItems.size.coerceAtLeast(1)
+      contentTitle = if (totalQueuedCount > 0) {
+        "Downloading $activeCount · $totalQueuedCount queued"
+      } else {
+        "Downloading $activeCount episodes"
+      }
+      subText = if (combinedSpeed.isNotEmpty()) "$avgProgress% · $combinedSpeed" else "$avgProgress%"
+
+      val leadEta = lead.eta.takeIf { it.isNotEmpty() }?.let { " · $it left" } ?: ""
+      contentText = "${lead.title} (${lead.subtitle}) · ${lead.progress}%$leadEta"
+
+      val inbox = NotificationCompat.InboxStyle()
+      for (item in items.take(5)) {
         if (item.status == "queued") {
-          "${item.title} (${item.subtitle}) · Queued"
+          inbox.addLine("Queued · ${item.subtitle} · ${item.title}")
         } else {
           val ip = item.progress.coerceIn(0, 100)
-          val itemExtra = listOf(item.size, item.speed).filter { it.isNotEmpty() }.joinToString(" · ")
-          if (itemExtra.isNotEmpty()) "${item.title} (${item.subtitle}) · $ip% · $itemExtra"
-          else "${item.title} (${item.subtitle}) · $ip%"
+          val spd = item.speed.takeIf { it.isNotEmpty() && it != "--" }?.let { " · $it" } ?: ""
+          val etaStr = item.eta.takeIf { it.isNotEmpty() }?.let { " · $it" } ?: ""
+          inbox.addLine("${item.subtitle} · ${item.title} — $ip%$spd$etaStr")
         }
       }
-      bigText = if (items.size > 4) "$lines\n+${items.size - 4} more in queue" else lines
-      progressValue = p
+      val remaining = maxOf(items.size, reportedCount) - 5
+      if (remaining > 0) {
+        inbox.setSummaryText("+$remaining more in queue")
+      } else {
+        inbox.setSummaryText("${activeItems.size} active · $totalQueuedCount queued")
+      }
+      style = inbox
+      progressValue = avgProgress
     } else if (items.size == 1) {
       val item = items.first()
       val clamped = item.progress.coerceIn(0, 100)
-      val details = listOf(item.size, item.speed).filter { it.isNotEmpty() }.joinToString(" · ")
-      contentTitle = if (displayCount > 1) "Downloading ($displayCount) · ${item.title}" else "Downloading: ${item.title}"
-      contentText = if (details.isNotEmpty()) "${item.subtitle} · $clamped% · $details" else "${item.subtitle} · $clamped%"
-      bigText = contentText
+      val cleanSpeed = item.speed.takeIf { it.isNotEmpty() && it != "Queued" && it != "--" }
+      val etaPart = item.eta.takeIf { it.isNotEmpty() }?.let { "$it left" }
+      subText = (listOf("$clamped%") + listOfNotNull(cleanSpeed, etaPart)).joinToString(" · ")
+      contentTitle = item.title
+      contentText = listOfNotNull(item.subtitle, item.size.takeIf { it.isNotEmpty() }).joinToString(" · ")
+      style = NotificationCompat.BigTextStyle().bigText(contentText)
       progressValue = clamped
     } else {
       val clamped = fallbackProgress.coerceIn(0, 100)
-      val details = listOf(fallbackSize, fallbackSpeed).filter { it.isNotEmpty() }.joinToString(" · ")
-      contentTitle = if (displayCount > 1) "Downloading ($displayCount) · $fallbackTitle" else "Downloading: $fallbackTitle"
-      contentText = if (details.isNotEmpty()) "$fallbackSubtitle · $clamped% · $details" else "$fallbackSubtitle · $clamped%"
-      bigText = contentText
+      val cleanSpeed = fallbackSpeed.takeIf { it.isNotEmpty() && it != "Queued" && it != "--" }
+      subText = (listOf("$clamped%") + listOfNotNull(cleanSpeed)).joinToString(" · ")
+      contentTitle = fallbackTitle
+      contentText = listOfNotNull(fallbackSubtitle, fallbackSize.takeIf { it.isNotEmpty() }).joinToString(" · ")
+      style = NotificationCompat.BigTextStyle().bigText(contentText)
       progressValue = clamped
     }
 
     return NotificationCompat.Builder(this, CHANNEL_ID)
       .setSmallIcon(android.R.drawable.stat_sys_download)
+      .setColor(0xFF1A73E8.toInt())
       .setContentTitle(contentTitle)
       .setContentText(contentText)
-      .setStyle(NotificationCompat.BigTextStyle().bigText(bigText))
+      .setSubText(subText)
+      .setStyle(style)
       .setProgress(100, progressValue, progressValue <= 0)
       .setOngoing(true)
       .setOnlyAlertOnce(true)
       .setSilent(true)
+      .setSound(null)
+      .setVibrate(null)
+      .setDefaults(0)
+      .setShowWhen(false)
       .setContentIntent(pendingIntent)
       .addAction(android.R.drawable.ic_media_pause, "Pause All", pauseIntent)
       .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancelIntent)
       .setPriority(NotificationCompat.PRIORITY_LOW)
+      .setCategory(NotificationCompat.CATEGORY_PROGRESS)
       .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
       .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
       .build()
@@ -640,7 +774,7 @@ class AuraDownloadService : Service() {
 
   override fun onTaskRemoved(rootIntent: Intent?) {
     super.onTaskRemoved(rootIntent)
-    // Keep Foreground Service alive if active or queued downloads are still running!
+    // Keep Foreground Service alive if active or queued downloads are still running
     val hasActiveDisk = hasActiveDiskDownloads(this)
     if (!hasActiveDisk && (nativeOwnsQueue || snapshotDownloads().isEmpty())) {
       stopServiceCleanly(lastStartId)

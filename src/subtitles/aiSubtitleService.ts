@@ -1,8 +1,8 @@
 import type { AICaptionConfig, SubtitleCue, SubtitleTrack, SubtitleStyleConfig } from "./types";
-import { parseVtt } from "./vttParser";
-import { formatSubtitleText } from "./dramaTranslator";
+import { normalizeCueText, parseVtt } from "./vttParser";
 import { LOCAL, isLocalMedia } from "../api";
 import { parseExtXKey, parseHlsIv, sequenceToIv } from "../offline/exportService";
+import { decodeAacToWav16k, extractAacFromTs, isMpegTs } from "./tsAudioExtractor";
 
 const MEMORY_CACHE = new Map<string, SubtitleTrack>();
 
@@ -17,8 +17,10 @@ function setCachedTrack(key: string, track: SubtitleTrack): void {
 const STORAGE_KEYS = {
   PROVIDER: "aurastream_caption_provider",
   GEMINI_KEY: "aurastream_gemini_api_key",
+  GROQ_KEY: "aurastream_groq_api_key",
   WHISPER_KEY: "aurastream_whisper_api_key",
   CUSTOM_URL: "aurastream_custom_stt_url",
+  CUSTOM_MODEL: "aurastream_custom_stt_model",
   STYLE_CONFIG: "aurastream_subtitle_style_v2",
   PREFIX: "aurastream_sub_",
 };
@@ -71,13 +73,18 @@ export function getAICaptionConfig(): AICaptionConfig {
   try {
     const rawProvider = localStorage.getItem(STORAGE_KEYS.PROVIDER);
     const provider: AICaptionConfig["provider"] =
-      rawProvider === "gemini" || rawProvider === "whisper" || rawProvider === "custom"
+      rawProvider === "gemini" ||
+      rawProvider === "groq" ||
+      rawProvider === "whisper" ||
+      rawProvider === "custom"
         ? rawProvider
         : "none";
     const geminiKey = localStorage.getItem(STORAGE_KEYS.GEMINI_KEY) || "";
+    const groqKey = localStorage.getItem(STORAGE_KEYS.GROQ_KEY) || "";
     const whisperKey = localStorage.getItem(STORAGE_KEYS.WHISPER_KEY) || "";
     const customUrl = localStorage.getItem(STORAGE_KEYS.CUSTOM_URL) || "";
-    return { provider, geminiKey, whisperKey, customUrl };
+    const customModel = localStorage.getItem(STORAGE_KEYS.CUSTOM_MODEL) || "";
+    return { provider, geminiKey, groqKey, whisperKey, customUrl, customModel };
   } catch {
     return { provider: "none" };
   }
@@ -90,8 +97,10 @@ export function setAICaptionConfig(config: Partial<AICaptionConfig>): void {
   try {
     if (config.provider !== undefined) localStorage.setItem(STORAGE_KEYS.PROVIDER, config.provider);
     if (config.geminiKey !== undefined) localStorage.setItem(STORAGE_KEYS.GEMINI_KEY, config.geminiKey.trim());
+    if (config.groqKey !== undefined) localStorage.setItem(STORAGE_KEYS.GROQ_KEY, config.groqKey.trim());
     if (config.whisperKey !== undefined) localStorage.setItem(STORAGE_KEYS.WHISPER_KEY, config.whisperKey.trim());
     if (config.customUrl !== undefined) localStorage.setItem(STORAGE_KEYS.CUSTOM_URL, config.customUrl.trim());
+    if (config.customModel !== undefined) localStorage.setItem(STORAGE_KEYS.CUSTOM_MODEL, config.customModel.trim());
   } catch {
     // ignore
   }
@@ -194,12 +203,13 @@ export function removeSubtitleTrackForEpisode(videoId: number, episode: number):
 }
 
 /**
- * Transcribe and translate audio directly via Google Gemini Audio API (Gemini 2.5 / 1.5 Flash).
+ * Transcribe and translate audio directly via Google Gemini Audio API (Gemini 2.5 Flash).
  */
 export async function transcribeWithGemini(
   audioBase64: string,
-  mimeType: string = "audio/mp3",
-  apiKey?: string
+  mimeType: string = "audio/aac",
+  apiKey?: string,
+  signal?: AbortSignal
 ): Promise<SubtitleCue[]> {
   const key = apiKey || getAICaptionConfig().geminiKey;
   if (!key) throw new Error("Gemini API Key is required for speech recognition");
@@ -214,15 +224,15 @@ Output ONLY a strict JSON array of objects with the following schema:
     "id": 1,
     "start": 1.2,
     "end": 4.5,
-    "zh": "Chinese transcription",
-    "en": "Accurate, dramatic English translation"
+    "zh": "Original spoken transcription",
+    "en": "Natural, accurate English translation"
   }
 ]
 Rules:
-1. "start" and "end" MUST be in floating point seconds.
-2. Filter out non-speech music and sound effects.
-3. Keep individual cues readable (maximum 60 characters).
-4. Output valid JSON with no markdown wrapping or backticks.`;
+1. "start" and "end" MUST be floating point seconds matching when dialogue is spoken.
+2. Filter out non-speech background music and sound effects.
+3. Keep individual cues concise and readable (at most 2 short lines, <= 70 characters).
+4. Output valid JSON only, with no markdown wrapping or backticks.`;
 
   const body = {
     contents: [
@@ -249,6 +259,7 @@ Rules:
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
 
   if (!res.ok) {
@@ -281,38 +292,51 @@ Rules:
     ? cues
     : (cues as any)?.cues || (cues as any)?.subtitles || (cues as any)?.segments || [];
 
-  return rawList.map((cue: any, idx: number) => {
+  const parsed = rawList.map((cue: any, idx: number) => {
     const s = Number(cue?.start);
     const e = Number(cue?.end);
     const validStart = Number.isFinite(s) ? Math.max(0, s) : 0;
     const validEnd = Number.isFinite(e) && e > validStart ? e : validStart + 1.5;
+    const en = normalizeCueText(String(cue?.en || cue?.zh || ""));
+    const zh = normalizeCueText(String(cue?.zh || cue?.en || ""));
     return {
       id: Number(cue?.id) || idx + 1,
       start: validStart,
       end: validEnd,
-      en: String(cue?.en || cue?.zh || ""),
-      zh: String(cue?.zh || cue?.en || ""),
+      en,
+      zh,
     };
-  });
+  }).filter((c) => Boolean(c.en));
+
+  parsed.sort((a, b) => a.start - b.start);
+  return parsed.map((c, idx) => ({ ...c, id: idx + 1 }));
 }
 
 /**
- * Transcribe audio via OpenAI Whisper API or OpenAI-compatible custom Whisper endpoint.
+ * Transcribe & translate audio via Groq Whisper, OpenAI Whisper, or OpenAI-compatible custom endpoint.
  */
 export async function transcribeWithWhisper(
   audioBlob: Blob,
   apiKey?: string,
-  customEndpoint?: string
+  customEndpoint?: string,
+  opts?: { model?: string; fileName?: string; signal?: AbortSignal }
 ): Promise<SubtitleCue[]> {
   const config = getAICaptionConfig();
-  const key = apiKey || config.whisperKey;
-  const endpoint = customEndpoint || config.customUrl || "https://api.openai.com/v1/audio/transcriptions";
+  const key = apiKey ?? config.whisperKey;
+  const endpoint =
+    (customEndpoint || config.customUrl || "").trim() ||
+    "https://api.openai.com/v1/audio/translations";
+  const model = (opts?.model || config.customModel || "whisper-1").trim() || "whisper-1";
+  const fileName = opts?.fileName || "audio.wav";
 
   const formData = new FormData();
-  formData.append("file", audioBlob, "audio.mp3");
-  formData.append("model", "whisper-1");
+  formData.append("file", audioBlob, fileName);
+  formData.append("model", model);
   formData.append("response_format", "verbose_json");
-  formData.append("timestamp_granularities[]", "segment");
+  formData.append("temperature", "0");
+  if (!endpoint.includes("/translations") && endpoint.includes("/transcriptions")) {
+    formData.append("timestamp_granularities[]", "segment");
+  }
 
   const headers: Record<string, string> = {};
   if (key) {
@@ -323,6 +347,7 @@ export async function transcribeWithWhisper(
     method: "POST",
     headers,
     body: formData,
+    signal: opts?.signal,
   });
 
   if (!res.ok) {
@@ -331,15 +356,33 @@ export async function transcribeWithWhisper(
   }
 
   const data = await res.json();
-  const segments = data.segments || [];
+  const segments = Array.isArray(data?.segments) ? data.segments : [];
 
-  return segments.map((seg: any, idx: number) => ({
-    id: idx + 1,
-    start: Math.round(Number(seg.start) * 100) / 100,
-    end: Math.round(Number(seg.end) * 100) / 100,
-    zh: seg.text?.trim() || "",
-    en: seg.text?.trim() || "",
-  }));
+  let parsed: SubtitleCue[] = segments
+    .map((seg: any, idx: number) => {
+      const start = Number.isFinite(Number(seg?.start)) ? Math.max(0, Math.round(Number(seg.start) * 100) / 100) : 0;
+      const rawEnd = Number(seg?.end);
+      const end = Number.isFinite(rawEnd) && rawEnd > start ? Math.round(rawEnd * 100) / 100 : start + 2.0;
+      const text = normalizeCueText(typeof seg?.text === "string" ? seg.text : "");
+      return {
+        id: idx + 1,
+        start,
+        end,
+        zh: text,
+        en: text,
+      };
+    })
+    .filter((c: SubtitleCue) => Boolean(c.en));
+
+  if (parsed.length === 0 && typeof data?.text === "string" && data.text.trim()) {
+    const clean = normalizeCueText(data.text);
+    if (clean) {
+      parsed = [{ id: 1, start: 0, end: 5, zh: clean, en: clean }];
+    }
+  }
+
+  parsed.sort((a, b) => a.start - b.start);
+  return parsed.map((c, idx) => ({ ...c, id: idx + 1 }));
 }
 
 function blobToBase64(blob: Blob): Promise<string> {
@@ -425,23 +468,65 @@ async function fetchHlsSubtitleCues(subtitleUrlOrPlaylistUrl: string): Promise<S
   return allCues;
 }
 
-async function collectEpisodeMediaForAI(streamUrl: string): Promise<{ blob: Blob; mimeType: string }> {
-  const MAX_BYTES = 12 * 1024 * 1024;
+function combineAbortSignal(timeoutMs: number, externalSignal?: AbortSignal): {
+  signal: AbortSignal;
+  cleanup: () => void;
+} {
+  const ctrl = new AbortController();
+  const timer = globalThis.setTimeout(() => ctrl.abort(new DOMException("Timed out", "TimeoutError")), timeoutMs);
+  const onExternalAbort = () => ctrl.abort(externalSignal?.reason ?? new DOMException("Transcription cancelled", "AbortError"));
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      onExternalAbort();
+    } else {
+      externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+    }
+  }
+  return {
+    signal: ctrl.signal,
+    cleanup: () => {
+      globalThis.clearTimeout(timer);
+      externalSignal?.removeEventListener("abort", onExternalAbort);
+    },
+  };
+}
+
+async function fetchWithSignal(url: string, timeoutMs: number, externalSignal?: AbortSignal): Promise<Response> {
+  if (externalSignal?.aborted) {
+    throw new DOMException("Transcription cancelled", "AbortError");
+  }
+  const { signal, cleanup } = combineAbortSignal(timeoutMs, externalSignal);
+  try {
+    return await fetch(url, { signal });
+  } finally {
+    cleanup();
+  }
+}
+
+async function collectEpisodeMediaForAI(
+  streamUrl: string,
+  opts?: { preferWav?: boolean; signal?: AbortSignal; onStatus?: (msg: string) => void }
+): Promise<{ blob: Blob; mimeType: string; fileName: string }> {
+  const MAX_AUDIO_BYTES = 18 * 1024 * 1024;
+  const MAX_WAV_UPLOAD_BYTES = 24 * 1024 * 1024;
+  const MAX_SEGMENTS = 120;
+  const CONCURRENCY = 3;
   const isHls = /\.m3u8(\?|$|#)/i.test(streamUrl) || streamUrl.includes("/hls?u=");
 
   if (!isHls) {
-    const res = await fetch(resolveMediaProxyUrl(streamUrl), { signal: AbortSignal.timeout(30000) });
+    const res = await fetchWithSignal(resolveMediaProxyUrl(streamUrl), 30000, opts?.signal);
     if (!res.ok) throw new Error(`Failed to fetch media stream (HTTP ${res.status})`);
     const ab = await res.arrayBuffer();
-    const sliced = ab.byteLength > MAX_BYTES ? ab.slice(0, MAX_BYTES) : ab;
+    const sliced = ab.byteLength > MAX_AUDIO_BYTES ? ab.slice(0, MAX_AUDIO_BYTES) : ab;
     const ctype = res.headers.get("content-type") || "video/mp4";
-    return { blob: new Blob([sliced], { type: ctype }), mimeType: ctype };
+    const fileName = ctype.includes("webm") ? "audio.webm" : ctype.includes("wav") ? "audio.wav" : "audio.mp4";
+    return { blob: new Blob([sliced], { type: ctype }), mimeType: ctype, fileName };
   }
 
   const plUrl = isLocalMedia(streamUrl) || streamUrl.startsWith("blob:")
     ? streamUrl
     : `${LOCAL}/hls?u=${encodeURIComponent(streamUrl)}`;
-  const plRes = await fetch(plUrl, { signal: AbortSignal.timeout(15000) });
+  const plRes = await fetchWithSignal(plUrl, 15000, opts?.signal);
   if (!plRes.ok) throw new Error(`Failed to load HLS playlist (HTTP ${plRes.status})`);
   let playlistText = await plRes.text();
 
@@ -450,8 +535,8 @@ async function collectEpisodeMediaForAI(streamUrl: string): Promise<{ blob: Blob
     const lines = playlistText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const variant = lines.find((l) => !l.startsWith("#"));
     if (!variant) throw new Error("Master playlist has no media variants");
-    variantUrl = resolveMediaProxyUrl(variant);
-    const vRes = await fetch(variantUrl, { signal: AbortSignal.timeout(15000) });
+    variantUrl = resolveMediaProxyUrl(resolveRelativeUrl(plUrl, variant));
+    const vRes = await fetchWithSignal(variantUrl, 15000, opts?.signal);
     if (!vRes.ok) throw new Error(`Failed to load variant playlist (HTTP ${vRes.status})`);
     playlistText = await vRes.text();
   }
@@ -498,36 +583,41 @@ async function collectEpisodeMediaForAI(streamUrl: string): Promise<{ blob: Blob
   }
   if (segments.length === 0) throw new Error("No downloadable media segments found");
 
-  const cryptoKeyCache = new Map<string, CryptoKey>();
-  const loadAesKey = async (keyUri?: string): Promise<CryptoKey> => {
-    if (!keyUri) throw new Error("Missing AES-128 key URI in HLS playlist");
+  const cryptoKeyCache = new Map<string, Promise<CryptoKey>>();
+  const loadAesKey = (keyUri?: string): Promise<CryptoKey> => {
+    if (!keyUri) return Promise.reject(new Error("Missing AES-128 key URI in HLS playlist"));
     const cached = cryptoKeyCache.get(keyUri);
     if (cached) return cached;
     if (typeof crypto === "undefined" || !crypto.subtle) {
-      throw new Error("WebCrypto AES-128 decryption is unavailable in this environment");
+      return Promise.reject(new Error("WebCrypto AES-128 decryption is unavailable in this environment"));
     }
-    const kRes = await fetch(resolvePlaylistRef(keyUri), { signal: AbortSignal.timeout(15000) });
-    if (!kRes.ok) throw new Error(`Failed to fetch HLS decryption key (HTTP ${kRes.status})`);
-    const rawKey = await kRes.arrayBuffer();
-    if (rawKey.byteLength !== 16) {
-      throw new Error(`Invalid HLS AES-128 key length (${rawKey.byteLength} bytes)`);
-    }
-    const imported = await crypto.subtle.importKey("raw", rawKey, { name: "AES-CBC" }, false, ["decrypt"]);
-    cryptoKeyCache.set(keyUri, imported);
-    return imported;
+    const promise = (async () => {
+      const kRes = await fetchWithSignal(resolvePlaylistRef(keyUri), 15000, opts?.signal);
+      if (!kRes.ok) throw new Error(`Failed to fetch HLS decryption key (HTTP ${kRes.status})`);
+      const rawKey = await kRes.arrayBuffer();
+      if (rawKey.byteLength !== 16) {
+        throw new Error(`Invalid HLS AES-128 key length (${rawKey.byteLength} bytes)`);
+      }
+      return crypto.subtle.importKey("raw", rawKey, { name: "AES-CBC" }, false, ["decrypt"]);
+    })();
+    cryptoKeyCache.set(keyUri, promise);
+    return promise;
   };
 
-  const parts: BlobPart[] = [];
+  const targetCount = Math.min(segments.length, MAX_SEGMENTS);
+  const extractedChunks: Uint8Array[] = [];
   let totalBytes = 0;
+  let extractedTsAudio = false;
+  let initMapBuf: Uint8Array | null = null;
+  let completedSegs = 0;
 
   if (mapUri) {
     try {
-      const mRes = await fetch(resolvePlaylistRef(mapUri), { signal: AbortSignal.timeout(15000) });
+      const mRes = await fetchWithSignal(resolvePlaylistRef(mapUri), 15000, opts?.signal);
       if (mRes.ok) {
-        const mapBuf = await mRes.arrayBuffer();
-        if (mapBuf.byteLength > 0) {
-          parts.push(mapBuf);
-          totalBytes += mapBuf.byteLength;
+        const ab = await mRes.arrayBuffer();
+        if (ab.byteLength > 0) {
+          initMapBuf = new Uint8Array(ab);
         }
       }
     } catch {
@@ -535,103 +625,211 @@ async function collectEpisodeMediaForAI(streamUrl: string): Promise<{ blob: Blob
     }
   }
 
-  for (let i = 0; i < segments.length; i++) {
-    if (totalBytes >= MAX_BYTES) break;
-    const seg = segments[i];
-    const method = seg.method || "NONE";
-    if (method !== "NONE" && method !== "" && method !== "AES-128") {
-      throw new Error(`Unsupported HLS encryption method "${method}" for AI transcription`);
-    }
-    const segRes = await fetch(resolvePlaylistRef(seg.url), { signal: AbortSignal.timeout(20000) });
-    if (!segRes.ok) continue;
-    let ab = await segRes.arrayBuffer();
-    if (ab.byteLength === 0) continue;
-    if (method === "AES-128") {
-      const cryptoKey = await loadAesKey(seg.keyUri);
-      const iv = seg.iv ? parseHlsIv(seg.iv) : sequenceToIv(mediaSequence + i);
-      ab = await crypto.subtle.decrypt({ name: "AES-CBC", iv: iv as BufferSource }, cryptoKey, ab);
-    }
-    if (ab.byteLength > 0) {
-      parts.push(ab);
-      totalBytes += ab.byteLength;
+  for (let batchStart = 0; batchStart < targetCount; batchStart += CONCURRENCY) {
+    if (totalBytes >= MAX_AUDIO_BYTES) break;
+    if (opts?.signal?.aborted) throw new DOMException("Transcription cancelled", "AbortError");
+
+    const batchEnd = Math.min(targetCount, batchStart + CONCURRENCY);
+    const batchResults = await Promise.all(
+      Array.from({ length: batchEnd - batchStart }, async (_, offset) => {
+        const idx = batchStart + offset;
+        const seg = segments[idx];
+        const method = seg.method || "NONE";
+        if (method !== "NONE" && method !== "" && method !== "AES-128") {
+          throw new Error(`Unsupported HLS encryption method "${method}" for AI transcription`);
+        }
+        const segRes = await fetchWithSignal(resolvePlaylistRef(seg.url), 20000, opts?.signal);
+        if (!segRes.ok) {
+          completedSegs++;
+          opts?.onStatus?.(`Extracting audio (${completedSegs}/${targetCount} segments)...`);
+          return null;
+        }
+        let ab = await segRes.arrayBuffer();
+        if (ab.byteLength === 0) {
+          completedSegs++;
+          opts?.onStatus?.(`Extracting audio (${completedSegs}/${targetCount} segments)...`);
+          return null;
+        }
+        if (method === "AES-128") {
+          const cryptoKey = await loadAesKey(seg.keyUri);
+          const iv = seg.iv ? parseHlsIv(seg.iv) : sequenceToIv(mediaSequence + idx);
+          ab = await crypto.subtle.decrypt({ name: "AES-CBC", iv: iv as BufferSource }, cryptoKey, ab);
+        }
+        completedSegs++;
+        opts?.onStatus?.(`Extracting audio (${completedSegs}/${targetCount} segments)...`);
+        const u8 = new Uint8Array(ab);
+        if (isMpegTs(u8)) {
+          const aac = extractAacFromTs(u8);
+          return { chunk: aac, isTsAudio: aac.length > 0 };
+        }
+        return { chunk: u8, isTsAudio: false };
+      })
+    );
+
+    for (const item of batchResults) {
+      if (!item || item.chunk.length === 0) continue;
+      if (totalBytes >= MAX_AUDIO_BYTES) break;
+      if (!item.isTsAudio && extractedChunks.length === 0 && initMapBuf && initMapBuf.length > 0) {
+        extractedChunks.push(initMapBuf);
+        totalBytes += initMapBuf.length;
+      }
+      if (item.isTsAudio) extractedTsAudio = true;
+      extractedChunks.push(item.chunk);
+      totalBytes += item.chunk.length;
     }
   }
+
   if (totalBytes === 0) throw new Error("Failed to read media segments for transcription");
-  return { blob: new Blob(parts, { type: "video/mp4" }), mimeType: "video/mp4" };
+
+  const combinedBytes = new Uint8Array(totalBytes);
+  let writeOff = 0;
+  for (const ch of extractedChunks) {
+    combinedBytes.set(ch, writeOff);
+    writeOff += ch.length;
+  }
+
+  if (extractedTsAudio) {
+    if (opts?.preferWav) {
+      opts?.onStatus?.("Converting audio to 16 kHz WAV...");
+      const wavBlob = await decodeAacToWav16k(combinedBytes);
+      if (wavBlob && wavBlob.size > 0 && wavBlob.size <= MAX_WAV_UPLOAD_BYTES) {
+        return { blob: wavBlob, mimeType: "audio/wav", fileName: "audio.wav" };
+      }
+    }
+    return {
+      blob: new Blob([combinedBytes.slice().buffer], { type: "audio/aac" }),
+      mimeType: "audio/aac",
+      fileName: "audio.aac",
+    };
+  }
+
+  return {
+    blob: new Blob([combinedBytes.slice().buffer], { type: "video/mp4" }),
+    mimeType: "video/mp4",
+    fileName: "audio.mp4",
+  };
 }
 
 /**
- * Generates real subtitles using the user's configured Gemini or Whisper API key.
+ * Generates real subtitles using the user's configured Gemini, Groq Whisper, OpenAI Whisper, or custom STT API.
  */
 export async function transcribeEpisodeWithAI(
   videoId: number,
   episode: number,
   streamUrl: string,
-  onStatus?: (msg: string) => void
+  onStatus?: (msg: string) => void,
+  signal?: AbortSignal
 ): Promise<SubtitleTrack> {
   if (!streamUrl) {
     throw new Error("Stream is not ready yet. Wait for video playback to load.");
   }
   const config = getAICaptionConfig();
-  const provider =
-    config.provider === "gemini" || config.provider === "whisper"
+  const provider: AICaptionConfig["provider"] =
+    config.provider !== "none"
       ? config.provider
+      : config.groqKey
+      ? "groq"
       : config.geminiKey
       ? "gemini"
       : config.whisperKey
       ? "whisper"
+      : config.customUrl
+      ? "custom"
       : "none";
 
   if (provider === "none") {
-    throw new Error("Configure a Gemini or Whisper API key first.");
+    throw new Error("Configure a Gemini, Groq, OpenAI, or Custom API key/URL first.");
   }
 
-  onStatus?.("Fetching episode audio/video...");
-  const { blob, mimeType } = await collectEpisodeMediaForAI(streamUrl);
+  try {
+    onStatus?.("Fetching episode audio stream...");
+    const { blob, mimeType, fileName } = await collectEpisodeMediaForAI(streamUrl, {
+      preferWav: provider !== "gemini",
+      signal,
+      onStatus,
+    });
 
-  let cues: SubtitleCue[] = [];
-  let source: SubtitleTrack["source"] = "ai_gemini";
+    let cues: SubtitleCue[] = [];
+    let source: SubtitleTrack["source"] = "ai_gemini";
 
-  if (provider === "gemini") {
-    if (!config.geminiKey) throw new Error("Gemini API Key is required.");
-    onStatus?.("Transcribing & translating with Gemini...");
-    const base64 = await blobToBase64(blob);
-    cues = await transcribeWithGemini(base64, mimeType || "video/mp4", config.geminiKey);
-    source = "ai_gemini";
-  } else {
-    if (!config.whisperKey && !config.customUrl) {
-      throw new Error("OpenAI Whisper API Key is required.");
+    if (provider === "gemini") {
+      if (!config.geminiKey) throw new Error("Gemini API Key is required.");
+      onStatus?.("Transcribing & translating with Gemini...");
+      const base64 = await blobToBase64(blob);
+      cues = await transcribeWithGemini(base64, mimeType || "audio/aac", config.geminiKey, signal);
+      source = "ai_gemini";
+    } else if (provider === "groq") {
+      if (!config.groqKey) throw new Error("Groq API Key is required (free at console.groq.com).");
+      onStatus?.("Translating speech with Groq Whisper...");
+      cues = await transcribeWithWhisper(
+        blob,
+        config.groqKey,
+        "https://api.groq.com/openai/v1/audio/translations",
+        { model: "whisper-large-v3", fileName, signal }
+      );
+      source = "ai_groq";
+    } else if (provider === "custom") {
+      if (!config.customUrl?.trim()) throw new Error("Custom Whisper endpoint URL is required.");
+      onStatus?.("Transcribing speech with custom endpoint...");
+      cues = await transcribeWithWhisper(blob, config.whisperKey, config.customUrl, {
+        model: config.customModel || "whisper-1",
+        fileName,
+        signal,
+      });
+      source = "ai_whisper";
+    } else {
+      if (!config.whisperKey) {
+        throw new Error("OpenAI API Key is required.");
+      }
+      onStatus?.("Translating speech with OpenAI Whisper...");
+      cues = await transcribeWithWhisper(
+        blob,
+        config.whisperKey,
+        "https://api.openai.com/v1/audio/translations",
+        { model: "whisper-1", fileName, signal }
+      );
+      source = "ai_whisper";
     }
-    onStatus?.("Translating speech with Whisper...");
-    cues = await transcribeWithWhisper(blob, config.whisperKey, config.customUrl);
-    source = "ai_whisper";
+
+    if (!cues.length) {
+      throw new Error("No spoken dialogue detected in episode audio.");
+    }
+
+    const normalizedCues = cues
+      .map((c, idx) => {
+        const cleanEn = normalizeCueText(c.en || c.zh);
+        const cleanZh = normalizeCueText(c.zh || c.en || "");
+        return {
+          ...c,
+          id: idx + 1,
+          en: cleanEn,
+          zh: cleanZh,
+        };
+      })
+      .filter((c) => Boolean(c.en));
+
+    if (!normalizedCues.length) {
+      throw new Error("AI transcription returned empty captions.");
+    }
+
+    normalizedCues.sort((a, b) => a.start - b.start);
+
+    const track: SubtitleTrack = {
+      videoId,
+      episode,
+      cues: normalizedCues.map((c, idx) => ({ ...c, id: idx + 1 })),
+      source,
+      generatedAt: Date.now(),
+    };
+    persistTrack(track);
+    emitTrackUpdated(track);
+    return track;
+  } catch (err) {
+    if ((err as { name?: string })?.name === "AbortError" || signal?.aborted) {
+      throw new Error("Transcription cancelled");
+    }
+    throw err;
   }
-
-  if (!cues.length) {
-    throw new Error("No spoken dialogue detected in episode audio.");
-  }
-
-  const normalizedCues = cues.map((c, idx) => ({
-    ...c,
-    id: c.id || idx + 1,
-    en: formatSubtitleText(c.en || c.zh),
-    zh: c.zh || c.en || "",
-  })).filter((c) => Boolean(c.en));
-
-  if (!normalizedCues.length) {
-    throw new Error("AI transcription returned empty captions.");
-  }
-
-  const track: SubtitleTrack = {
-    videoId,
-    episode,
-    cues: normalizedCues,
-    source,
-    generatedAt: Date.now(),
-  };
-  persistTrack(track);
-  emitTrackUpdated(track);
-  return track;
 }
 
 /**
@@ -783,7 +981,7 @@ function formatSubtitleTimestamp(rawSec: number, decimalSep: "." | ","): string 
 export function exportToVtt(track: SubtitleTrack, _lang: "en" = "en"): string {
   const lines = ["WEBVTT - AuraStream English Captions", ""];
   for (const cue of track?.cues || []) {
-    const text = formatSubtitleText(cue.en || cue.zh);
+    const text = normalizeCueText(cue.en || cue.zh);
     if (!text) continue;
     const startSec = Number.isFinite(cue.start) && cue.start >= 0 ? cue.start : 0;
     const endSec = Number.isFinite(cue.end) && cue.end >= startSec ? cue.end : startSec + 1.0;
@@ -802,7 +1000,7 @@ export function exportToSrt(track: SubtitleTrack, _lang: "en" = "en"): string {
   const blocks: string[] = [];
   let index = 1;
   for (const cue of track?.cues || []) {
-    const text = formatSubtitleText(cue.en || cue.zh);
+    const text = normalizeCueText(cue.en || cue.zh);
     if (!text) continue;
     const startSec = Number.isFinite(cue.start) && cue.start >= 0 ? cue.start : 0;
     const endSec = Number.isFinite(cue.end) && cue.end >= startSec ? cue.end : startSec + 1.0;

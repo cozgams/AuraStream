@@ -678,7 +678,7 @@ fn serve_offline_binary_file(
     range: Option<&str>,
     head_only: bool,
 ) -> Response<Vec<u8>> {
-    const OFFLINE_CHUNK_CAP: u64 = 4 * 1024 * 1024;
+    const OFFLINE_CHUNK_CAP: u64 = 32 * 1024 * 1024;
     const UNRANGED_FULL_CAP: u64 = 64 * 1024 * 1024;
 
     let Ok(mut file) = std::fs::File::open(file_path) else {
@@ -700,7 +700,7 @@ fn serve_offline_binary_file(
             .header("Accept-Ranges", "bytes")
             .header("Access-Control-Expose-Headers", "Content-Length, Content-Type, Accept-Ranges, Content-Range")
             .header("X-Content-Type-Options", "nosniff")
-            .header("Cache-Control", "private, max-age=86400")
+            .header("Cache-Control", "public, max-age=31536000, immutable")
             .body(Vec::new())
             .unwrap_or_else(|_| Response::new(Vec::new()));
     }
@@ -747,38 +747,36 @@ fn serve_offline_binary_file(
                 .header("Content-Range", format!("bytes {start}-{actual_end}/{len}"))
                 .header("Access-Control-Expose-Headers", "Content-Length, Content-Type, Accept-Ranges, Content-Range")
                 .header("X-Content-Type-Options", "nosniff")
-                .header("Cache-Control", "private, max-age=86400")
+                .header("Cache-Control", "public, max-age=31536000, immutable")
                 .body(buf)
                 .unwrap_or_else(|_| Response::new(Vec::new()))
         }
         ParsedRange::None => {
-            if len > UNRANGED_FULL_CAP {
-                let to_read = OFFLINE_CHUNK_CAP.min(len);
-                let mut buf = Vec::with_capacity(to_read as usize);
-                if file.take(to_read).read_to_end(&mut buf).is_err() || buf.is_empty() {
-                    return respond(500, "text/plain", b"failed reading offline file".to_vec(), "no-store");
+            if len <= UNRANGED_FULL_CAP {
+                if let Ok(full_bytes) = std::fs::read(file_path) {
+                    let mut resp = respond(200, ctype, full_bytes, "public, max-age=31536000, immutable");
+                    resp.headers_mut()
+                        .insert("Accept-Ranges", tauri::http::HeaderValue::from_static("bytes"));
+                    return resp;
                 }
-                let actual_end = (buf.len() as u64) - 1;
-                return Response::builder()
-                    .status(StatusCode::PARTIAL_CONTENT)
-                    .header("Content-Type", ctype)
-                    .header("Content-Length", buf.len().to_string())
-                    .header("Accept-Ranges", "bytes")
-                    .header("Content-Range", format!("bytes 0-{actual_end}/{len}"))
-                    .header("Access-Control-Expose-Headers", "Content-Length, Content-Type, Accept-Ranges, Content-Range")
-                    .header("X-Content-Type-Options", "nosniff")
-                    .header("Cache-Control", "private, max-age=86400")
-                    .body(buf)
-                    .unwrap_or_else(|_| Response::new(Vec::new()));
             }
-            let mut buf = Vec::with_capacity(len as usize);
-            if file.take(UNRANGED_FULL_CAP).read_to_end(&mut buf).is_err() {
+            let to_read = OFFLINE_CHUNK_CAP.min(len);
+            let mut buf = Vec::with_capacity(to_read as usize);
+            if file.take(to_read).read_to_end(&mut buf).is_err() || buf.is_empty() {
                 return respond(500, "text/plain", b"failed reading offline file".to_vec(), "no-store");
             }
-            let mut resp = respond(200, ctype, buf, "private, max-age=86400");
-            resp.headers_mut()
-                .insert("Accept-Ranges", tauri::http::HeaderValue::from_static("bytes"));
-            resp
+            let actual_end = (buf.len() as u64) - 1;
+            Response::builder()
+                .status(StatusCode::PARTIAL_CONTENT)
+                .header("Content-Type", ctype)
+                .header("Content-Length", buf.len().to_string())
+                .header("Accept-Ranges", "bytes")
+                .header("Content-Range", format!("bytes 0-{actual_end}/{len}"))
+                .header("Access-Control-Expose-Headers", "Content-Length, Content-Type, Accept-Ranges, Content-Range")
+                .header("X-Content-Type-Options", "nosniff")
+                .header("Cache-Control", "public, max-age=31536000, immutable")
+                .body(buf)
+                .unwrap_or_else(|_| Response::new(Vec::new()))
         }
     }
 }

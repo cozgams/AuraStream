@@ -1,17 +1,23 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Sheet } from "./ios/overlays";
 import { Button } from "./ios/controls";
-import { IBan, ICheck, IClose, ICaptionsF, IFileText, ILangEn, IRefresh, ISparkles, ITrash } from "../icons";
+import { IBan, ICheck, IClose, ICaptionsF, IFileText, ILangEn, IRefresh, ISettings, ISparkles, ITrash } from "../icons";
 import type {
   AICaptionConfig,
+  AICaptionProvider,
   SubtitleMode,
   SubtitlePosition,
   SubtitleSize,
   SubtitleStyleConfig,
   SubtitleTrackStatus,
 } from "../subtitles/types";
+import { platform } from "../api";
 import { useStore } from "../store";
-import { processSubtitleExport } from "../offline/exportService";
+import {
+  isAndroidCaptionSettingsSupported,
+  openAndroidCaptionSettings,
+  processSubtitleExport,
+} from "../offline/exportService";
 import {
   getAICaptionConfig,
   getSubtitleStyleConfig,
@@ -53,16 +59,44 @@ export default function SubtitleSheet({
   const [styleConfig, setStyleConfig] = useState<SubtitleStyleConfig>(() => getSubtitleStyleConfig());
   const [aiConfig, setAiConfig] = useState<AICaptionConfig>(() => getAICaptionConfig());
   const [aiExpanded, setAiExpanded] = useState(false);
+  const [pasteExpanded, setPasteExpanded] = useState(false);
+  const [pasteText, setPasteText] = useState("");
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeStatus, setTranscribeStatus] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const abortCtrlRef = useRef<AbortController | null>(null);
+  const androidLiveCaptionAvailable = isAndroidCaptionSettingsSupported();
 
   useEffect(() => {
     if (open) {
       setStyleConfig(getSubtitleStyleConfig());
       setAiConfig(getAICaptionConfig());
+    } else {
+      abortCtrlRef.current?.abort();
+      abortCtrlRef.current = null;
+      setPasteExpanded(false);
     }
   }, [open]);
+
+  useEffect(() => {
+    return () => {
+      abortCtrlRef.current?.abort();
+      abortCtrlRef.current = null;
+    };
+  }, []);
+
+  const effectiveAiProvider: Exclude<AICaptionProvider, "none"> =
+    aiConfig.provider !== "none"
+      ? aiConfig.provider
+      : aiConfig.groqKey
+      ? "groq"
+      : aiConfig.geminiKey
+      ? "gemini"
+      : aiConfig.whisperKey
+      ? "whisper"
+      : aiConfig.customUrl
+      ? "custom"
+      : "gemini";
 
   const applyPreset = (preset: "yellow" | "white" | "cyan" | "green" | "solid") => {
     let updated: SubtitleStyleConfig;
@@ -116,6 +150,10 @@ export default function SubtitleSheet({
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || videoId == null || episode == null) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast("Subtitle file is too large (max 5 MB)", "info");
+      return;
+    }
     try {
       const rawText = await file.text();
       const imported = importSubtitleTextForEpisode(videoId, episode, rawText, file.name);
@@ -126,21 +164,70 @@ export default function SubtitleSheet({
     }
   };
 
-  const handleAiTranscribe = async () => {
+  const handleLoadPasted = () => {
     if (videoId == null || episode == null) return;
-    setAiConfig(aiConfig);
-    setAICaptionConfig(aiConfig);
-    setTranscribing(true);
-    setTranscribeStatus("Preparing episode stream...");
+    const raw = pasteText.trim();
+    if (!raw) {
+      toast("Paste .SRT, .VTT, or .ASS subtitle text first", "info");
+      return;
+    }
     try {
-      const track = await transcribeEpisodeWithAI(videoId, episode, streamUrl || "", setTranscribeStatus);
+      const imported = importSubtitleTextForEpisode(videoId, episode, raw, "pasted.srt");
+      if (mode === "off") onModeChange("en");
+      setPasteExpanded(false);
+      setPasteText("");
+      toast(`Loaded ${imported.cues.length} pasted subtitle lines`, "ok");
+    } catch (err) {
+      toast((err as Error)?.message || "Could not parse pasted subtitle text", "info");
+    }
+  };
+
+  const handlePasteClipboard = async () => {
+    try {
+      const clip = await navigator.clipboard?.readText?.();
+      if (clip && clip.trim()) {
+        setPasteText(clip);
+        toast("Pasted clipboard text", "info");
+      } else {
+        toast("Clipboard is empty. Long-press inside the box to paste.", "info");
+      }
+    } catch {
+      toast("Long-press inside the text box and tap Paste", "info");
+    }
+  };
+
+  const handleAiTranscribe = async () => {
+    if (videoId == null || episode == null || transcribing) return;
+    const configToSave: AICaptionConfig = {
+      ...aiConfig,
+      provider: effectiveAiProvider,
+    };
+    setAiConfig(configToSave);
+    setAICaptionConfig(configToSave);
+
+    abortCtrlRef.current?.abort();
+    const ctrl = new AbortController();
+    abortCtrlRef.current = ctrl;
+    setTranscribing(true);
+    setTranscribeStatus("Preparing episode audio...");
+    try {
+      const track = await transcribeEpisodeWithAI(
+        videoId,
+        episode,
+        streamUrl || "",
+        setTranscribeStatus,
+        ctrl.signal
+      );
       if (mode === "off") onModeChange("en");
       toast(`Generated ${track.cues.length} synced subtitle lines`, "ok");
       setTranscribeStatus("");
+      setAiExpanded(false);
     } catch (err) {
-      toast((err as Error)?.message || "AI transcription failed", "info");
+      const msg = (err as Error)?.message || "AI transcription failed";
+      toast(msg, "info");
       setTranscribeStatus("");
     } finally {
+      if (abortCtrlRef.current === ctrl) abortCtrlRef.current = null;
       setTranscribing(false);
     }
   };
@@ -156,12 +243,14 @@ export default function SubtitleSheet({
         return "Embedded Stream CC";
       case "ai_gemini":
         return "Gemini AI Track";
+      case "ai_groq":
+        return "Groq Whisper AI";
       case "ai_whisper":
         return "Whisper AI Track";
       case "cache":
         return "Cached Track";
       default:
-        return "No Embedded Subtitles";
+        return "No Stream CC Track";
     }
   })();
 
@@ -169,6 +258,7 @@ export default function SubtitleSheet({
     hasRealTrack &&
     (trackInfo?.source === "local_import" ||
       trackInfo?.source === "ai_gemini" ||
+      trackInfo?.source === "ai_groq" ||
       trackInfo?.source === "ai_whisper" ||
       trackInfo?.source === "cache");
 
@@ -291,10 +381,10 @@ export default function SubtitleSheet({
                     </span>
                   )}
                 </div>
-                <p className="text-[11.5px] text-mut mt-0.5 leading-snug truncate">
+                <p className="text-[11.5px] text-mut mt-0.5 leading-normal break-words">
                   {hasRealTrack
                     ? trackInfo?.fileName || `Episode ${episode} active subtitle track`
-                    : "This video has no embedded subtitle track. Load an .SRT / .VTT file or transcribe below."}
+                    : "This video stream has no embedded caption track. Import or paste .SRT/.VTT/.ASS, generate synced English captions with AI, or enable Android Live Caption."}
                 </p>
               </div>
               {canRemoveTrack && (
@@ -315,7 +405,7 @@ export default function SubtitleSheet({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".srt,.vtt,text/vtt,application/x-subrip,text/plain"
+              accept={platform === "android" ? "*/*" : ".srt,.vtt,.ass,.ssa,.txt,text/vtt,application/x-subrip,text/plain"}
               className="hidden"
               onChange={handleImportFile}
             />
@@ -327,38 +417,102 @@ export default function SubtitleSheet({
                 className="h-9 px-3 rounded-xl bg-white dark:bg-neutral-800 border border-border text-[12px] font-bold text-on flex items-center justify-center gap-1.5 pressable shadow-xs"
               >
                 <IFileText size={14} className="text-amber-500" />
-                <span>Load .SRT / .VTT</span>
+                <span>Import File</span>
               </Button>
               <Button
                 type="button"
-                onClick={() => setAiExpanded((v) => !v)}
+                onClick={() => {
+                  setPasteExpanded((v) => !v);
+                  setAiExpanded(false);
+                }}
                 className="h-9 px-3 rounded-xl bg-white dark:bg-neutral-800 border border-border text-[12px] font-bold text-on flex items-center justify-center gap-1.5 pressable shadow-xs"
               >
-                <ISparkles size={14} className="text-primary" />
-                <span>{aiExpanded ? "Hide AI Setup" : "AI Transcribe"}</span>
+                <ICaptionsF size={14} className="text-amber-500" />
+                <span>{pasteExpanded ? "Hide Paste" : "Paste Subtitles"}</span>
               </Button>
             </div>
 
+            <div className={`grid gap-2 ${androidLiveCaptionAvailable ? "grid-cols-2" : "grid-cols-1"}`}>
+              <Button
+                type="button"
+                onClick={() => {
+                  setAiExpanded((v) => !v);
+                  setPasteExpanded(false);
+                }}
+                className="h-9 px-3 rounded-xl bg-white dark:bg-neutral-800 border border-border text-[12px] font-bold text-on flex items-center justify-center gap-1.5 pressable shadow-xs"
+              >
+                <ISparkles size={14} className="text-primary" />
+                <span>{aiExpanded ? "Hide AI Setup" : "AI Auto-Captions"}</span>
+              </Button>
+              {androidLiveCaptionAvailable && (
+                <Button
+                  type="button"
+                  onClick={() => {
+                    const opened = openAndroidCaptionSettings();
+                    if (opened) {
+                      toast("Enable Live Caption in Android Settings for free on-device captions", "info");
+                    } else {
+                      toast("Open Android Settings > Accessibility > Live Caption", "info");
+                    }
+                  }}
+                  className="h-9 px-3 rounded-xl bg-white dark:bg-neutral-800 border border-border text-[12px] font-bold text-on flex items-center justify-center gap-1.5 pressable shadow-xs"
+                >
+                  <ISettings size={14} className="text-emerald-500" />
+                  <span>Live Caption</span>
+                </Button>
+              )}
+            </div>
+
+            {pasteExpanded && (
+              <div className="pt-2 border-t border-border/60 flex flex-col gap-2">
+                <textarea
+                  rows={4}
+                  value={pasteText}
+                  onChange={(e) => setPasteText(e.target.value)}
+                  placeholder="Paste .SRT, .VTT, or .ASS subtitle text here..."
+                  className="w-full p-2.5 rounded-xl bg-bg border border-border text-[12px] text-on placeholder:text-mut outline-none focus:border-primary resize-y font-mono"
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    onClick={() => void handlePasteClipboard()}
+                    className="h-8 rounded-xl bg-s3 border border-border text-[12px] font-semibold text-on pressable"
+                  >
+                    Paste Clipboard
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleLoadPasted}
+                    className="h-8 rounded-xl bg-primary text-on-primary text-[12px] font-bold pressable"
+                  >
+                    Load Captions
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {aiExpanded && (
               <div className="pt-2 border-t border-border/60 flex flex-col gap-2">
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-4 gap-1.5">
                   {(
                     [
-                      ["gemini", "Gemini 2.5 Flash"],
-                      ["whisper", "OpenAI Whisper"],
+                      ["gemini", "Gemini"],
+                      ["groq", "Groq"],
+                      ["whisper", "OpenAI"],
+                      ["custom", "Custom"],
                     ] as const
                   ).map(([prov, label]) => {
-                    const selected = aiConfig.provider === prov || (aiConfig.provider === "none" && prov === "gemini");
+                    const selected = effectiveAiProvider === prov;
                     return (
                       <button
                         key={prov}
                         type="button"
                         onClick={() => {
-                          const next = { ...aiConfig, provider: prov };
+                          const next: AICaptionConfig = { ...aiConfig, provider: prov };
                           setAiConfig(next);
                           setAICaptionConfig(next);
                         }}
-                        className={`h-8 rounded-lg border text-[11.5px] font-bold transition-all ${
+                        className={`h-8 rounded-lg border text-[11px] font-bold transition-all ${
                           selected
                             ? "bg-primary/15 border-primary text-primary"
                             : "bg-s3 border-border text-mut"
@@ -369,39 +523,106 @@ export default function SubtitleSheet({
                     );
                   })}
                 </div>
-                <input
-                  type="password"
-                  value={
-                    aiConfig.provider === "whisper"
-                      ? aiConfig.whisperKey || ""
-                      : aiConfig.geminiKey || ""
-                  }
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    const activeProv = aiConfig.provider === "whisper" ? "whisper" : "gemini";
-                    const next: AICaptionConfig =
-                      activeProv === "whisper"
-                        ? { ...aiConfig, provider: "whisper", whisperKey: val }
-                        : { ...aiConfig, provider: "gemini", geminiKey: val };
-                    setAiConfig(next);
-                    setAICaptionConfig(next);
-                  }}
-                  placeholder={
-                    aiConfig.provider === "whisper"
-                      ? "Paste OpenAI API key (sk-...)"
-                      : "Paste Google Gemini API key (AIza...)"
-                  }
-                  className="h-9 px-3 rounded-xl bg-bg border border-border text-[12px] text-on placeholder:text-mut outline-none focus:border-primary"
-                />
-                <Button
-                  type="button"
-                  disabled={transcribing}
-                  onClick={() => void handleAiTranscribe()}
-                  className="h-9 rounded-xl bg-primary text-on-primary text-[12px] font-bold flex items-center justify-center gap-1.5 pressable disabled:opacity-60"
-                >
-                  <ISparkles size={13} />
-                  <span>{transcribing ? (transcribeStatus || "Transcribing...") : "Transcribe Current Episode"}</span>
-                </Button>
+                <p className="text-[11px] text-mut leading-snug">
+                  {effectiveAiProvider === "groq"
+                    ? "Free Whisper large-v3 translation key at console.groq.com"
+                    : effectiveAiProvider === "gemini"
+                    ? "Gemini 2.5 Flash audio translation key at aistudio.google.com"
+                    : effectiveAiProvider === "whisper"
+                    ? "OpenAI Whisper API key at platform.openai.com"
+                    : "Custom OpenAI-compatible /audio/translations or /transcriptions URL"}
+                </p>
+                {effectiveAiProvider === "custom" ? (
+                  <>
+                    <input
+                      type="url"
+                      value={aiConfig.customUrl || ""}
+                      onChange={(e) => {
+                        const next: AICaptionConfig = { ...aiConfig, provider: "custom", customUrl: e.target.value };
+                        setAiConfig(next);
+                        setAICaptionConfig(next);
+                      }}
+                      placeholder="https://your-host/v1/audio/translations"
+                      className="h-9 px-3 rounded-xl bg-bg border border-border text-[12px] text-on placeholder:text-mut outline-none focus:border-primary"
+                    />
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <input
+                        type="text"
+                        value={aiConfig.customModel || ""}
+                        onChange={(e) => {
+                          const next: AICaptionConfig = { ...aiConfig, provider: "custom", customModel: e.target.value };
+                          setAiConfig(next);
+                          setAICaptionConfig(next);
+                        }}
+                        placeholder="Model (whisper-1)"
+                        className="h-9 px-3 rounded-xl bg-bg border border-border text-[12px] text-on placeholder:text-mut outline-none focus:border-primary"
+                      />
+                      <input
+                        type="password"
+                        value={aiConfig.whisperKey || ""}
+                        onChange={(e) => {
+                          const next: AICaptionConfig = { ...aiConfig, provider: "custom", whisperKey: e.target.value };
+                          setAiConfig(next);
+                          setAICaptionConfig(next);
+                        }}
+                        placeholder="API key (optional)"
+                        className="h-9 px-3 rounded-xl bg-bg border border-border text-[12px] text-on placeholder:text-mut outline-none focus:border-primary"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <input
+                    type="password"
+                    value={
+                      effectiveAiProvider === "groq"
+                        ? aiConfig.groqKey || ""
+                        : effectiveAiProvider === "whisper"
+                        ? aiConfig.whisperKey || ""
+                        : aiConfig.geminiKey || ""
+                    }
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const next: AICaptionConfig =
+                        effectiveAiProvider === "groq"
+                          ? { ...aiConfig, provider: "groq", groqKey: val }
+                          : effectiveAiProvider === "whisper"
+                          ? { ...aiConfig, provider: "whisper", whisperKey: val }
+                          : { ...aiConfig, provider: "gemini", geminiKey: val };
+                      setAiConfig(next);
+                      setAICaptionConfig(next);
+                    }}
+                    placeholder={
+                      effectiveAiProvider === "groq"
+                        ? "Paste Groq API key (gsk_...)"
+                        : effectiveAiProvider === "whisper"
+                        ? "Paste OpenAI API key (sk-...)"
+                        : "Paste Google Gemini API key (AIza...)"
+                    }
+                    className="h-9 px-3 rounded-xl bg-bg border border-border text-[12px] text-on placeholder:text-mut outline-none focus:border-primary"
+                  />
+                )}
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    disabled={transcribing}
+                    onClick={() => void handleAiTranscribe()}
+                    className="flex-1 h-9 rounded-xl bg-primary text-on-primary text-[12px] font-bold flex items-center justify-center gap-1.5 pressable disabled:opacity-60"
+                  >
+                    <ISparkles size={13} />
+                    <span>{transcribing ? (transcribeStatus || "Transcribing...") : "Generate Synced Captions"}</span>
+                  </Button>
+                  {transcribing && (
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        abortCtrlRef.current?.abort();
+                      }}
+                      className="px-3 h-9 rounded-xl bg-red-500/15 text-red-600 dark:text-red-400 text-[12px] font-bold pressable"
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -638,17 +859,27 @@ export default function SubtitleSheet({
                 { id: "cyan" as const, label: "Cinema", dot: "#00E5FF" },
                 { id: "green" as const, label: "Neon", dot: "#76FF03" },
                 { id: "solid" as const, label: "Solid", dot: "#FFFFFF" },
-              ].map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => applyPreset(p.id)}
-                  className="h-8 rounded-xl bg-s2 hover:bg-s3 border border-border text-[11px] font-bold text-on flex items-center justify-center gap-1 pressable transition-all active:scale-95"
-                >
-                  <span className="w-2.5 h-2.5 rounded-full border border-black/20" style={{ backgroundColor: p.dot }} />
-                  <span>{p.label}</span>
-                </button>
-              ))}
+              ].map((p) => {
+                const isPresetActive =
+                  p.id === "solid"
+                    ? styleConfig.bgStyle === "solid" && styleConfig.color === "white"
+                    : styleConfig.bgStyle !== "solid" && styleConfig.color === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => applyPreset(p.id)}
+                    className={`h-8 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 pressable transition-all active:scale-95 ${
+                      isPresetActive
+                        ? "bg-white dark:bg-neutral-900 text-on border-amber-500/60 shadow-xs ring-1 ring-amber-500/30"
+                        : "bg-s2 hover:bg-s3 border-border text-on"
+                    }`}
+                  >
+                    <span className="w-2.5 h-2.5 rounded-full border border-black/20" style={{ backgroundColor: p.dot }} />
+                    <span>{p.label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}

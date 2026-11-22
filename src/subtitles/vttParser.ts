@@ -1,5 +1,18 @@
 import type { SubtitleCue } from "./types";
-import { formatSubtitleText } from "./dramaTranslator";
+
+/**
+ * Collapses extra horizontal whitespace inside subtitle cues while preserving
+ * authentic English, Chinese, and punctuation characters intact.
+ */
+export function normalizeCueText(rawText: string | undefined): string {
+  if (!rawText) return "";
+  return rawText
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n");
+}
 
 /**
  * Decodes standard HTML entities commonly found in subtitle tracks
@@ -62,15 +75,100 @@ export function parseTimestamp(ts: string): number {
 }
 
 /**
- * Parses standard WebVTT or SRT format text into SubtitleCue[]
+ * Parses SSA/ASS ([Events] / Dialogue:) subtitle content into sorted SubtitleCue[].
+ */
+export function parseAss(content: string): SubtitleCue[] {
+  if (!content || typeof content !== "string") return [];
+  const normalized = content.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+  const lines = normalized.split("\n");
+
+  let inEvents = false;
+  let startIdx = 1;
+  let endIdx = 2;
+  let textIdx = 9;
+  const cues: SubtitleCue[] = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (line.startsWith("[") && line.endsWith("]")) {
+      inEvents = line.toLowerCase() === "[events]";
+      continue;
+    }
+    if (!inEvents && !/^Dialogue\s*:/i.test(line)) continue;
+
+    if (/^Format\s*:/i.test(line)) {
+      const cols = line
+        .slice(line.indexOf(":") + 1)
+        .split(",")
+        .map((c) => c.trim().toLowerCase());
+      const sIdx = cols.indexOf("start");
+      const eIdx = cols.indexOf("end");
+      const tIdx = cols.indexOf("text");
+      if (sIdx >= 0) startIdx = sIdx;
+      if (eIdx >= 0) endIdx = eIdx;
+      if (tIdx >= 0) textIdx = tIdx;
+      inEvents = true;
+      continue;
+    }
+
+    if (!/^Dialogue\s*:/i.test(line)) continue;
+    const body = line.slice(line.indexOf(":") + 1).trimStart();
+    const parts = body.split(",");
+    if (parts.length <= Math.max(startIdx, endIdx, textIdx)) continue;
+
+    const start = tryParseTimestamp(parts[startIdx]);
+    if (start === null) continue;
+    const parsedEnd = tryParseTimestamp(parts[endIdx]);
+    const end = parsedEnd !== null && parsedEnd > start ? parsedEnd : start + 1.0;
+
+    const rawText = parts
+      .slice(textIdx)
+      .join(",")
+      .replace(/\{[^}]*\}/g, "")
+      .replace(/\\N/g, "\n")
+      .replace(/\\n/g, "\n")
+      .replace(/\\h/g, " ")
+      .replace(/<[^>]+>/g, "");
+    const decoded = normalizeCueText(decodeHtmlEntities(rawText));
+    if (!decoded) continue;
+
+    const textLines = decoded.split("\n").filter(Boolean);
+    const enLines: string[] = [];
+    const zhLines: string[] = [];
+    for (const tl of textLines) {
+      if (/[\u4e00-\u9fa5]/.test(tl)) zhLines.push(tl);
+      else enLines.push(tl);
+    }
+    const joinedEn = normalizeCueText(enLines.join("\n"));
+    const joinedZh = normalizeCueText(zhLines.join("\n"));
+    const displayCue = joinedEn || joinedZh;
+    if (!displayCue) continue;
+
+    cues.push({
+      id: cues.length + 1,
+      start,
+      end,
+      en: displayCue,
+      zh: joinedZh || displayCue,
+    });
+  }
+
+  cues.sort((a, b) => a.start - b.start);
+  return cues.map((c, idx) => ({ ...c, id: idx + 1 }));
+}
+
+/**
+ * Parses standard WebVTT, SRT, or SSA/ASS subtitle format text into SubtitleCue[].
  */
 export function parseVtt(content: string): SubtitleCue[] {
   if (!content || typeof content !== "string") return [];
+  if (/\[Events\]/i.test(content) && /^\s*Dialogue\s*:/im.test(content)) {
+    return parseAss(content);
+  }
   const cues: SubtitleCue[] = [];
   const normalized = content.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const blocks = normalized.split(/\n\s*\n/);
-
-  let idCounter = 1;
 
   for (const block of blocks) {
     const lines = block.trim().split("\n");
@@ -108,14 +206,14 @@ export function parseVtt(content: string): SubtitleCue[] {
 
     const textLines = lines
       .slice(timeLineIdx + 1)
-      .map((l) => decodeHtmlEntities(l.replace(/\{\\[^}]+\}/g, "").replace(/<[^>]+>/g, "").trim()))
+      .map((l) => decodeHtmlEntities(l.replace(/\{[^}]*\}/g, "").replace(/<[^>]+>/g, "").trim()))
       .filter(Boolean);
     if (!textLines.length) continue;
 
     const enLines: string[] = [];
     const zhLines: string[] = [];
 
-    // Preserve multi-line cues cleanly instead of treating line 2 as a second language
+    // Preserve multi-line dialogue cleanly without corrupting monolingual or bilingual cues
     for (const line of textLines) {
       if (/^(\[EN\]|EN:)/i.test(line)) {
         const cleaned = line.replace(/^(\[EN\]|EN:)\s*/i, "").trim();
@@ -133,21 +231,22 @@ export function parseVtt(content: string): SubtitleCue[] {
       }
     }
 
-    const joinedEn = enLines.join("\n");
-    const joinedZh = zhLines.join("\n");
-    const englishCue = formatSubtitleText(joinedEn || joinedZh);
-    if (!englishCue) continue;
+    const joinedEn = normalizeCueText(enLines.join("\n"));
+    const joinedZh = normalizeCueText(zhLines.join("\n"));
+    const displayCue = joinedEn || joinedZh;
+    if (!displayCue) continue;
 
     cues.push({
-      id: idCounter++,
+      id: cues.length + 1,
       start,
       end,
-      en: englishCue,
-      zh: joinedZh || englishCue,
+      en: displayCue,
+      zh: joinedZh || displayCue,
     });
   }
 
-  return cues;
+  cues.sort((a, b) => a.start - b.start);
+  return cues.map((c, idx) => ({ ...c, id: idx + 1 }));
 }
 
 /**

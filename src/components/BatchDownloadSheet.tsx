@@ -121,19 +121,22 @@ export default function BatchDownloadSheet({
   const seriesQueueItems = Array.from(activeMap.values()).filter(
     (item) => item.videoId === videoId && (item.status === "downloading" || item.status === "queued")
   );
+  const downloadingItems = seriesQueueItems.filter((item) => item.status === "downloading");
   const isCurrentBatchActive =
     seriesQueueItems.length > 0 || (batchProgress.active && batchProgress.videoId === videoId);
   const batchSessionKey = isCurrentBatchActive ? `${videoId}:${Math.max(batchProgress.total, seriesQueueItems.length)}` : "";
 
   const activeDownloadingItem =
-    seriesQueueItems.find((item) => item.status === "downloading") ||
+    downloadingItems[0] ||
     seriesQueueItems[0] ||
     (batchProgress.videoId === videoId ? activeMap.get(`${videoId}_${batchProgress.currentEpisode}`) : undefined);
   const activeEpProgress = activeDownloadingItem;
   const activeEpNum = activeEpProgress?.episode || batchProgress.currentEpisode;
   const activeEpPct = activeEpProgress?.progress || 0;
-  const activeFraction =
-    activeEpProgress?.status === "downloading" ? Math.min(99, Math.max(0, activeEpPct)) / 100 : 0;
+  const activeFractionSum = downloadingItems.reduce(
+    (sum, item) => sum + Math.min(99, Math.max(0, item.progress || 0)) / 100,
+    0
+  );
   const displayBatchTotal =
     batchProgress.videoId === videoId && batchProgress.total > 0
       ? Math.max(batchProgress.total, seriesQueueItems.length)
@@ -146,7 +149,7 @@ export default function BatchDownloadSheet({
     100,
     Math.max(
       activeEpPct > 0 || processedCount > 0 ? 2 : 0,
-      Math.round(((processedCount + activeFraction) / Math.max(1, displayBatchTotal)) * 100)
+      Math.round(((processedCount + activeFractionSum) / Math.max(1, displayBatchTotal)) * 100)
     )
   );
   const sessionChanged = prevBatchKeyRef.current !== batchSessionKey;
@@ -160,6 +163,13 @@ export default function BatchDownloadSheet({
   }, [batchSessionKey, overallBatchPct]);
 
   if (!isOpen) return null;
+
+  const selectableEpisodes = allEpisodes.filter((ep) => {
+    if (downloadedSet.has(ep)) return false;
+    const st = activeMap.get(`${videoId}_${ep}`)?.status;
+    return st !== "downloading" && st !== "queued";
+  });
+  const selectableCount = selectableEpisodes.length;
 
   const effectiveSelected = Array.from(selectedEps).filter((ep) => {
     if (downloadedSet.has(ep)) return false;
@@ -283,22 +293,25 @@ export default function BatchDownloadSheet({
         {/* Quick Presets */}
         <div className="flex items-center gap-2 p-3 border-b border-edge/30 shrink-0 overflow-x-auto scrollbar-none">
           <Button
+            disabled={selectableCount === 0}
             onClick={() => selectNext(5)}
-            className="px-3 py-1.5 rounded-xl bg-s3 text-[12px] font-semibold text-on pressable"
+            className="px-3 py-1.5 rounded-xl bg-s3 text-[12px] font-semibold text-on pressable disabled:opacity-45"
           >
             + {t("batch.next_5")}
           </Button>
           <Button
+            disabled={selectableCount === 0}
             onClick={() => selectNext(10)}
-            className="px-3 py-1.5 rounded-xl bg-s3 text-[12px] font-semibold text-on pressable"
+            className="px-3 py-1.5 rounded-xl bg-s3 text-[12px] font-semibold text-on pressable disabled:opacity-45"
           >
             + {t("batch.next_10")}
           </Button>
           <Button
+            disabled={selectableCount === 0}
             onClick={selectAllUnsaved}
-            className="px-3 py-1.5 rounded-xl bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[12px] font-bold pressable"
+            className="px-3 py-1.5 rounded-xl bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[12px] font-bold pressable disabled:opacity-45"
           >
-            {t("batch.all_unsaved", { count: Math.max(0, allEpisodes.length - downloadedSet.size) })}
+            {t("batch.all_unsaved", { count: selectableCount })}
           </Button>
           <Button
             onClick={clearSelection}
@@ -371,12 +384,13 @@ export default function BatchDownloadSheet({
               <span className="font-semibold text-primary flex items-center gap-1.5">
                 <Loader className="w-4 h-4 spinner" />
                 <span>
-                  {t("batch.downloading", {
-                    current: activeEpNum,
-                    completed: processedCount,
-                    total: displayBatchTotal,
-                  })}
-                  {activeEpPct > 0 ? ` · ${activeEpPct}%` : ""}
+                  {downloadingItems.length > 1
+                    ? `Downloading ${downloadingItems.length} episodes (${processedCount}/${displayBatchTotal}) · ${overallBatchPct}%`
+                    : `${t("batch.downloading", {
+                        current: activeEpNum,
+                        completed: processedCount,
+                        total: displayBatchTotal,
+                      })}${activeEpPct > 0 ? ` · ${activeEpPct}%` : ""}`}
                 </span>
               </span>
               <Button
@@ -395,7 +409,11 @@ export default function BatchDownloadSheet({
                       }`
                     : "Connecting to stream..."}
                 </span>
-                <span>{activeEpProgress.speedFormatted || ""}</span>
+                {activeEpProgress.downloadedBytes > 0 &&
+                  activeEpProgress.speedFormatted &&
+                  !/connecting/i.test(activeEpProgress.speedFormatted) && (
+                    <span>{activeEpProgress.speedFormatted}</span>
+                  )}
               </div>
             )}
             <div className="w-full h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden relative">
@@ -453,10 +471,18 @@ export default function BatchDownloadSheet({
         <div className="px-4 pt-3 pb-4 border-t border-edge/30 flex items-center justify-between gap-3 shrink-0 bg-s1">
           <div className="flex flex-col">
             <span className="text-[13px] font-bold text-on">
-              {t("batch.selected_count", { count: effectiveSelected.length })}
+              {effectiveSelected.length > 0
+                ? t("batch.selected_count", { count: effectiveSelected.length })
+                : isCurrentBatchActive
+                ? `${seriesQueueItems.length} in queue (${downloadingItems.length || 1} active)`
+                : t("batch.selected_count", { count: 0 })}
             </span>
             <span className="text-[11px] text-mut">
-              {t("batch.est_size", { size: estFormatted })}
+              {effectiveSelected.length > 0
+                ? t("batch.est_size", { size: estFormatted })
+                : isCurrentBatchActive
+                ? "Tap episodes above to add more"
+                : t("batch.est_size", { size: estFormatted })}
             </span>
           </div>
 
@@ -472,7 +498,11 @@ export default function BatchDownloadSheet({
             <IDownload size={15} />
             {batchProgress.active && !isCurrentBatchActive
               ? `Add to queue (${effectiveSelected.length})`
-              : t("batch.download_selected", { count: effectiveSelected.length })}
+              : effectiveSelected.length > 0
+              ? t("batch.download_selected", { count: effectiveSelected.length })
+              : isCurrentBatchActive
+              ? "Select Episodes"
+              : t("batch.download_selected", { count: 0 })}
           </Button>
         </div>
       </div>

@@ -2217,6 +2217,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           onLock={lockControls}
           onTheater={() => setTheater((v) => !v)}
           onFullscreen={toggleFull}
+          onOpenCaptions={() => setPanel("captions")}
           onNext={() => {
             if (nextEpObj) pickEp(nextEpObj.ep_num);
             else go(1);
@@ -2856,7 +2857,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 setPanel("captions");
               }}
               aria-label={t("captions.title")}
-              title={subtitleTrackInfo.hasTrack ? "Captions (Tap to customize)" : "No embedded captions (Tap to load .SRT/.VTT)"}
+              title={subtitleTrackInfo.hasTrack ? "Closed Captions (Tap to customize)" : "Closed Captions (Tap for AI / .SRT / Live Caption)"}
               className={`hg-chip w-9 h-9 rounded-full flex items-center justify-center relative pressable elev-1 ${
                 store.subtitleMode === "en" && subtitleTrackInfo.hasTrack
                   ? "text-white bg-black/60 border border-white/20"
