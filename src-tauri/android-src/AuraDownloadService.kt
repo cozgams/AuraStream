@@ -60,8 +60,10 @@ class AuraDownloadService : Service() {
   )
 
   companion object {
-    const val CHANNEL_ID = "aurastream_downloads_silent_v4"
-    const val COMPLETE_CHANNEL_ID = "aurastream_downloads_complete_silent_v4"
+    const val CHANNEL_ID = "aurastream_downloads_silent_v5"
+    const val COMPLETE_CHANNEL_ID = "aurastream_downloads_complete_silent_v5"
+    private const val LEGACY_SILENT_V4_CHANNEL_ID = "aurastream_downloads_silent_v4"
+    private const val LEGACY_SILENT_V4_COMPLETE_CHANNEL_ID = "aurastream_downloads_complete_silent_v4"
     private const val LEGACY_SILENT_V3_CHANNEL_ID = "aurastream_downloads_silent_v3"
     private const val LEGACY_SILENT_V3_COMPLETE_CHANNEL_ID = "aurastream_downloads_complete_silent_v3"
     private const val LEGACY_CHANNEL_ID = "aurastream_downloads_v2"
@@ -105,6 +107,12 @@ class AuraDownloadService : Service() {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
         try {
+          manager.deleteNotificationChannel(LEGACY_SILENT_V4_CHANNEL_ID)
+        } catch (_: Exception) {}
+        try {
+          manager.deleteNotificationChannel(LEGACY_SILENT_V4_COMPLETE_CHANNEL_ID)
+        } catch (_: Exception) {}
+        try {
           manager.deleteNotificationChannel(LEGACY_SILENT_V3_CHANNEL_ID)
         } catch (_: Exception) {}
         try {
@@ -125,7 +133,7 @@ class AuraDownloadService : Service() {
           "Active Downloads",
           NotificationManager.IMPORTANCE_LOW
         ).apply {
-          description = "Shows silent progress for active and queued downloads"
+          description = "Silent progress for active and queued downloads"
           setShowBadge(false)
           enableVibration(false)
           vibrationPattern = longArrayOf(0L)
@@ -198,7 +206,7 @@ class AuraDownloadService : Service() {
           .setOnlyAlertOnce(true)
           .setSilent(true)
           .setSound(null)
-          .setVibrate(null)
+          .setVibrate(longArrayOf(0L))
           .setDefaults(0)
           .setPriority(NotificationCompat.PRIORITY_LOW)
           .setCategory(NotificationCompat.CATEGORY_STATUS)
@@ -729,7 +737,7 @@ class AuraDownloadService : Service() {
       .setOnlyAlertOnce(true)
       .setSilent(true)
       .setSound(null)
-      .setVibrate(null)
+      .setVibrate(longArrayOf(0L))
       .setDefaults(0)
       .setShowWhen(false)
       .setContentIntent(pendingIntent)

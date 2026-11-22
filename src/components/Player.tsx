@@ -121,6 +121,7 @@ export default function Player({
     const resume = proxyRecovery.resume();
     const isBlob = src.startsWith("blob:");
     const isHlsBlob = isBlob && (src.includes(".m3u8") || src.includes("type=hls") || src.includes("#.m3u8"));
+    const isOfflineLocal = isBlob || src.includes("/offline/");
     const isDirectOfflineFile = src.includes("/offline/") && !src.toLowerCase().includes(".m3u8");
     const proxied = isLocalMedia(src) || isBlob;
     const url = isBlob ? src : (proxied ? src : playlist(src));
@@ -142,7 +143,10 @@ export default function Player({
         enableWorker: platform !== "ios",
         // Keep the same macOS seek workaround as the shared player.
         preferManagedMediaSource: false,
-        autoStartLoad: false,
+        autoStartLoad: isOfflineLocal || activity.isActive(),
+        startFragPrefetch: true,
+        progressive: true,
+        capLevelToPlayerSize: true,
         startPosition: resume?.time ?? -1,
         lowLatencyMode: false,
         maxBufferLength: isFullEpisodePreCacheEnabled() ? 600 : 30,
@@ -163,9 +167,11 @@ export default function Player({
       observeHls(hls, trace);
       hls.loadSource(url);
       hls.attachMedia(video);
+
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         if (activity.isActive()) hls.startLoad(resume?.time ?? -1);
-        if (autoPlayRef.current && !resume) activity.play("manifest_autoplay", true);
+        const shouldPlay = autoPlayRef.current && (!resume || resume.playing !== false);
+        if (shouldPlay) activity.play("manifest_autoplay", true);
       });
       hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
         hls.subtitleDisplay = false;
@@ -180,7 +186,11 @@ export default function Player({
         if (recoverTimerRef.current) { window.clearTimeout(recoverTimerRef.current); recoverTimerRef.current = null; }
       });
       hls.on(Hls.Events.ERROR, (_e, data) => {
-        if (!data.fatal) {
+        const isTrackRemoved = data.details === Hls.ErrorDetails.BUFFER_APPEND_ERROR ||
+          String(data.error || "").includes("SourceBuffer, but it does not exist") ||
+          String(data.details || "").includes("bufferAppendError");
+
+        if (!data.fatal && !isTrackRemoved) {
           if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR && activity.isActive()) {
             try { hls.startLoad(video.currentTime || -1); } catch { /* ignore */ }
           }
@@ -189,13 +199,16 @@ export default function Player({
         if (!activity.isActive()) return;
         const retry = () => {
           recoverCountRef.current += 1;
-          const delay = 500 * Math.pow(2, recoverCountRef.current - 1);
+          const delay = 300 * Math.pow(2, recoverCountRef.current - 1);
           if (recoverTimerRef.current) window.clearTimeout(recoverTimerRef.current);
           recoverTimerRef.current = window.setTimeout(() => {
             recoverTimerRef.current = null;
             if (hlsRef.current !== hls || !activity.isActive()) return;
             try {
               if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                hls.startLoad(video.currentTime || -1);
+              } else if (isTrackRemoved) {
+                hls.recoverMediaError();
                 hls.startLoad(video.currentTime || -1);
               } else {
                 hls.recoverMediaError();
@@ -204,8 +217,10 @@ export default function Player({
             } catch { /* ignore */ }
           }, delay);
         };
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && recoverCountRef.current < 4) { retry(); return; }
-        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && recoverCountRef.current < 4) { retry(); return; }
+        if ((data.type === Hls.ErrorTypes.NETWORK_ERROR || isTrackRemoved || data.type === Hls.ErrorTypes.MEDIA_ERROR) && recoverCountRef.current < 4) {
+          retry();
+          return;
+        }
         if (recoverTimerRef.current) { window.clearTimeout(recoverTimerRef.current); recoverTimerRef.current = null; }
         const detail = `${data.type}/${data.details}/${data.response?.code ?? ""}/${String(data.reason ?? "").slice(0, 80)}`;
         (window as unknown as { __hlsErr?: string }).__hlsErr = detail;
@@ -218,7 +233,8 @@ export default function Player({
     } else {
       // Native HLS fallback for Safari and compatible WebViews
       video.src = url;
-      if (autoPlayRef.current && !resume) activity.play("native_autoplay", true);
+      const shouldPlay = autoPlayRef.current && (!resume || resume.playing !== false);
+      if (shouldPlay) activity.play("native_autoplay", true);
     }
 
     return () => {

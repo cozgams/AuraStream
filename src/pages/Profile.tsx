@@ -1226,7 +1226,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
           /* =====================================================================
               2. Downloads Hub View (Image 2 & Image 3 Screen 1)
               ===================================================================== */
-          <div className="flex flex-col gap-3.5 a-rise min-w-0 w-full overflow-x-hidden">
+          <div className="flex flex-col gap-3.5 a-rise min-w-0 w-full overflow-x-hidden pb-[calc(var(--sab,0px)+96px)]">
             {/* Search Input Bar (when search is toggled in top bar) */}
             {downloadSearchOpen && (
               <div className="relative flex items-center bg-white/95 dark:bg-neutral-900/95 border border-blue-200/90 dark:border-blue-500/30 rounded-full px-3.5 py-2 shadow-xs a-fade-in">
@@ -1941,12 +1941,14 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                 </button>
               </div>
             ) : null}
+            {/* Safe bottom spacer for downloads list so floating bottom tabs never obstruct items */}
+            <div className="h-[calc(var(--sab,0px)+96px)] shrink-0 pointer-events-none" aria-hidden="true" />
           </div>
         ) : view === "seriesDetail" && selectedSeriesGroup ? (
           /* =====================================================================
               3. Series Detail View (Image 3 Screen 2)
               ===================================================================== */
-          <div className="flex flex-col gap-4 a-rise">
+          <div className="flex flex-col gap-4 a-rise pb-[calc(var(--sab,0px)+96px)]">
             {/* Top Showcase Hero */}
             <div className="flex items-center gap-3.5 px-0.5">
               <div className="w-16 h-16 rounded-2xl overflow-hidden shrink-0 shadow-md border border-black/5 dark:border-white/10 bg-slate-100 dark:bg-neutral-800">

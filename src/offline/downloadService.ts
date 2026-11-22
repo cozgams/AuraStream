@@ -670,10 +670,10 @@ export async function ensureOfflineSyncReady(): Promise<void> {
   initialReadyPromise.p = (async () => {
     startNativeDownloadListener();
     if (isNativeRustDownloaderAvailable()) {
-      await syncNativeDownloadState();
+      await syncNativeDownloadState().catch(() => {});
     }
-    await syncOfflineEpisodesFromIndexedDB();
-    await resumeAllDownloads(false, true);
+    await syncOfflineEpisodesFromIndexedDB().catch(() => {});
+    void resumeAllDownloads(false, true).catch(() => {});
   })();
   return initialReadyPromise.p;
 }

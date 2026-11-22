@@ -182,7 +182,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         enableWorker: platform !== "ios",
         // Prefer standard MSE on macOS; hls.js handles MMS-only fallback and seek recovery.
         preferManagedMediaSource: false,
-        autoStartLoad: false,
+        autoStartLoad: isOfflineLocal || activity.isActive(),
         startFragPrefetch: true,
         progressive: true,
         capLevelToPlayerSize: true,
@@ -210,7 +210,8 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         if (!hls.loadingEnabled && activity.isActive()) hls.startLoad(resume?.time ?? -1);
-        if (autoPlayRef.current && !resume) activity.play("manifest_autoplay", true);
+        const shouldPlay = autoPlayRef.current && (!resume || resume.playing !== false);
+        if (shouldPlay) activity.play("manifest_autoplay", true);
       });
       hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
         hls.subtitleDisplay = false;
@@ -224,7 +225,11 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         if (recoverTimerRef.current) { window.clearTimeout(recoverTimerRef.current); recoverTimerRef.current = null; }
       });
       hls.on(Hls.Events.ERROR, (_e, data) => {
-        if (!data.fatal) {
+        const isTrackRemoved = data.details === Hls.ErrorDetails.BUFFER_APPEND_ERROR ||
+          String(data.error || "").includes("SourceBuffer, but it does not exist") ||
+          String(data.details || "").includes("bufferAppendError");
+
+        if (!data.fatal && !isTrackRemoved) {
           if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR && activity.isActive()) {
             try { hls.startLoad(video.currentTime || -1); } catch { /* ignore */ }
           }
@@ -233,22 +238,28 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         if (!activity.isActive()) return;
         const retry = () => {
           recoverCountRef.current += 1;
-          const delay = 500 * Math.pow(2, recoverCountRef.current - 1);
+          const delay = 350 * Math.pow(2, recoverCountRef.current - 1);
           if (recoverTimerRef.current) window.clearTimeout(recoverTimerRef.current);
           recoverTimerRef.current = window.setTimeout(() => {
             recoverTimerRef.current = null;
             if (hlsRef.current !== hls || !activity.isActive()) return;
             try {
-              if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad(video.currentTime || -1);
-              else {
+              if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                hls.startLoad(video.currentTime || -1);
+              } else if (isTrackRemoved) {
+                hls.recoverMediaError();
+                hls.startLoad(video.currentTime || -1);
+              } else {
                 hls.recoverMediaError();
                 activity.play("error_recover", true);
               }
             } catch { /* ignore */ }
           }, delay);
         };
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && recoverCountRef.current < 4) { retry(); return; }
-        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && recoverCountRef.current < 4) { retry(); return; }
+        if ((data.type === Hls.ErrorTypes.NETWORK_ERROR || isTrackRemoved || data.type === Hls.ErrorTypes.MEDIA_ERROR) && recoverCountRef.current < 4) {
+          retry();
+          return;
+        }
         if (recoverTimerRef.current) { window.clearTimeout(recoverTimerRef.current); recoverTimerRef.current = null; }
         onErrorRef.current?.(`${data.type}/${data.details}`);
         hls.destroy();
@@ -256,7 +267,8 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
       });
     } else {
       video.src = url;
-      if (autoPlayRef.current && !resume) activity.play("native_autoplay", true);
+      const shouldPlay = autoPlayRef.current && (!resume || resume.playing !== false);
+      if (shouldPlay) activity.play("native_autoplay", true);
     }
 
     return () => {

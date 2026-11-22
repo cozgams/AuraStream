@@ -412,7 +412,12 @@ export default function BatchDownloadSheet({
                 {activeEpProgress.downloadedBytes > 0 &&
                   activeEpProgress.speedFormatted &&
                   !/connecting/i.test(activeEpProgress.speedFormatted) && (
-                    <span>{activeEpProgress.speedFormatted}</span>
+                    <span>
+                      {activeEpProgress.speedFormatted}
+                      {activeEpProgress.etaFormatted && activeEpProgress.etaFormatted !== "--"
+                        ? ` · ETA ${activeEpProgress.etaFormatted}`
+                        : ""}
+                    </span>
                   )}
               </div>
             )}

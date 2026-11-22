@@ -189,6 +189,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       } catch { /* ignore */ }
     };
   }, [active, paused, waiting, err]);
+
   const [fullscreen, setFullscreen] = useState(false);
   const [starBurst, setStarBurst] = useState(0);
   /* --- Mobile Gestures --- */
@@ -697,6 +698,34 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     let alive = true;
 
     void (async () => {
+      // 1. Fast path: If episode is already known in offline cache, resolve local media instantly
+      if (isEpisodeDownloaded(curId, curEp)) {
+        if (offlineUrls[playKey]) return;
+        try {
+          const localUrl = await getOfflinePlaybackUrl(curId, curEp, sessionKeyRef.current);
+          if (!alive) return;
+          if (localUrl) {
+            logLine(`[play] id=${curId} ep=${curEp} playing from local offline cache (instant)`);
+            tracePlayback("play.resolve", {
+              video_id: curId, episode: curEp, resolved: true, kind: "offline", host: "localhost",
+              status: 200, msg: "Offline storage local media",
+            });
+            setOfflineUrls((m) => ({ ...m, [playKey]: localUrl }));
+            setPlayUrls((m) => ({ ...m, [playKey]: localUrl }));
+            setHevcUrls((m) => {
+              if (!m[playKey]) return m;
+              const next = { ...m };
+              delete next[playKey];
+              return next;
+            });
+            saveHistory(curEp);
+            return;
+          }
+        } catch {
+          // Fall through to resync below
+        }
+      }
+
       await ensureOfflineSyncReady().catch(() => {});
       if (!alive) return;
 
@@ -1982,20 +2011,20 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       </span>
                     )}
                   </div>
-                    <div ref={barRef} className="mx-4 mt-1 relative pointer-events-auto" style={{ height: 24, touchAction: "none" }}
+                    <div ref={barRef} className="mx-4 mt-1 mb-2 relative pointer-events-auto" style={{ height: 26, touchAction: "none" }}
                       onPointerDown={onBarDown} onPointerMove={onBarMove} onPointerUp={onBarUp} onPointerCancel={onBarUp}>
                       {/* Scrub track */}
-                      <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-[2px] rounded-full" style={{ background: "rgba(255,255,255,.1)" }}>
+                      <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-[2.5px] rounded-full" style={{ background: "rgba(255,255,255,.14)" }}>
                         <div className="h-full rounded-full"
-                          style={{ width: `${barProgress * 100}%`, background: "rgba(255,255,255,.26)", transition: barPct !== null ? "none" : "width .25s linear" }} />
+                          style={{ width: `${barProgress * 100}%`, background: "rgba(255,255,255,.38)", transition: barPct !== null ? "none" : "width .25s linear" }} />
                       </div>
                       {/* Scrub thumb */}
-                      <span className="absolute top-1/2 w-[7px] h-[7px] rounded-full bg-white pointer-events-none"
+                      <span className={`absolute top-1/2 rounded-full bg-white pointer-events-none transition-transform ${barPct !== null ? "w-[11px] h-[11px] scale-110 shadow-lg" : "w-[8px] h-[8px]"}`}
                         style={{
                           left: `${barProgress * 100}%`,
                           transform: "translate(-50%, -50%)",
-                          boxShadow: "0 0 8px rgba(0,0,0,.55)",
-                          transition: barPct !== null ? "none" : "left .25s linear",
+                          boxShadow: "0 0 10px rgba(0,0,0,.6)",
+                          transition: barPct !== null ? "none" : "left .25s linear, transform .15s ease",
                         }} />
                       {barPct !== null && (
                         <div
