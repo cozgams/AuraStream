@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Sheet } from "./ios/overlays";
 import { Button } from "./ios/controls";
-import { IBan, ICheck, IClose, ICaptionsF, IFileText, ILangEn, IRefresh, ISettings, ISparkles, ITrash, IVertSwap } from "../icons";
+import { IBan, ICheck, IClose, ICaptionsF, IFileText, ILangEn, IRefresh, ISettings, ISparkles, ITrash } from "../icons";
 import type {
   AICaptionConfig,
   AICaptionProvider,
@@ -271,12 +271,6 @@ export default function SubtitleSheet({
         ? `Displaying ${trackInfo?.cueCount || 0} active lines · Auto-translated to English`
         : "Overlay on · Foreign dialogue auto-translates to English",
       icon: <ILangEn size={22} className="text-amber-500" />,
-    },
-    {
-      id: "bilingual",
-      label: "Bilingual (Dual)",
-      desc: "Show English translation + original foreign dialogue",
-      icon: <IVertSwap size={20} className="text-amber-500" />,
     },
     {
       id: "off",
@@ -698,7 +692,7 @@ export default function SubtitleSheet({
           <span className="text-[11px] font-bold uppercase tracking-wider text-mut">
             Caption Display Mode
           </span>
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-2 gap-1.5">
             {modes.map((item) => {
               const active = mode === item.id;
               return (

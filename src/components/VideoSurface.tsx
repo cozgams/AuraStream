@@ -117,6 +117,14 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
     setAudioOffset: (offsetMs: number) => {
       const v = videoRef.current;
       if (!v) return;
+      if (offsetMs === 0) {
+        if (delayNodeRef.current && audioCtxRef.current) {
+          try {
+            delayNodeRef.current.delayTime.setValueAtTime(0, audioCtxRef.current.currentTime);
+          } catch { /* ignore */ }
+        }
+        return;
+      }
       try {
         const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
         if (!AudioCtx) return;
@@ -229,11 +237,8 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         highBufferWatchdogPeriod: 2,
         // Voice & Audio/Video synchronization hardening:
         stretchShortVideoTrack: true,
-        maxAudioFramesDrift: 1,
         forceKeyFrameOnDiscontinuity: true,
-        maxBufferHole: 0.1,
-        nudgeOffset: 0.05,
-        nudgeMaxRetry: 10,
+        maxBufferHole: 0.5,
         manifestLoadingTimeOut: isOfflineLocal ? 5000 : 15000,
         manifestLoadingMaxRetry: 4,
         fragLoadingTimeOut: isOfflineLocal ? 5000 : 20000,
@@ -261,9 +266,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         if (recoverTimerRef.current) { window.clearTimeout(recoverTimerRef.current); recoverTimerRef.current = null; }
       });
       hls.on(Hls.Events.ERROR, (_e, data) => {
-        const isTrackRemoved = data.details === Hls.ErrorDetails.BUFFER_APPEND_ERROR ||
-          String(data.error || "").includes("SourceBuffer, but it does not exist") ||
-          String(data.details || "").includes("bufferAppendError");
+        const isTrackRemoved = String(data.error || "").includes("SourceBuffer, but it does not exist");
 
         if (!data.fatal && !isTrackRemoved) {
           if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR && activity.isActive()) {

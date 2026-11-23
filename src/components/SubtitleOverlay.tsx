@@ -456,18 +456,6 @@ export default function SubtitleOverlay({
         >
           {balancedCaption}
         </span>
-        {mode === "bilingual" && activeCue?.zh && activeCue.zh.trim() !== rawEnglish.trim() && (
-          <span
-            className="inline-block font-medium tracking-normal rounded-md shadow-[0_2px_6px_rgba(0,0,0,0.65)] px-2.5 py-0.5 text-[12px] sm:text-[13px] opacity-90"
-            style={{
-              ...commonStyle,
-              color: "#E2E8F0",
-              fontSize: "0.85em",
-            }}
-          >
-            {activeCue.zh}
-          </span>
-        )}
       </div>
     </div>
   );

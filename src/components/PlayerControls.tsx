@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { fmtTime } from "../api";
 import { useSeekInput } from "../useSeekInput";
 import { useStore } from "../store";
-import { ICaptions, ICaptionsF, ICheck, ICompress, IExpand, ILockF, INext, IPauseF, IPip, IPlayF, ITheater, IVertSwap, IVol, IVolMute } from "../icons";
+import { ICaptions, ICaptionsF, ICheck, ICompress, IExpand, ILockF, INext, IPauseF, IPlayF, ITheater, IVertSwap, IVol, IVolMute } from "../icons";
 import type { PlaybackClock } from "../playbackClock";
 
 type Props = {
@@ -28,7 +28,7 @@ type Props = {
   onRate: (r: number) => void;
   onMute: () => void;
   onVolume: (v: number) => void;
-  onPip: () => void;
+  onPip?: () => void;
   onLock: () => void;
   onTheater?: () => void;
   onFullscreen: () => void;
@@ -204,7 +204,6 @@ export default function PlayerControls({
               onChange={(e) => onVolume(Number(e.target.value))} />
           </div>
         </div>
-        <Button className="player-control" aria-label="Picture in Picture" data-tooltip="PiP" onClick={onPip}><IPip size={20} strokeWidth={1.6} /></Button>
         <Button className="player-control" aria-label="Lock controls" aria-pressed={false} data-tooltip="Lock controls" onClick={onLock}><ILockF size={18} /></Button>
         {!fullscreen && onTheater && (
           <Button className={`player-control ${theater ? "is-on" : ""}`} aria-label="Theater mode" aria-pressed={theater}

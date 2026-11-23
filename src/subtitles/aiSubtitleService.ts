@@ -895,6 +895,52 @@ export async function getSubtitlesForEpisode(
         return track;
       }
     }
+
+    // Direct IndexedDB query fallback for offline downloads
+    if (typeof indexedDB !== "undefined") {
+      const idbTrack = await new Promise<SubtitleTrack | null>((resolve) => {
+        try {
+          const req = indexedDB.open("aurastream_downloads_v1");
+          req.onsuccess = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains("episodes")) {
+              db.close();
+              resolve(null);
+              return;
+            }
+            const tx = db.transaction("episodes", "readonly");
+            const getReq = tx.objectStore("episodes").get(`${videoId}_${episode}`);
+            getReq.onsuccess = () => {
+              const rec = getReq.result;
+              db.close();
+              if (rec?.cues && Array.isArray(rec.cues) && rec.cues.length > 0 && !isLegacyFakeTrack(rec)) {
+                resolve({
+                  videoId,
+                  episode,
+                  cues: rec.cues,
+                  source: "offline_download",
+                  generatedAt: rec.downloadedAt || Date.now(),
+                });
+              } else {
+                resolve(null);
+              }
+            };
+            getReq.onerror = () => {
+              db.close();
+              resolve(null);
+            };
+          };
+          req.onerror = () => resolve(null);
+        } catch {
+          resolve(null);
+        }
+      });
+      if (idbTrack) {
+        const track = await translateTrackToEnglish(idbTrack);
+        setCachedTrack(cacheKey, track);
+        return track;
+      }
+    }
   } catch {
     // ignore
   }
@@ -981,12 +1027,22 @@ function formatSubtitleTimestamp(rawSec: number, decimalSep: "." | ","): string 
 }
 
 /**
- * Formats a SubtitleTrack into standard WebVTT format string (English)
+ * Formats a SubtitleTrack into standard WebVTT format string
  */
-export function exportToVtt(track: SubtitleTrack, _lang: "en" = "en"): string {
-  const lines = ["WEBVTT - AuraStream English Captions", ""];
+export function exportToVtt(track: SubtitleTrack, lang: "en" | "zh" = "en"): string {
+  const lines = [
+    lang === "zh"
+      ? "WEBVTT - AuraStream Original Captions"
+      : "WEBVTT - AuraStream English Captions",
+    "",
+  ];
   for (const cue of track?.cues || []) {
-    const text = normalizeCueText(cue.en || cue.zh);
+    let text = "";
+    if (lang === "zh") {
+      text = normalizeCueText(cue.zh || cue.en);
+    } else {
+      text = normalizeCueText(cue.en || cue.zh);
+    }
     if (!text) continue;
     const startSec = Number.isFinite(cue.start) && cue.start >= 0 ? cue.start : 0;
     const endSec = Number.isFinite(cue.end) && cue.end >= startSec ? cue.end : startSec + 1.0;
@@ -999,13 +1055,18 @@ export function exportToVtt(track: SubtitleTrack, _lang: "en" = "en"): string {
 }
 
 /**
- * Formats a SubtitleTrack into standard SubRip (.SRT) format string (English)
+ * Formats a SubtitleTrack into standard SubRip (.SRT) format string
  */
-export function exportToSrt(track: SubtitleTrack, _lang: "en" = "en"): string {
+export function exportToSrt(track: SubtitleTrack, lang: "en" | "zh" = "en"): string {
   const blocks: string[] = [];
   let index = 1;
   for (const cue of track?.cues || []) {
-    const text = normalizeCueText(cue.en || cue.zh);
+    let text = "";
+    if (lang === "zh") {
+      text = normalizeCueText(cue.zh || cue.en);
+    } else {
+      text = normalizeCueText(cue.en || cue.zh);
+    }
     if (!text) continue;
     const startSec = Number.isFinite(cue.start) && cue.start >= 0 ? cue.start : 0;
     const endSec = Number.isFinite(cue.end) && cue.end >= startSec ? cue.end : startSec + 1.0;

@@ -2,7 +2,7 @@
  * Subtitle and Closed Captions (CC) Types for AuraStream
  */
 
-export type SubtitleMode = "off" | "en" | "bilingual";
+export type SubtitleMode = "off" | "en";
 export type SubtitleSize = "sm" | "md" | "lg" | "xl";
 export type SubtitlePosition = "bottom" | "above_title" | "middle" | "top" | "custom";
 export type AICaptionProvider = "none" | "gemini" | "groq" | "whisper" | "custom";

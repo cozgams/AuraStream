@@ -83,16 +83,6 @@ function AppBody() {
   const mainRef = useRef<HTMLDivElement>(null);
   const [wide, setWide] = useState(!isMobile);
   const [collapsed, setCollapsed] = useState(false);
-  const [inPip, setInPip] = useState(false);
-
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ inPip?: boolean }>).detail;
-      setInPip(!!detail?.inPip);
-    };
-    window.addEventListener("aurastream:pip-changed", handler);
-    return () => window.removeEventListener("aurastream:pip-changed", handler);
-  }, []);
 
   useLayoutEffect(() => {
     const el = mainRef.current;
@@ -139,8 +129,8 @@ function AppBody() {
           </div>
         ))}
 
-        {isMobile && !inPip && !fs && !clean && stack.length === 0 && !loginOpen && tab !== "home" && tab !== "profile" && <ContinueWatchingBar />}
-        {isMobile && !inPip && !fs && !clean && stack.length === 0 && !loginOpen && <TabBar />}
+        {isMobile && !fs && !clean && stack.length === 0 && !loginOpen && tab !== "home" && tab !== "profile" && <ContinueWatchingBar />}
+        {isMobile && !fs && !clean && stack.length === 0 && !loginOpen && <TabBar />}
       </div>
     </div>
   );

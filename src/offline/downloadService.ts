@@ -1258,10 +1258,12 @@ export async function getOfflinePlaybackUrl(
             pruneStaleOfflineMetadata(id);
             return null;
           }
+          const isFmp4 = Boolean(record.initSegment || (Array.isArray(record.mapSegments) && record.mapSegments.length > 0));
+          const segMime = isFmp4 ? "video/mp4" : "video/mp2t";
           const segBlob =
             segData instanceof Blob
               ? segData
-              : new Blob([segData], { type: "video/mp2t" });
+              : new Blob([segData], { type: segMime });
           if (segBlob.size <= 0) {
             revokeUrlSet(sessionUrls);
             pruneStaleOfflineMetadata(id);

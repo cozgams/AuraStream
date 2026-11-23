@@ -236,7 +236,7 @@ export function parseVtt(content: string): SubtitleCue[] {
     const enLines: string[] = [];
     const zhLines: string[] = [];
 
-    // Preserve multi-line dialogue cleanly without corrupting monolingual or bilingual cues
+    // Preserve multi-line dialogue cleanly without corrupting cues
     for (const tl of textLines) {
       for (const line of tl.split("\n").filter(Boolean)) {
         if (/^(\[EN\]|EN:)/i.test(line)) {

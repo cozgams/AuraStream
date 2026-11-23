@@ -96,7 +96,7 @@ export async function processSubtitleExport(
   episode: number,
   format: "srt" | "vtt" = "srt",
   title?: string,
-  lang: "en" = "en",
+  lang: "en" | "zh" = "en",
   action: "save_movies" | "save_downloads" = "save_downloads",
   streamUrl?: string,
   fallbackCues?: { id: number; start: number; end: number; en?: string; zh?: string }[]

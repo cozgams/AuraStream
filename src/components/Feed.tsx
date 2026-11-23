@@ -56,7 +56,7 @@ import { processEpisodeExport } from "../offline/exportService";
 import { useMediaSession } from "../useMediaSession";
 import {
   IBack, IBoltF, ICaptions, ICaptionsF, ICheck, IChevR, IChevronDown, IChevronUp, IClock, IClose, ICommentF, ICompress, IDownload, IEye, IExpand, IExport, IFileText,
-  IFastForwardF, ILink, IList, ILockF, IMore, IPauseF, IPip, IPlayF, IRewindF, ISearch, IStar, IStarF, ISun, IVertSwap, IVol, IVolMute,
+  IFastForwardF, ILink, IList, ILockF, IMore, IPauseF, IPlayF, IRewindF, ISearch, IStar, IStarF, ISun, IVertSwap, IVol, IVolMute,
 } from "../icons";
 
 type Props = {
@@ -221,7 +221,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     visible: boolean;
   }>({ type: "volume", val: 100, visible: false });
   const hudTimerRef = useRef<number | null>(null);
-  const [inPip, setInPip] = useState(false);
   const [scrub, setScrub] = useState<{ pct: number; target: number } | null>(null);
   const scrubTarget = useRef<number | null>(null);
   /* Scrub bar drag */
@@ -1436,17 +1435,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   };
 
   useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ inPip?: boolean }>).detail;
-      setInPip(!!detail?.inPip);
-    };
-    window.addEventListener("aurastream:pip-changed", handler);
-    return () => window.removeEventListener("aurastream:pip-changed", handler);
-  }, []);
-
-  useEffect(() => {
     const onVisibility = () => {
-      if (document.visibilityState === "hidden" && !inPip) {
+      if (document.visibilityState === "hidden") {
         wasPlayingBeforeHiddenRef.current = !paused || waiting;
         if (videoRef.current) {
           videoRef.current.pause();
@@ -1469,7 +1459,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [active, inPip, waiting, paused, muted]);
+  }, [active, waiting, paused, muted]);
 
   useEffect(() => {
     // Mini PiP popup on app switch / home disabled per user requirement
@@ -1478,23 +1468,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       bridge?.setAutoPip?.(false);
     } catch {}
   }, []);
-
-  const togglePip = async () => {
-    try {
-      const bridge = (window as any).AuraNativeExport;
-      if (bridge?.isPictureInPictureSupported?.()) {
-        const isLandscape = isLandscapeCurrent();
-        const entered = typeof bridge.enterPictureInPictureWithAspect === "function"
-          ? bridge.enterPictureInPictureWithAspect(isLandscape ? 16 : 9, isLandscape ? 9 : 16)
-          : bridge.enterPictureInPicture?.();
-        if (entered) return;
-      }
-      const v = videoRef.current?.el();
-      if (document.pictureInPictureElement) await document.exitPictureInPicture();
-      else if (v && document.pictureInPictureEnabled) await v.requestPictureInPicture();
-      else toast("Picture-in-picture is not supported on this device", "info");
-    } catch { toast("Failed to enter picture-in-picture", "info"); }
-  };
 
   const requireLogin = () => { if (!user) { setLoginOpen(true); return false; } return true; };
 
@@ -1781,7 +1754,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               )}
 
               {/* Top navigation bar */}
-              {!inPip && (
               <>
               {!fs && !clean && mode === "context" ? (
                 isDesktop ? (
@@ -2244,7 +2216,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 </div>
               )}
               </>
-              )}
               {isActive && !playUrl && (
                 <div className="absolute inset-0 z-0 flex flex-col items-center justify-center bg-gradient-to-b from-neutral-900 via-neutral-950 to-black select-none">
                   <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(255,255,255,0.06)_0%,_transparent_70%)]" />
@@ -2343,7 +2314,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           onRate={(r) => { setRate(r); videoRef.current?.rate(r); }}
           onMute={() => setMuted((m) => !m)}
           onVolume={(v) => setVolume(v)}
-          onPip={togglePip}
           onLock={lockControls}
           onTheater={() => setTheater((v) => !v)}
           onFullscreen={toggleFull}
@@ -2993,10 +2963,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                   </div>
                 </div>
 
-                {/* 8. Screen Fit & Floating PiP */}
+                {/* 8. Screen Fit */}
                 <div className="flex flex-col gap-1.5">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-mut">Display & Mini-Player</span>
-                  <div className="grid grid-cols-2 gap-2">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-mut">Display Aspect Ratio</span>
+                  <div className="grid grid-cols-1 gap-2">
                     <Button
                       type="button"
                       data-card={true}
@@ -3016,25 +2986,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       </div>
                       <span className="text-[10.5px] text-mut mt-0.5 leading-snug">
                         {portraitFit === "cover" ? "Cropped to fill phone" : "Original aspect ratio"}
-                      </span>
-                    </Button>
-
-                    <Button
-                      type="button"
-                      data-card={true}
-                      style={{ borderRadius: 12 }}
-                      onClick={() => {
-                        setPanel(null);
-                        void togglePip();
-                      }}
-                      className="p-3 rounded-xl border border-border bg-s2 flex flex-col text-left pressable hover:bg-s3"
-                    >
-                      <div className="flex items-center justify-between w-full">
-                        <span className="text-[13px] font-bold text-on">Floating PiP</span>
-                        <IPip size={16} className="text-amber-500" />
-                      </div>
-                      <span className="text-[10.5px] text-mut mt-0.5 leading-snug">
-                        Play in floating window
                       </span>
                     </Button>
                   </div>
@@ -3087,16 +3038,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
             className="hg-chip w-9 h-9 rounded-full flex items-center justify-center pressable elev-1">
             {muted ? <IVolMute size={17} /> : <IVol size={17} />}
           </Button>}
-          {!fs && !clean && (
-            <Button
-              onClick={() => void togglePip()}
-              aria-label="Picture in Picture"
-              title="Mini Floating Player (PiP)"
-              className="hg-chip w-9 h-9 rounded-full flex items-center justify-center pressable elev-1 text-white/80 hover:text-white"
-            >
-              <IPip size={16} />
-            </Button>
-          )}
           <Button onClick={lockControls} aria-label="Lock controls" title="Lock controls" aria-pressed={false}
             className="hg-chip w-9 h-9 rounded-full flex items-center justify-center pressable elev-1"><ILockF size={17} /></Button>
           {!fs && !clean && (

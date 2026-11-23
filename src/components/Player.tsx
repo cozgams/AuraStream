@@ -154,9 +154,10 @@ export default function Player({
         maxBufferSize: isFullEpisodePreCacheEnabled() ? 80 * 1024 * 1024 : 30 * 1024 * 1024,
         backBufferLength: isFullEpisodePreCacheEnabled() ? 120 : 30,
         highBufferWatchdogPeriod: isFullEpisodePreCacheEnabled() ? 2 : 4,
+        // Voice & Audio/Video synchronization hardening:
+        stretchShortVideoTrack: true,
+        forceKeyFrameOnDiscontinuity: true,
         maxBufferHole: 0.5,
-        nudgeOffset: 0.25,
-        nudgeMaxRetry: 6,
         manifestLoadingTimeOut: 20000,
         manifestLoadingMaxRetry: 4,
         fragLoadingTimeOut: 25000,
@@ -186,9 +187,7 @@ export default function Player({
         if (recoverTimerRef.current) { window.clearTimeout(recoverTimerRef.current); recoverTimerRef.current = null; }
       });
       hls.on(Hls.Events.ERROR, (_e, data) => {
-        const isTrackRemoved = data.details === Hls.ErrorDetails.BUFFER_APPEND_ERROR ||
-          String(data.error || "").includes("SourceBuffer, but it does not exist") ||
-          String(data.details || "").includes("bufferAppendError");
+        const isTrackRemoved = String(data.error || "").includes("SourceBuffer, but it does not exist");
 
         if (!data.fatal && !isTrackRemoved) {
           if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR && activity.isActive()) {
