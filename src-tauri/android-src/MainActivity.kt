@@ -16,11 +16,13 @@ import android.os.Environment
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.PowerManager
+import android.os.StatFs
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.MediaStore
 import android.provider.Settings
 import android.util.Base64
+import android.util.Rational
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -411,22 +413,59 @@ class MainActivity : TauriActivity() {
 
     @JavascriptInterface
     fun isPictureInPictureSupported(): Boolean {
-      return false
+      return Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+        activity.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
     }
 
     @JavascriptInterface
     fun enterPictureInPicture(): Boolean {
+      return enterPictureInPictureWithAspect(9, 16)
+    }
+
+    @JavascriptInterface
+    fun enterPictureInPictureWithAspect(num: Int, den: Int): Boolean {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (!activity.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+          return false
+        }
+        return try {
+          val validNum = if (num > 0) num else 9
+          val validDen = if (den > 0) den else 16
+          val ratio = validNum.toFloat() / validDen.toFloat()
+          val clampedAspect = if (ratio < 0.42f) {
+            Rational(42, 100)
+          } else if (ratio > 2.38f) {
+            Rational(238, 100)
+          } else {
+            Rational(validNum, validDen)
+          }
+          val builder = PictureInPictureParams.Builder()
+            .setAspectRatio(clampedAspect)
+          activity.runOnUiThread {
+            try {
+              activity.enterPictureInPictureMode(builder.build())
+            } catch (_: Exception) {}
+          }
+          true
+        } catch (_: Exception) {
+          false
+        }
+      }
       return false
     }
 
     @JavascriptInterface
-    fun enterPictureInPictureWithAspect(@Suppress("UNUSED_PARAMETER") num: Int, @Suppress("UNUSED_PARAMETER") den: Int): Boolean {
-      return false
-    }
-
-    @JavascriptInterface
-    fun setAutoPip(@Suppress("UNUSED_PARAMETER") enabled: Boolean) {
-      activity.autoPipEnabled = false
+    fun setAutoPip(enabled: Boolean) {
+      activity.autoPipEnabled = enabled
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        try {
+          activity.setPictureInPictureParams(
+            PictureInPictureParams.Builder()
+              .setAutoEnterEnabled(enabled)
+              .build()
+          )
+        } catch (_: Exception) {}
+      }
     }
 
     @JavascriptInterface

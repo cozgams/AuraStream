@@ -443,7 +443,7 @@ export default function SubtitleOverlay({
       <div
         className={`flex flex-col items-center text-center ${
           isRightRailVisible ? "max-w-[80%] sm:max-w-[74%]" : "max-w-[90%] sm:max-w-[76%]"
-        } gap-0.5 select-none transition-opacity duration-150 ease-out ${
+        } gap-1 select-none transition-opacity duration-150 ease-out ${
           isVisible ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
       >
@@ -456,6 +456,18 @@ export default function SubtitleOverlay({
         >
           {balancedCaption}
         </span>
+        {mode === "bilingual" && activeCue?.zh && activeCue.zh.trim() !== rawEnglish.trim() && (
+          <span
+            className="inline-block font-medium tracking-normal rounded-md shadow-[0_2px_6px_rgba(0,0,0,0.65)] px-2.5 py-0.5 text-[12px] sm:text-[13px] opacity-90"
+            style={{
+              ...commonStyle,
+              color: "#E2E8F0",
+              fontSize: "0.85em",
+            }}
+          >
+            {activeCue.zh}
+          </span>
+        )}
       </div>
     </div>
   );

@@ -1597,7 +1597,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                                   : "object-contain"
                                 : vpLandscape
                                 ? "object-contain"
-                                : "object-cover"
+                                : portraitFit === "cover"
+                                ? "object-cover"
+                                : "object-contain"
                             }`}
                             onError={(e) => {
                               (e.target as HTMLElement).style.display = "none";
@@ -1626,7 +1628,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       <VideoSurface ref={videoRef} src={playUrl} poster={posterUrl} autoPlay active={active} muted={muted}
                         diagnosticContext={{ active, view: mode, kind, video_id: curId, episode: curEp }}
                         volume={volume} rate={effRate}
-                        fit={isDesktop ? "contain" : landscapeVideo ? (fs || vpLandscape ? "contain" : portraitFit) : (vpLandscape ? "contain" : "cover")}
+                        fit={isDesktop ? "contain" : landscapeVideo ? (fs || vpLandscape ? "contain" : portraitFit) : (vpLandscape ? "contain" : portraitFit)}
                         onClick={() => { if (isDesktop) videoRef.current?.toggle(); }}
                         onTime={(t) => {
                           if (t > 0.1 && !videoStarted) setVideoStarted(true);
@@ -2990,6 +2992,53 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     </button>
                   </div>
                 </div>
+
+                {/* 8. Screen Fit & Floating PiP */}
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-mut">Display & Mini-Player</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      type="button"
+                      data-card={true}
+                      style={{ borderRadius: 12 }}
+                      onClick={() => {
+                        const next = portraitFit === "contain" ? "cover" : "contain";
+                        setPortraitFit(next);
+                        toast(next === "cover" ? "Fill screen mode (cropped)" : "Fit screen mode (original)", "info");
+                      }}
+                      className="p-3 rounded-xl border border-border bg-s2 flex flex-col text-left pressable hover:bg-s3"
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="text-[13px] font-bold text-on">
+                          {portraitFit === "cover" ? "Fill Screen" : "Fit Screen"}
+                        </span>
+                        <ICompress size={15} className="text-primary" />
+                      </div>
+                      <span className="text-[10.5px] text-mut mt-0.5 leading-snug">
+                        {portraitFit === "cover" ? "Cropped to fill phone" : "Original aspect ratio"}
+                      </span>
+                    </Button>
+
+                    <Button
+                      type="button"
+                      data-card={true}
+                      style={{ borderRadius: 12 }}
+                      onClick={() => {
+                        setPanel(null);
+                        void togglePip();
+                      }}
+                      className="p-3 rounded-xl border border-border bg-s2 flex flex-col text-left pressable hover:bg-s3"
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="text-[13px] font-bold text-on">Floating PiP</span>
+                        <IPip size={16} className="text-amber-500" />
+                      </div>
+                      <span className="text-[10.5px] text-mut mt-0.5 leading-snug">
+                        Play in floating window
+                      </span>
+                    </Button>
+                  </div>
+                </div>
               </div>
             </div>
           </Sheet>
@@ -3038,6 +3087,16 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
             className="hg-chip w-9 h-9 rounded-full flex items-center justify-center pressable elev-1">
             {muted ? <IVolMute size={17} /> : <IVol size={17} />}
           </Button>}
+          {!fs && !clean && (
+            <Button
+              onClick={() => void togglePip()}
+              aria-label="Picture in Picture"
+              title="Mini Floating Player (PiP)"
+              className="hg-chip w-9 h-9 rounded-full flex items-center justify-center pressable elev-1 text-white/80 hover:text-white"
+            >
+              <IPip size={16} />
+            </Button>
+          )}
           <Button onClick={lockControls} aria-label="Lock controls" title="Lock controls" aria-pressed={false}
             className="hg-chip w-9 h-9 rounded-full flex items-center justify-center pressable elev-1"><ILockF size={17} /></Button>
           {!fs && !clean && (

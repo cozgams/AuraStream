@@ -1,6 +1,6 @@
 import { Button, Surface } from "../components/ios/controls";
 import { Loader } from "../components/ios/effects";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, APP_VERSION, cover as getCoverUrl, fmtTime, isMobile, platform, type UpdateInfo } from "../api";
 import type { Detail } from "../types";
 import { useStore } from "../store";
@@ -27,6 +27,7 @@ import {
   IMore,
   IPauseF,
   IPlayF,
+  IRefresh,
   ISearch,
   ISettings,
   IStar,
@@ -35,6 +36,8 @@ import {
   IUser,
   IUserF,
 } from "../icons";
+import { getCurrentAuthUid, loadUserDataFromCloud, saveUserDataToCloud, type CloudUserData } from "../firebase";
+import { readStorage, writeStorage, STORAGE_KEYS } from "../storage";
 import {
   cancelAllDownloads,
   getOfflineCoverUrl,
@@ -125,6 +128,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
   const {
     theme,
     user,
+    setUser,
     setLoginOpen,
     logout,
     history,
@@ -140,6 +144,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
     setTab,
     t,
     toast,
+    mergeCloudUserData,
   } = useStore();
 
   // Navigation view:
@@ -192,6 +197,124 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
       toast("Unable to check for updates. Check connection.", "info");
     } finally {
       setCheckingUpdate(false);
+    }
+  };
+
+  const [syncingCloud, setSyncingCloud] = useState(false);
+  const [lastSyncedTime, setLastSyncedTime] = useState<string>(() => {
+    try {
+      const s = localStorage.getItem("aurastream_last_cloud_sync");
+      return s ? new Date(parseInt(s, 10)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+    } catch { return ""; }
+  });
+
+  const handleSyncCloud = async () => {
+    setSyncingCloud(true);
+    try {
+      const uid = getCurrentAuthUid();
+      if (uid && user?.user_type === "firebase") {
+        await saveUserDataToCloud(uid, {
+          favorites: favs,
+          watchLater,
+          history: history.map((h) => ({
+            id: h.id,
+            ep: h.ep,
+            t: h.t,
+            dur: h.dur,
+            updatedAt: h.at,
+            title: h.title,
+            cover: h.cover,
+          })),
+        });
+        const cloudData = await loadUserDataFromCloud(uid);
+        if (cloudData) {
+          mergeCloudUserData(cloudData);
+        }
+      }
+      const now = Date.now();
+      localStorage.setItem("aurastream_last_cloud_sync", String(now));
+      setLastSyncedTime(new Date(now).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      toast("Cloud library synchronized", "ok");
+    } catch {
+      toast("Sync failed. Check connection.", "info");
+    } finally {
+      setSyncingCloud(false);
+    }
+  };
+
+  const backupInputRef = useRef<HTMLInputElement>(null);
+
+  const handleExportBackup = () => {
+    try {
+      const backup = {
+        app: "AuraStream",
+        version: APP_VERSION,
+        exportedAt: new Date().toISOString(),
+        history,
+        favorites: favs,
+        watchLater,
+        settings: {
+          accent: readStorage(STORAGE_KEYS.accent) || "amber",
+          language: readStorage(STORAGE_KEYS.lang) || "en",
+          subtitleMode: readStorage(STORAGE_KEYS.subtitleMode) || "en",
+        },
+      };
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `aurastream-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast("Library backup downloaded", "ok");
+    } catch {
+      toast("Backup export failed", "info");
+    }
+  };
+
+  const handleImportBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== "object") throw new Error("Invalid format");
+      let count = 0;
+      const cloudDataToMerge: CloudUserData = {};
+      if (Array.isArray(parsed.history)) {
+        cloudDataToMerge.history = parsed.history;
+        count += parsed.history.length;
+      }
+      if (Array.isArray(parsed.favorites)) {
+        cloudDataToMerge.favorites = parsed.favorites;
+        count += parsed.favorites.length;
+      }
+      if (Array.isArray(parsed.watchLater)) {
+        cloudDataToMerge.watchLater = parsed.watchLater;
+        count += parsed.watchLater.length;
+      }
+      if (Array.isArray(parsed.likes)) {
+        cloudDataToMerge.likes = parsed.likes;
+        count += parsed.likes.length;
+      }
+      mergeCloudUserData(cloudDataToMerge);
+      if (parsed.settings?.accent) {
+        writeStorage(STORAGE_KEYS.accent, parsed.settings.accent);
+      }
+      if (parsed.settings?.language) {
+        writeStorage(STORAGE_KEYS.lang, parsed.settings.language);
+      }
+      if (parsed.settings?.subtitleMode) {
+        writeStorage(STORAGE_KEYS.subtitleMode, parsed.settings.subtitleMode);
+      }
+      window.dispatchEvent(new CustomEvent("aurastream:storage-migrated"));
+      toast(`Restored ${count} library items from backup`, "ok");
+    } catch {
+      toast("Failed to import backup: invalid JSON", "info");
+    } finally {
+      if (backupInputRef.current) backupInputRef.current.value = "";
     }
   };
 
@@ -1742,37 +1865,25 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
             ))}
 
             {/* ======================= DOWNLOADED TAB CONTENT ======================= */}
-            {downloadHubTab === "downloaded" && (downloads.length > 0 ? (
+            {downloadHubTab === "downloaded" && (
               <>
-                {/* Storage Gauge Card */}
-                <div className="bg-white/85 dark:bg-neutral-900/85 backdrop-blur-md rounded-2xl border border-white/70 dark:border-white/10 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-3.5 flex items-center justify-between gap-3">
-                  <FolderDownloadIcon size={46} className="shrink-0 drop-shadow-sm" />
-
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[11.5px] font-semibold text-[#64748b] dark:text-neutral-400">Storage Used</div>
-                    <div className="text-[16px] font-black text-[#0f172a] dark:text-neutral-100 tracking-tight">
-                      {formatBytes(totalDownloadsBytes)}{" "}
-                      <span className="text-[12px] text-[#64748b] dark:text-neutral-400 font-normal">
-                        {storageStats?.quotaBytes ? `/ ${formatBytes(storageStats.quotaBytes)}` : ""}
-                      </span>
+                {/* Device Storage Breakdown Card */}
+                <div className="bg-white/85 dark:bg-neutral-900/85 backdrop-blur-md rounded-2xl border border-white/70 dark:border-white/10 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-3.5 flex flex-col gap-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <FolderDownloadIcon size={38} className="shrink-0 drop-shadow-sm" />
+                      <div>
+                        <div className="text-[11px] font-semibold text-[#64748b] dark:text-neutral-400">Device Storage</div>
+                        <div className="text-[15px] font-black text-[#0f172a] dark:text-neutral-100 tracking-tight">
+                          {formatBytes(totalDownloadsBytes)} AuraStream
+                          {storageStats?.freeBytes != null && (
+                            <span className="text-[12px] font-medium text-emerald-600 dark:text-emerald-400 ml-1.5">
+                              · {formatBytes(storageStats.freeBytes)} Free
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-neutral-800 overflow-hidden mt-1.5">
-                      <div
-                        className="h-full bg-[#1a73e8] rounded-full transition-all duration-300"
-                        style={{
-                          width: `${
-                            storageStats?.percentUsed != null
-                              ? storageStats.percentUsed > 0
-                                ? Math.min(100, Math.max(3, Math.round(storageStats.percentUsed)))
-                                : 0
-                              : 0
-                          }%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col items-end gap-1 shrink-0">
                     <button
                       type="button"
                       onClick={() => setManageStorageOpen(true)}
@@ -1781,11 +1892,63 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                       <ISettings size={12} />
                       <span>Manage</span>
                     </button>
-                    <span className="text-[11px] font-bold text-[#1a73e8] dark:text-blue-400 tabular-nums">
-                      {storageStats?.percentUsed != null ? `${Math.round(storageStats.percentUsed)}%` : "0%"}
-                    </span>
                   </div>
+
+                  {/* Multi-segmented storage bar */}
+                  {(() => {
+                    const quota = storageStats?.quotaBytes || (storageStats?.freeBytes ? storageStats.freeBytes + totalDownloadsBytes * 2 : 64 * 1024 * 1024 * 1024);
+                    const free = storageStats?.freeBytes ?? Math.max(0, quota - totalDownloadsBytes);
+                    const auraPct = Math.min(100, Math.max(totalDownloadsBytes > 0 ? 2 : 0, (totalDownloadsBytes / quota) * 100));
+                    const freePct = Math.min(100, Math.max(5, (free / quota) * 100));
+                    const otherPct = Math.max(0, 100 - auraPct - freePct);
+
+                    return (
+                      <div className="flex flex-col gap-1.5">
+                        <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-neutral-800 overflow-hidden flex">
+                          {auraPct > 0 && (
+                            <div
+                              style={{ width: `${auraPct}%` }}
+                              className="h-full bg-[#1a73e8] transition-all duration-300"
+                              title={`AuraStream: ${formatBytes(totalDownloadsBytes)}`}
+                            />
+                          )}
+                          {otherPct > 0 && (
+                            <div
+                              style={{ width: `${otherPct}%` }}
+                              className="h-full bg-slate-400 dark:bg-neutral-600 transition-all duration-300"
+                              title="Other Apps & System"
+                            />
+                          )}
+                          <div
+                            style={{ width: `${freePct}%` }}
+                            className="h-full bg-emerald-500 transition-all duration-300"
+                            title={`Free Space: ${formatBytes(free)}`}
+                          />
+                        </div>
+
+                        {/* Legend */}
+                        <div className="flex items-center justify-between text-[10.5px] text-[#64748b] dark:text-neutral-400 font-medium px-0.5">
+                          <div className="flex items-center gap-3">
+                            <span className="flex items-center gap-1">
+                              <span className="w-2 h-2 rounded-full bg-[#1a73e8]" />
+                              <span>AuraStream ({formatBytes(totalDownloadsBytes)})</span>
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                              <span>Free ({formatBytes(free)})</span>
+                            </span>
+                          </div>
+                          {storageStats?.quotaBytes && (
+                            <span>Total {formatBytes(storageStats.quotaBytes)}</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
+
+                {downloads.length > 0 ? (
+                  <>
 
                 {/* Filter Pills */}
                 <div className="flex items-center justify-between px-0.5">
@@ -2195,7 +2358,9 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                   )}
                 </div>
               </div>
-            ))}
+            )}
+              </>
+            )}
             {/* Safe bottom spacer for downloads list so floating bottom tabs never obstruct items */}
             <div className="h-[calc(var(--sab,0px)+120px)] shrink-0 pointer-events-none" aria-hidden="true" />
           </div>
@@ -2884,6 +3049,62 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                 {downloads.length} {downloads.length === 1 ? "episode" : "episodes"} ({formatBytes(totalDownloadsBytes)})
               </div>
             </div>
+          </div>
+
+          {/* Cloud Sync Status & Action */}
+          <div className="p-3 rounded-2xl bg-slate-50 dark:bg-neutral-800/80 border border-slate-200/80 dark:border-white/10 flex items-center justify-between gap-2 text-left">
+            <div className="min-w-0 flex-1">
+              <div className="text-[12.5px] font-bold text-[#0f172a] dark:text-neutral-100 flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${user ? "bg-sky-400" : "bg-emerald-500"}`} />
+                <span>{user ? "Cloud Sync Active" : "Local Storage Mode"}</span>
+              </div>
+              <div className="text-[10.5px] text-[#64748b] dark:text-neutral-400 mt-0.5 truncate">
+                {lastSyncedTime ? `Last synced: ${lastSyncedTime}` : user ? "Connected to Firestore" : "Sign in to sync across devices"}
+              </div>
+            </div>
+            {user && (
+              <button
+                type="button"
+                onClick={handleSyncCloud}
+                disabled={syncingCloud}
+                className="px-3 py-1.5 rounded-xl bg-[#1a73e8] text-white text-[11.5px] font-bold flex items-center gap-1.5 pressable disabled:opacity-50 shrink-0"
+              >
+                <IRefresh size={12} className={syncingCloud ? "animate-spin" : ""} />
+                <span>{syncingCloud ? "Syncing..." : "Sync Now"}</span>
+              </button>
+            )}
+          </div>
+
+          {/* Backup & Restore Tools */}
+          <div className="p-3 rounded-2xl bg-slate-50 dark:bg-neutral-800/80 border border-slate-200/80 dark:border-white/10 flex flex-col gap-2 text-left">
+            <div className="text-[11.5px] font-bold uppercase tracking-wider text-[#64748b] dark:text-neutral-400">
+              Backup & Transfer
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={handleExportBackup}
+                className="py-2 px-3 rounded-xl bg-white dark:bg-neutral-900 border border-slate-200 dark:border-white/10 text-[11.5px] font-bold text-[#0f172a] dark:text-neutral-100 flex items-center justify-center gap-1.5 pressable shadow-xs hover:bg-slate-50"
+              >
+                <IExport size={13} className="text-[#1a73e8]" />
+                <span>Export Backup</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => backupInputRef.current?.click()}
+                className="py-2 px-3 rounded-xl bg-white dark:bg-neutral-900 border border-slate-200 dark:border-white/10 text-[11.5px] font-bold text-[#0f172a] dark:text-neutral-100 flex items-center justify-center gap-1.5 pressable shadow-xs hover:bg-slate-50"
+              >
+                <IDownload size={13} className="text-emerald-500" />
+                <span>Restore Backup</span>
+              </button>
+            </div>
+            <input
+              ref={backupInputRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={handleImportBackup}
+            />
           </div>
 
           {user ? (
