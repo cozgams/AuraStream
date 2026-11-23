@@ -60,8 +60,12 @@ class AuraDownloadService : Service() {
   )
 
   companion object {
-    const val CHANNEL_ID = "aurastream_downloads_silent_v5"
-    const val COMPLETE_CHANNEL_ID = "aurastream_downloads_complete_silent_v5"
+    const val CHANNEL_ID = "aurastream_downloads_silent_v7"
+    const val COMPLETE_CHANNEL_ID = "aurastream_downloads_complete_silent_v7"
+    private const val LEGACY_SILENT_V6_CHANNEL_ID = "aurastream_downloads_silent_v6"
+    private const val LEGACY_SILENT_V6_COMPLETE_CHANNEL_ID = "aurastream_downloads_complete_silent_v6"
+    private const val LEGACY_SILENT_V5_CHANNEL_ID = "aurastream_downloads_silent_v5"
+    private const val LEGACY_SILENT_V5_COMPLETE_CHANNEL_ID = "aurastream_downloads_complete_silent_v5"
     private const val LEGACY_SILENT_V4_CHANNEL_ID = "aurastream_downloads_silent_v4"
     private const val LEGACY_SILENT_V4_COMPLETE_CHANNEL_ID = "aurastream_downloads_complete_silent_v4"
     private const val LEGACY_SILENT_V3_CHANNEL_ID = "aurastream_downloads_silent_v3"
@@ -111,6 +115,26 @@ class AuraDownloadService : Service() {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
         try {
+          val channels = manager.notificationChannels
+          for (ch in channels) {
+            if (ch.id != CHANNEL_ID && ch.id != COMPLETE_CHANNEL_ID && ch.id.contains("download", ignoreCase = true)) {
+              try { manager.deleteNotificationChannel(ch.id) } catch (_: Exception) {}
+            }
+          }
+        } catch (_: Exception) {}
+        try {
+          manager.deleteNotificationChannel(LEGACY_SILENT_V6_CHANNEL_ID)
+        } catch (_: Exception) {}
+        try {
+          manager.deleteNotificationChannel(LEGACY_SILENT_V6_COMPLETE_CHANNEL_ID)
+        } catch (_: Exception) {}
+        try {
+          manager.deleteNotificationChannel(LEGACY_SILENT_V5_CHANNEL_ID)
+        } catch (_: Exception) {}
+        try {
+          manager.deleteNotificationChannel(LEGACY_SILENT_V5_COMPLETE_CHANNEL_ID)
+        } catch (_: Exception) {}
+        try {
           manager.deleteNotificationChannel(LEGACY_SILENT_V4_CHANNEL_ID)
         } catch (_: Exception) {}
         try {
@@ -140,7 +164,7 @@ class AuraDownloadService : Service() {
           description = "Silent progress for active and queued downloads"
           setShowBadge(false)
           enableVibration(false)
-          vibrationPattern = longArrayOf(0L)
+          vibrationPattern = null
           enableLights(false)
           setSound(null, null)
           lockscreenVisibility = Notification.VISIBILITY_PUBLIC
@@ -155,7 +179,7 @@ class AuraDownloadService : Service() {
           description = "Silently summarizes episodes saved for offline viewing"
           setShowBadge(false)
           enableVibration(false)
-          vibrationPattern = longArrayOf(0L)
+          vibrationPattern = null
           enableLights(false)
           setSound(null, null)
           lockscreenVisibility = Notification.VISIBILITY_PUBLIC
@@ -210,10 +234,10 @@ class AuraDownloadService : Service() {
           .setOnlyAlertOnce(true)
           .setSilent(true)
           .setSound(null)
-          .setVibrate(longArrayOf(0L))
+          .setVibrate(null)
           .setDefaults(0)
           .setPriority(NotificationCompat.PRIORITY_LOW)
-          .setCategory(NotificationCompat.CATEGORY_STATUS)
+          .setCategory(NotificationCompat.CATEGORY_SERVICE)
           .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
         if (entries.size <= 1) {
@@ -300,22 +324,21 @@ class AuraDownloadService : Service() {
     }
 
     fun findOfflineDir(context: Context): File {
-      val candidates = mutableListOf(
+      val candidates = listOf(
         File(context.filesDir, "offline_downloads"),
-        File(context.dataDir, "offline_downloads")
+        File(context.dataDir, "offline_downloads"),
+        File(context.noBackupFilesDir, "offline_downloads")
       )
-      var bestDir = candidates.first()
-      var bestTime = -1L
       for (dir in candidates) {
         val statusFile = File(dir, "active_status.json")
-        if (statusFile.isFile && statusFile.lastModified() > bestTime) {
-          bestTime = statusFile.lastModified()
-          bestDir = dir
-        } else if (dir.isDirectory && bestTime < 0L) {
-          bestDir = dir
+        if (statusFile.isFile && statusFile.length() > 0) {
+          return dir
         }
       }
-      return bestDir
+      for (dir in candidates) {
+        if (dir.isDirectory) return dir
+      }
+      return candidates.first()
     }
 
     fun hasActiveDiskDownloads(context: Context): Boolean {
@@ -330,8 +353,7 @@ class AuraDownloadService : Service() {
     }
 
     fun computeNotifItemId(videoId: Int, episode: Int): Int {
-      val key = "${videoId}_$episode"
-      var h = key.hashCode() and 0x7fffffff
+      var h = ((Math.abs(videoId) % 10000) * 100 + (episode % 100)) and 0x7fffffff
       if (h == NOTIFICATION_ID || h == COMPLETE_NOTIFICATION_ID || h == 0) {
         h = (h + 2) and 0x7fffffff
       }
@@ -420,8 +442,8 @@ class AuraDownloadService : Service() {
       if (!isRunning) return@scheduleWithFixedDelay
       try {
         pollNativeStatusFromDisk()
-      } catch (_: Exception) {}
-    }, 800L, 1000L, TimeUnit.MILLISECONDS)
+      } catch (_: Throwable) {}
+    }, 600L, 800L, TimeUnit.MILLISECONDS)
   }
 
   private fun stopDiskPoller() {
@@ -756,7 +778,7 @@ class AuraDownloadService : Service() {
       .setOnlyAlertOnce(true)
       .setSilent(true)
       .setSound(null)
-      .setVibrate(longArrayOf(0L))
+      .setVibrate(null)
       .setDefaults(0)
       .setShowWhen(false)
       .setContentIntent(pendingIntent)

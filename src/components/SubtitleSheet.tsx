@@ -266,8 +266,10 @@ export default function SubtitleSheet({
   const modes: Array<{ id: SubtitleMode; label: string; desc: string; icon: React.ReactNode }> = [
     {
       id: "en",
-      label: "Captions On",
-      desc: "Show real or imported English captions",
+      label: hasRealTrack ? "Captions On" : "Captions Enabled",
+      desc: hasRealTrack
+        ? `Displaying ${trackInfo?.cueCount || 0} active lines`
+        : "Overlay on · Waiting for subtitle track",
       icon: <ILangEn size={22} className="text-amber-500" />,
     },
     {
@@ -375,7 +377,9 @@ export default function SubtitleSheet({
                       hasRealTrack ? "bg-emerald-500" : "bg-amber-500"
                     }`}
                   />
-                  <span className="text-[13px] font-bold text-on">{trackSourceLabel}</span>
+                  <span className="text-[13px] font-bold text-on">
+                    {hasRealTrack ? trackSourceLabel : "No Stream Captions Detected"}
+                  </span>
                   {hasRealTrack && (
                     <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
                       · {trackInfo?.cueCount} lines
@@ -385,7 +389,7 @@ export default function SubtitleSheet({
                 <p className="text-[11.5px] text-mut mt-0.5 leading-normal break-words">
                   {hasRealTrack
                     ? trackInfo?.fileName || `Episode ${episode} active subtitle track`
-                    : "This video stream has no embedded caption track. Import or paste .SRT/.VTT/.ASS, generate synced English captions with AI, or enable Android Live Caption."}
+                    : "This video stream has no embedded subtitle track. Most dramas feature on-screen subtitles. You can import .SRT/.VTT files, generate AI auto-captions, or enable Android Live Caption."}
                 </p>
               </div>
               {canRemoveTrack && (
@@ -633,7 +637,7 @@ export default function SubtitleSheet({
         {mode !== "off" && (
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-mut">
-              <span>Live Caption Preview</span>
+              <span>Caption Style Preview (Sample Text)</span>
               <span className="text-amber-500 font-semibold lowercase">
                 {currentPosition} ({currentPercent}%) · {size}
               </span>
@@ -658,14 +662,17 @@ export default function SubtitleSheet({
                 }}
               >
                 <div
-                  className={`font-semibold text-center px-3 py-1 rounded-md shadow-[0_2px_8px_rgba(0,0,0,0.85)] transition-all leading-snug max-w-[90%] ${previewFontSize}`}
+                  className={`font-semibold text-center px-3 py-1.5 rounded-lg shadow-[0_2px_8px_rgba(0,0,0,0.85)] transition-all leading-snug max-w-[90%] flex flex-col items-center gap-1 ${previewFontSize}`}
                   style={{
                     color: previewTextColor,
                     textShadow: previewShadow,
                     backgroundColor: previewBg,
                   }}
                 >
-                  "Never let go of what matters most."
+                  <span className="text-[9.5px] uppercase tracking-wider font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    {hasRealTrack ? "Live Track" : "Style Sample"}
+                  </span>
+                  <span>Sample: "Never let go of what matters most."</span>
                 </div>
               </div>
             </div>
@@ -674,6 +681,14 @@ export default function SubtitleSheet({
 
         {/* Subtitle Mode Selection */}
         <div className="flex flex-col gap-1.5">
+          {mode === "en" && !hasRealTrack && (
+            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+              <span>
+                Captions are turned ON. This stream has no embedded subtitles. Import an .SRT file, use AI Auto-Captions, or enable Android Live Caption to display dialogue.
+              </span>
+            </div>
+          )}
           <span className="text-[11px] font-bold uppercase tracking-wider text-mut">
             Caption Display
           </span>

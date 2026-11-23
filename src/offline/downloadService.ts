@@ -10,6 +10,7 @@ import { listen } from "@tauri-apps/api/event";
 import { api, cover as getRemoteCoverUrl, isLocalMedia, LOCAL, logLine } from "../api";
 import { readStorage, writeStorage, STORAGE_KEYS } from "../storage";
 import { getSubtitlesForEpisode } from "../subtitles/aiSubtitleService";
+import { translateTrackToEnglish } from "../subtitles/translator";
 import type { SubtitleCue } from "../subtitles/types";
 import type { PlayInfo } from "../types";
 import type { NativeExportBridge } from "./exportService";
@@ -170,17 +171,33 @@ function applyNativeDownloadSnapshot(payload: { queue?: unknown[]; completed?: u
       if (!raw || typeof raw !== "object") continue;
       const item = raw as ActiveDownloadProgress;
       if (!item.id) continue;
+      const speedBps = Number(item.speedBytesPerSec) || 0;
+      const speedFormatted =
+        item.speedFormatted && item.speedFormatted !== "-- KB/s" && item.speedFormatted !== "--"
+          ? item.speedFormatted
+          : speedBps > 0
+          ? formatSpeed(speedBps)
+          : item.status === "queued"
+          ? "Queued"
+          : "Connecting...";
+      const downloadedBytes = Number(item.downloadedBytes) || 0;
+      const totalBytes = Number(item.totalBytes) || 0;
+      const progress = Number(item.progress) || 0;
+      const videoId = Number(item.videoId);
+      const episode = Number(item.episode);
+      const title = item.title || `Episode ${episode}`;
+
       activeProgress.set(item.id, {
         id: item.id,
-        videoId: Number(item.videoId),
-        episode: Number(item.episode),
-        title: item.title || `Episode ${item.episode}`,
+        videoId,
+        episode,
+        title,
         cover: item.cover || "",
-        progress: Number(item.progress) || 0,
-        downloadedBytes: Number(item.downloadedBytes) || 0,
-        totalBytes: Number(item.totalBytes) || 0,
-        speedBytesPerSec: Number(item.speedBytesPerSec) || 0,
-        speedFormatted: item.speedFormatted || (item.status === "queued" ? "Queued" : "-- KB/s"),
+        progress,
+        downloadedBytes,
+        totalBytes,
+        speedBytesPerSec: speedBps,
+        speedFormatted,
         etaSeconds: Number(item.etaSeconds) || 0,
         etaFormatted: item.etaFormatted || "--",
         status: item.status || "queued",
@@ -189,13 +206,55 @@ function applyNativeDownloadSnapshot(payload: { queue?: unknown[]; completed?: u
         isHevc: item.isHevc,
         autoResume: item.autoResume,
       });
+
+      // Synchronize native notification with active download progress
+      if (item.status === "downloading" && videoId > 0 && episode > 0) {
+        const sizeText =
+          totalBytes > 0
+            ? `${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}`
+            : downloadedBytes > 0
+            ? formatBytes(downloadedBytes)
+            : "";
+        notifyNativeDownloadProgress(videoId, episode, title, progress, speedFormatted, sizeText);
+      }
     }
   }
 
   if (Array.isArray(payload.completed)) {
-    const nativeCompleted = payload.completed
-      .filter((c): c is OfflineEpisode => Boolean(c && typeof c === "object" && (c as OfflineEpisode).id))
-      .map((c) => ({ ...c, storage: "native" as const }));
+    const nativeCompleted: OfflineEpisode[] = payload.completed
+      .filter((c): c is Record<string, unknown> => Boolean(c && typeof c === "object" && (c as { id?: unknown }).id))
+      .map((c) => {
+        const id = String(c.id);
+        const videoId = Number(c.videoId ?? c.video_id ?? (id.includes("_") ? id.split("_")[0] : 0));
+        const episode = Number(c.episode ?? (id.includes("_") ? id.split("_")[1] : 1));
+        const title = String(c.title || `Episode ${episode}`);
+        const cover = String(c.cover || "");
+        const sizeBytes = Number(c.sizeBytes ?? c.size_bytes ?? 0);
+        const completedAt = Number(
+          c.completedAt ?? c.downloadedAt ?? c.completed_at ?? c.downloaded_at ?? Date.now()
+        );
+        const isHls = Boolean(c.isHls ?? c.is_hls ?? true);
+        const isHevc = Boolean(c.isHevc ?? c.is_hevc ?? false);
+        const hasLocalCover = Boolean(c.hasLocalCover ?? c.has_local_cover ?? false);
+        const quality = (
+          c.quality === "hevc" ? "hevc" : c.quality === "standard" ? "standard" : "auto"
+        ) as DownloadQuality;
+        return {
+          id,
+          videoId,
+          episode,
+          title,
+          cover,
+          sizeBytes,
+          downloadedAt: completedAt,
+          completedAt,
+          isHls,
+          isHevc,
+          hasLocalCover,
+          quality,
+          storage: "native" as const,
+        };
+      });
     const nativeIds = new Set(nativeCompleted.map((c) => c.id));
     const current = getOfflineEpisodes();
     const legacyNonNative = current.filter((c) => c.storage !== "native" && !nativeIds.has(c.id));
@@ -207,7 +266,8 @@ function applyNativeDownloadSnapshot(payload: { queue?: unknown[]; completed?: u
           m.id !== current[i]?.id ||
           m.sizeBytes !== current[i]?.sizeBytes ||
           m.storage !== current[i]?.storage ||
-          m.hasLocalCover !== current[i]?.hasLocalCover
+          m.hasLocalCover !== current[i]?.hasLocalCover ||
+          m.isHls !== current[i]?.isHls
       )
     ) {
       saveOfflineEpisodesList(merged);
@@ -355,6 +415,14 @@ export function setDownloadNotificationEnabled(enabled: boolean): void {
   }
 }
 
+function computeNotifId(videoId: number, episode: number): number {
+  let h = ((Math.abs(videoId) % 10000) * 100 + (episode % 100)) & 0x7fffffff;
+  if (h === 9001 || h === 9002 || h === 0) {
+    h = (h + 2) & 0x7fffffff;
+  }
+  return h;
+}
+
 function notifyNativeDownloadProgress(
   videoId: number,
   episode: number,
@@ -365,7 +433,7 @@ function notifyNativeDownloadProgress(
 ) {
   const bridge = getNativeBridge();
   if (bridge && typeof bridge.updateDownloadNotification === "function") {
-    const notifId = ((Math.abs(videoId) % 10000) * 100 + (episode % 100)) & 0x7fffffff;
+    const notifId = computeNotifId(videoId, episode);
     const cleanTitle = title || `Series #${videoId}`;
     bridge.updateDownloadNotification(notifId, cleanTitle, `Episode ${episode}`, pct, speedFormatted, fileSizeFormatted);
   }
@@ -376,7 +444,7 @@ function notifyNativeDownloadComplete(videoId: number, episode: number, title: s
   if (!isDownloadNotificationEnabled()) return;
   const bridge = getNativeBridge();
   if (bridge && typeof bridge.showDownloadCompleteNotification === "function") {
-    const notifId = ((Math.abs(videoId) % 10000) * 100 + (episode % 100)) & 0x7fffffff;
+    const notifId = computeNotifId(videoId, episode);
     const cleanTitle = title || `Series #${videoId}`;
     bridge.showDownloadCompleteNotification(notifId, cleanTitle, `Episode ${episode}`, fileSizeFormatted);
   }
@@ -385,7 +453,7 @@ function notifyNativeDownloadComplete(videoId: number, episode: number, title: s
 function notifyNativeDownloadCancel(videoId: number, episode: number) {
   const bridge = getNativeBridge();
   if (bridge && typeof bridge.cancelDownloadNotification === "function") {
-    const notifId = ((Math.abs(videoId) % 10000) * 100 + (episode % 100)) & 0x7fffffff;
+    const notifId = computeNotifId(videoId, episode);
     bridge.cancelDownloadNotification(notifId);
   }
   syncNativeDownloadCount();
@@ -742,11 +810,11 @@ export function getEpisodeDownloadProgress(videoId: number, episode: number): nu
  * Formats bytes per second into human-readable transfer speed
  */
 export function formatSpeed(bytesPerSec: number): string {
-  if (!bytesPerSec || bytesPerSec <= 0 || !Number.isFinite(bytesPerSec)) return "-- KB/s";
+  if (!bytesPerSec || bytesPerSec <= 0 || !Number.isFinite(bytesPerSec)) return "Connecting...";
   if (bytesPerSec >= 1024 * 1024) {
     return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
   }
-  return `${Math.round(bytesPerSec / 1024)} KB/s`;
+  return `${Math.max(1, Math.round(bytesPerSec / 1024))} KB/s`;
 }
 
 /**
@@ -1091,7 +1159,8 @@ export async function getOfflinePlaybackUrl(
       if (sessionKey) {
         revokeOfflinePlaybackUrls(sessionKey);
       }
-      return `${LOCAL}/offline/${id}/${meta.isHls ? "index.m3u8" : "video.mp4"}`;
+      const isHls = Boolean(meta.isHls ?? (meta as unknown as { is_hls?: boolean }).is_hls ?? true);
+      return `${LOCAL}/offline/${id}/${isHls ? "index.m3u8" : "video.mp4"}`;
     }
 
     const record = await fetchRecordFromAnyDB(id);
@@ -1739,9 +1808,10 @@ export async function startEpisodeDownload(
   if (isNativeRustDownloaderAvailable()) {
     let cues: SubtitleCue[] = [];
     try {
-      const track = await getSubtitlesForEpisode(videoId, episode, title);
+      const track = await getSubtitlesForEpisode(videoId, episode, title, undefined, streamUrl);
       if (track && track.source !== "none" && track.cues.length > 0) {
-        cues = track.cues;
+        const translated = await translateTrackToEnglish(track);
+        cues = translated.cues;
       }
     } catch {
       // ignore subtitle fetch error
@@ -1850,9 +1920,10 @@ export async function startEpisodeDownload(
     // 1. Fetch real subtitle track in parallel if present so subtitles work offline (never fake cues)
     let cues: SubtitleCue[] = [];
     try {
-      const track = await getSubtitlesForEpisode(videoId, episode, title);
+      const track = await getSubtitlesForEpisode(videoId, episode, title, undefined, streamUrl);
       if (track && track.source !== "none" && track.cues.length > 0) {
-        cues = track.cues;
+        const translated = await translateTrackToEnglish(track);
+        cues = translated.cues;
       }
     } catch {
       // Subtitle fallback if offline or request failed

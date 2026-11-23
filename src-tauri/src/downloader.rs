@@ -40,24 +40,27 @@ static ACTIVE_ABORTS: Lazy<Mutex<HashMap<String, tokio::task::AbortHandle>>> =
 #[serde(rename_all = "camelCase")]
 pub struct CompletedOfflineEpisode {
     pub id: String,
+    #[serde(alias = "video_id")]
     pub video_id: i64,
     pub episode: i64,
     pub title: String,
     #[serde(default)]
     pub cover: String,
+    #[serde(alias = "size_bytes")]
     pub size_bytes: u64,
     #[serde(default)]
     pub duration: Option<f64>,
+    #[serde(alias = "downloaded_at", alias = "completed_at", alias = "completedAt")]
     pub downloaded_at: u64,
     #[serde(default)]
     pub cues: Vec<Value>,
     #[serde(default = "default_quality")]
     pub quality: String,
-    #[serde(default)]
+    #[serde(default, alias = "is_hevc")]
     pub is_hevc: bool,
-    #[serde(default)]
+    #[serde(default, alias = "is_hls")]
     pub is_hls: bool,
-    #[serde(default)]
+    #[serde(default, alias = "has_local_cover")]
     pub has_local_cover: bool,
     #[serde(default = "default_storage_native")]
     pub storage: String,
@@ -261,11 +264,11 @@ fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed creating dir: {e}"))?;
     }
-    let tmp = path.with_extension(format!(
-        "{}.{}.tmp",
-        path.extension().and_then(|s| s.to_str()).unwrap_or("dat"),
-        now_ms()
-    ));
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("tmp");
+    let tmp = path.with_file_name(format!(".{file_name}.{}.tmp", now_ms()));
     {
         let mut f = File::create(&tmp).map_err(|e| format!("Failed creating temp file: {e}"))?;
         f.write_all(bytes).map_err(|e| format!("Failed writing temp file: {e}"))?;
@@ -398,12 +401,12 @@ pub fn format_bytes(bytes: u64) -> String {
 
 pub fn format_speed(bps: f64) -> String {
     if !bps.is_finite() || bps <= 0.0 {
-        return "-- KB/s".to_string();
+        return "Connecting...".to_string();
     }
     if bps >= 1024.0 * 1024.0 {
         format!("{:.1} MB/s", bps / (1024.0 * 1024.0))
     } else {
-        format!("{} KB/s", (bps / 1024.0).round() as u64)
+        format!("{} KB/s", (bps / 1024.0).round().max(1.0) as u64)
     }
 }
 
@@ -624,15 +627,32 @@ async fn coordinator_loop() {
 
 struct SpeedTracker {
     samples: Vec<(Instant, u64)>,
+    start_time: Instant,
+    start_bytes: u64,
     ema_bps: f64,
 }
 
 impl SpeedTracker {
+    #[allow(dead_code)]
     fn new() -> Self {
+        let now = Instant::now();
         Self {
             samples: Vec::with_capacity(32),
+            start_time: now,
+            start_bytes: 0,
             ema_bps: 0.0,
         }
+    }
+
+    fn with_start(start_time: Instant, start_bytes: u64) -> Self {
+        let mut s = Self {
+            samples: Vec::with_capacity(32),
+            start_time,
+            start_bytes,
+            ema_bps: 0.0,
+        };
+        s.samples.push((start_time, start_bytes));
+        s
     }
 
     fn sample(&mut self, bytes_now: u64, total_bytes: u64) -> (f64, String, u64, String) {
@@ -644,7 +664,7 @@ impl SpeedTracker {
         }
         if let Some((first_t, first_b)) = self.samples.first().copied() {
             let dt = now.duration_since(first_t).as_secs_f64();
-            if dt >= 0.35 && bytes_now >= first_b {
+            if dt >= 0.25 && bytes_now >= first_b {
                 let win_bps = ((bytes_now - first_b) as f64) / dt;
                 self.ema_bps = if self.ema_bps > 0.0 {
                     self.ema_bps * 0.6 + win_bps * 0.4
@@ -653,15 +673,27 @@ impl SpeedTracker {
                 };
             }
         }
+        // Fallback to overall speed if EMA has not yet computed but bytes have arrived
+        if self.ema_bps <= 0.0 && bytes_now > self.start_bytes {
+            let total_dt = now.duration_since(self.start_time).as_secs_f64();
+            if total_dt > 0.1 {
+                self.ema_bps = ((bytes_now - self.start_bytes) as f64) / total_dt;
+            }
+        }
         let remaining = total_bytes.saturating_sub(bytes_now);
         let eta_sec = if self.ema_bps > 100.0 && remaining > 0 {
             ((remaining as f64) / self.ema_bps).round() as u64
         } else {
             0
         };
+        let speed_str = if self.ema_bps > 0.0 {
+            format_speed(self.ema_bps)
+        } else {
+            "Connecting...".to_string()
+        };
         (
             self.ema_bps,
-            format_speed(self.ema_bps),
+            speed_str,
             eta_sec,
             format_eta(eta_sec),
         )
@@ -1382,7 +1414,7 @@ async fn download_hls_to_dir(
     };
     let completed_count = Arc::new(AtomicU64::new(0));
     let bytes_counter = Arc::new(AtomicU64::new(received_bytes));
-    let tracker = Arc::new(Mutex::new(SpeedTracker::new()));
+    let tracker = Arc::new(Mutex::new(SpeedTracker::with_start(Instant::now(), received_bytes)));
     let failed = Arc::new(AtomicBool::new(false));
     let mut join_set: tokio::task::JoinSet<Result<(), String>> = tokio::task::JoinSet::new();
 
@@ -1588,7 +1620,7 @@ async fn download_direct_to_dir(
         file = File::create(&tmp_path).map_err(|e| format!("Failed creating MP4 file: {e}"))?;
     }
 
-    let mut tracker = SpeedTracker::new();
+    let mut tracker = SpeedTracker::with_start(Instant::now(), received);
     while let Some(chunk) = tokio::time::timeout(Duration::from_secs(30), resp.chunk())
         .await
         .map_err(|_| "Stream chunk timed out".to_string())?

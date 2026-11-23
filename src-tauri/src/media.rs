@@ -678,7 +678,7 @@ fn serve_offline_binary_file(
     range: Option<&str>,
     head_only: bool,
 ) -> Response<Vec<u8>> {
-    const OFFLINE_CHUNK_CAP: u64 = 32 * 1024 * 1024;
+    const OFFLINE_CHUNK_CAP: u64 = 4 * 1024 * 1024;
     const UNRANGED_FULL_CAP: u64 = 64 * 1024 * 1024;
 
     let Ok(mut file) = std::fs::File::open(file_path) else {

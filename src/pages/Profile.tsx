@@ -50,6 +50,7 @@ import {
   resumeAllDownloads,
   getActiveDownloadsSummary,
   formatBytes,
+  formatSpeed,
   formatDownloadError,
   syncOfflineEpisodesFromIndexedDB,
   subscribeBatchProgress,
@@ -167,6 +168,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
   const [downloadSort, setDownloadSort] = useState<"recent" | "size" | "title">("recent");
   const [downloadSearchOpen, setDownloadSearchOpen] = useState(false);
   const [downloadSearchQuery, setDownloadSearchQuery] = useState("");
+  const [downloadHubTab, setDownloadHubTab] = useState<"downloaded" | "queue">("downloaded");
   const [episodeOrder, setEpisodeOrder] = useState<"asc" | "desc">("asc");
   const [detailCache, setDetailCache] = useState<Record<number, Detail>>({});
   const [wifiOnlyDl, setWifiOnlyDl] = useState<boolean>(() => isWifiOnlyDownloadEnabled());
@@ -433,6 +435,27 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
     }
     return activeDownloads.some((d) => d.status === "downloading") ? "Connecting..." : "Paused";
   }, [activeSummary.aggregateSpeedFormatted, activeDownloads]);
+
+  const downloadingItemsCount = useMemo(
+    () => activeDownloads.filter((d) => d.status === "downloading").length,
+    [activeDownloads]
+  );
+  const queuedItemsCount = useMemo(
+    () => activeDownloads.filter((d) => d.status === "queued").length,
+    [activeDownloads]
+  );
+  const failedItemsCount = useMemo(
+    () => activeDownloads.filter((d) => d.status === "error").length,
+    [activeDownloads]
+  );
+  const pausedItemsCount = useMemo(
+    () => activeDownloads.filter((d) => d.status === "paused").length,
+    [activeDownloads]
+  );
+  const activeTransferringItem = useMemo(
+    () => activeDownloads.find((d) => d.status === "downloading") || activeDownloads[0],
+    [activeDownloads]
+  );
 
   const sortedDramaGroups = useMemo(() => {
     let list = [...dramaGroups];
@@ -848,7 +871,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
           ========================================================================= */}
       <div
         className="ios-page-body flex-1 scroll-y overflow-x-hidden px-4 pt-0"
-        style={{ paddingBottom: "calc(var(--sab, 48px) + 120px)" }}
+        style={{ paddingBottom: "calc(var(--sab, 48px) + 140px)" }}
       >
         {/* =====================================================================
             1. Overview Page (AuraStream Profile / You Tab)
@@ -904,6 +927,58 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                   Sign In
                 </button>
               )}
+            </div>
+
+            {/* Quick Library Stats Bar */}
+            <div className="grid grid-cols-4 gap-2 px-0.5">
+              <button
+                type="button"
+                onClick={() => setView("history")}
+                className="p-2 rounded-xl bg-white/70 dark:bg-neutral-900/70 border border-white/60 dark:border-white/10 flex flex-col items-center justify-center text-center shadow-xs pressable active:scale-95 transition-all"
+              >
+                <span className="text-[14px] font-black text-[#0f172a] dark:text-neutral-100 tabular-nums">
+                  {history.length}
+                </span>
+                <span className="text-[10px] font-medium text-[#64748b] dark:text-neutral-400 mt-0.5">
+                  Watched
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setView("favs")}
+                className="p-2 rounded-xl bg-white/70 dark:bg-neutral-900/70 border border-white/60 dark:border-white/10 flex flex-col items-center justify-center text-center shadow-xs pressable active:scale-95 transition-all"
+              >
+                <span className="text-[14px] font-black text-amber-500 tabular-nums">
+                  {favs.length}
+                </span>
+                <span className="text-[10px] font-medium text-[#64748b] dark:text-neutral-400 mt-0.5">
+                  Favorites
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setView("watchlater")}
+                className="p-2 rounded-xl bg-white/70 dark:bg-neutral-900/70 border border-white/60 dark:border-white/10 flex flex-col items-center justify-center text-center shadow-xs pressable active:scale-95 transition-all"
+              >
+                <span className="text-[14px] font-black text-sky-500 tabular-nums">
+                  {watchLater?.length || 0}
+                </span>
+                <span className="text-[10px] font-medium text-[#64748b] dark:text-neutral-400 mt-0.5">
+                  Watch Later
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setView("downloads")}
+                className="p-2 rounded-xl bg-white/70 dark:bg-neutral-900/70 border border-white/60 dark:border-white/10 flex flex-col items-center justify-center text-center shadow-xs pressable active:scale-95 transition-all"
+              >
+                <span className="text-[14px] font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
+                  {downloads.length}
+                </span>
+                <span className="text-[10px] font-medium text-[#64748b] dark:text-neutral-400 mt-0.5">
+                  Downloads
+                </span>
+              </button>
             </div>
 
             {/* History Shelf */}
@@ -1173,7 +1248,9 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                       </div>
                     ) : (
                       <div className="text-[11px] text-[#64748b] dark:text-neutral-400 truncate">
-                        {downloads.length} {downloads.length === 1 ? "episode" : "episodes"} offline · {formatBytes(totalDownloadsBytes)}
+                        {downloads.length > 0
+                          ? `${downloads.length} ${downloads.length === 1 ? "episode" : "episodes"} offline · ${formatBytes(totalDownloadsBytes)}`
+                          : "0 episodes offline · Ready for offline download"}
                       </div>
                     )}
                   </div>
@@ -1196,11 +1273,17 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                     {activeDownloadsProgressPercent}%
                   </span>
                 </div>
-              ) : (
-                <div className="flex items-center gap-2 pt-0.5">
-                  <div className="flex-1 h-1.5 rounded-full bg-[#e2e8f0] dark:bg-neutral-800 overflow-hidden">
+              ) : downloads.length > 0 ? (
+                <div className="flex flex-col gap-1 pt-0.5">
+                  <div className="flex items-center justify-between text-[10.5px] text-[#64748b] dark:text-neutral-400">
+                    <span>Phone Storage</span>
+                    <span className="font-bold tabular-nums text-[#0f172a] dark:text-neutral-200">
+                      {storageStats?.percentUsed != null ? `${Math.round(storageStats.percentUsed)}% used` : ""}
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 rounded-full bg-[#e2e8f0] dark:bg-neutral-800 overflow-hidden">
                     <div
-                      className="h-full bg-[#2563eb] rounded-full transition-all duration-300"
+                      className="h-full bg-slate-400 dark:bg-neutral-600 rounded-full transition-all duration-300"
                       style={{
                         width: `${
                           storageStats?.percentUsed != null
@@ -1212,13 +1295,8 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                       }}
                     />
                   </div>
-                  <span className="text-[10.5px] font-extrabold text-[#2563eb] dark:text-blue-400 tabular-nums">
-                    {storageStats?.percentUsed != null
-                      ? `${Math.round(storageStats.percentUsed)}%`
-                      : "0%"}
-                  </span>
                 </div>
-              )}
+              ) : null}
             </div>
 
             {/* Settings Card */}
@@ -1319,20 +1397,112 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                 </div>
               )}
 
-            {/* Active Downloads & Queue */}
-            {activeDownloads.length > 0 && (() => {
-              const downloadingItemsCount = activeDownloads.filter((d) => d.status === "downloading").length;
-              const queuedItemsCount = activeDownloads.filter((d) => d.status === "queued").length;
-              const failedItemsCount = activeDownloads.filter((d) => d.status === "error").length;
-              const pausedItemsCount = activeDownloads.filter((d) => d.status === "paused").length;
-              const statusParts: string[] = [];
-              if (downloadingItemsCount > 0) statusParts.push(`${downloadingItemsCount} downloading`);
-              if (queuedItemsCount > 0) statusParts.push(`${queuedItemsCount} queued`);
-              if (failedItemsCount > 0) statusParts.push(`${failedItemsCount} failed`);
-              if (pausedItemsCount > 0) statusParts.push(`${pausedItemsCount} paused`);
-              if (statusParts.length === 0) statusParts.push(`${activeDownloads.length} active`);
-              const hasFailedOnly = failedItemsCount > 0 && pausedItemsCount === 0;
-              return (
+            {/* Downloads Hub Navigation Switcher: Downloaded vs Queue */}
+            <div className="flex items-center gap-1.5 p-1 bg-slate-200/70 dark:bg-neutral-800/80 rounded-2xl shrink-0">
+              <button
+                type="button"
+                onClick={() => setDownloadHubTab("downloaded")}
+                className={`flex-1 py-1.5 px-3 rounded-xl text-[12.5px] font-bold flex items-center justify-center gap-2 transition-all ${
+                  downloadHubTab === "downloaded"
+                    ? "bg-white dark:bg-neutral-900 text-[#0f172a] dark:text-neutral-100 shadow-xs"
+                    : "text-[#64748b] dark:text-neutral-400 hover:text-[#0f172a] dark:hover:text-neutral-200"
+                }`}
+              >
+                <ICheck size={13} strokeWidth={2.6} />
+                <span>Downloaded</span>
+                <span
+                  className={`text-[11px] px-1.5 py-0.2 rounded-full font-bold ${
+                    downloadHubTab === "downloaded"
+                      ? "bg-blue-100 dark:bg-blue-500/20 text-[#1a73e8] dark:text-blue-400"
+                      : "bg-slate-300/60 dark:bg-neutral-700 text-slate-600 dark:text-neutral-300"
+                  }`}
+                >
+                  {downloads.length}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDownloadHubTab("queue")}
+                className={`flex-1 py-1.5 px-3 rounded-xl text-[12.5px] font-bold flex items-center justify-center gap-2 transition-all ${
+                  downloadHubTab === "queue"
+                    ? "bg-white dark:bg-neutral-900 text-[#0f172a] dark:text-neutral-100 shadow-xs"
+                    : "text-[#64748b] dark:text-neutral-400 hover:text-[#0f172a] dark:hover:text-neutral-200"
+                }`}
+              >
+                <IDownload size={13} strokeWidth={2.4} />
+                <span>Queue</span>
+                {activeDownloads.length > 0 && (
+                  <span
+                    className={`text-[11px] px-1.5 py-0.2 rounded-full font-bold flex items-center gap-1 ${
+                      downloadHubTab === "queue"
+                        ? "bg-blue-500 text-white"
+                        : "bg-blue-100 dark:bg-blue-500/20 text-[#1a73e8] dark:text-blue-400"
+                    }`}
+                  >
+                    {downloadingItemsCount > 0 && <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />}
+                    <span>{activeDownloads.length}</span>
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* When on Downloaded Tab: Show Smart Mini-Banner if Downloads are running in background */}
+            {downloadHubTab === "downloaded" && activeDownloads.length > 0 && (
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => setDownloadHubTab("queue")}
+                className="p-2.5 px-3 rounded-2xl bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-blue-500/10 border border-blue-500/25 flex items-center justify-between gap-2.5 cursor-pointer pressable hover:bg-blue-500/15 active:scale-[0.99] transition-all shadow-xs a-fade-in"
+              >
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                  <div className="w-8 h-8 rounded-xl bg-blue-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <IDownload size={14} strokeWidth={2.6} className={downloadingItemsCount > 0 ? "animate-bounce" : ""} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 text-[12px] font-bold text-[#0f172a] dark:text-neutral-100 truncate">
+                      <span>
+                        {downloadingItemsCount > 0
+                          ? `Downloading Ep. ${activeTransferringItem?.episode || 1}`
+                          : `${activeDownloads.length} ${activeDownloads.length === 1 ? "item" : "items"} in queue`}
+                      </span>
+                      {activeTransferringItem?.speedFormatted &&
+                        !/connecting|--/i.test(activeTransferringItem.speedFormatted) && (
+                          <span className="text-blue-600 dark:text-blue-400 font-semibold tabular-nums">
+                            · {activeTransferringItem.speedFormatted}
+                          </span>
+                        )}
+                      {activeTransferringItem?.progress != null && activeTransferringItem.progress > 0 && (
+                        <span className="text-slate-500 dark:text-neutral-400 tabular-nums">
+                          ({activeTransferringItem.progress}%)
+                        </span>
+                      )}
+                    </div>
+                    <div className="w-full h-1 rounded-full bg-blue-200 dark:bg-blue-950 overflow-hidden mt-1">
+                      <div
+                        className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-300"
+                        style={{ width: `${Math.max(2, activeTransferringItem?.progress || 0)}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 text-[11.5px] font-bold text-[#1a73e8] dark:text-blue-400 shrink-0">
+                  <span>View Queue ({activeDownloads.length})</span>
+                  <IChevR size={12} strokeWidth={2.6} />
+                </div>
+              </div>
+            )}
+
+            {/* Queue Tab Content */}
+            {downloadHubTab === "queue" && (
+              activeDownloads.length > 0 ? (() => {
+                const statusParts: string[] = [];
+                if (downloadingItemsCount > 0) statusParts.push(`${downloadingItemsCount} downloading`);
+                if (queuedItemsCount > 0) statusParts.push(`${queuedItemsCount} queued`);
+                if (failedItemsCount > 0) statusParts.push(`${failedItemsCount} failed`);
+                if (pausedItemsCount > 0) statusParts.push(`${pausedItemsCount} paused`);
+                if (statusParts.length === 0) statusParts.push(`${activeDownloads.length} active`);
+                const hasFailedOnly = failedItemsCount > 0 && pausedItemsCount === 0;
+                return (
               <div className="flex flex-col gap-2.5 mb-1 min-w-0 w-full">
                 <div className="flex flex-wrap items-center justify-between px-0.5 gap-x-2 gap-y-1.5 min-w-0">
                   <div className="text-[11.5px] font-black text-[#0f172a] dark:text-neutral-100 uppercase tracking-wider flex items-center gap-2 min-w-0">
@@ -1432,11 +1602,15 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                               ? "Paused"
                               : item.status === "error"
                               ? "Failed"
-                              : item.speedFormatted || "Connecting..."}
+                              : item.speedFormatted && item.speedFormatted !== "-- KB/s" && item.speedFormatted !== "--"
+                              ? item.speedFormatted
+                              : item.speedBytesPerSec > 0
+                              ? formatSpeed(item.speedBytesPerSec)
+                              : "Connecting..."}
                           </span>
                         </div>
-                        <div className="flex items-center justify-between gap-2 text-[10.5px] text-[#94a3b8] mt-0.5 tabular-nums">
-                          <span className="truncate">
+                        <div className="flex items-center justify-between gap-1.5 text-[10.5px] text-[#94a3b8] mt-0.5 tabular-nums">
+                          <span className="truncate min-w-0">
                             {item.status === "queued"
                               ? "Waiting in background queue"
                               : item.totalBytes > 0
@@ -1446,7 +1620,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                               : "Preparing..."}
                           </span>
                           {item.status === "downloading" && item.etaFormatted && item.etaFormatted !== "--" && (
-                            <span className="shrink-0">ETA {item.etaFormatted}</span>
+                            <span className="shrink-0 text-[#64748b] dark:text-neutral-400 font-medium">ETA {item.etaFormatted}</span>
                           )}
                         </div>
                       </div>
@@ -1519,9 +1693,27 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                 ))}
               </div>
               );
-            })()}
+            })() : (
+              <div className="flex flex-col items-center justify-center py-16 px-4 text-center select-none a-fade-in">
+                <div className="w-16 h-16 rounded-full bg-blue-100 dark:bg-blue-950/60 text-blue-500 flex items-center justify-center mb-3 shadow-xs">
+                  <ICheck size={28} strokeWidth={3} />
+                </div>
+                <h3 className="text-[17px] font-bold text-[#0f172a] dark:text-neutral-100">Download Queue Is Clear</h3>
+                <p className="text-[12.5px] text-[#64748b] dark:text-neutral-400 max-w-xs mt-1">
+                  No active or pending downloads in queue.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setDownloadHubTab("downloaded")}
+                  className="mt-4 px-5 py-2 rounded-full bg-blue-500 text-white font-bold text-[12.5px] shadow-xs pressable active:scale-95 transition-all"
+                >
+                  View Downloaded Shows ({downloads.length})
+                </button>
+              </div>
+            ))}
 
-            {downloads.length > 0 ? (
+            {/* ======================= DOWNLOADED TAB CONTENT ======================= */}
+            {downloadHubTab === "downloaded" && (downloads.length > 0 ? (
               <>
                 {/* Storage Gauge Card */}
                 <div className="bg-white/85 dark:bg-neutral-900/85 backdrop-blur-md rounded-2xl border border-white/70 dark:border-white/10 shadow-[0_4px_20px_-2px_rgba(20,45,85,0.06)] p-3.5 flex items-center justify-between gap-3">
@@ -1914,9 +2106,9 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
               </div>
             )}
               </>
-            ) : activeDownloads.length === 0 ? (
-              /* Empty Downloads Screen (Image 3 Screen 4) */
-              <div className="flex flex-col items-center justify-center py-16 px-4 text-center select-none relative">
+            ) : (
+              /* Empty Downloads Screen */
+              <div className="flex flex-col items-center justify-center py-16 px-4 text-center select-none relative a-fade-in">
                 {/* Floating graphic with orbital ring and sparkles */}
                 <div className="relative mb-5 flex items-center justify-center">
                   {/* Aura blur behind */}
@@ -1951,21 +2143,32 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                 <p className="text-[13.5px] text-[#64748b] dark:text-neutral-400 max-w-xs mt-1.5 leading-relaxed">
                   Download your favorite series and watch them offline anytime!
                 </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setView("overview");
-                    setTab("home");
-                  }}
-                  className="mt-6 px-6 py-2.5 rounded-full bg-gradient-to-r from-[#1a73e8] to-[#2563eb] hover:from-[#1557b0] hover:to-[#1d4ed8] text-white font-bold text-[13.5px] shadow-md shadow-blue-500/25 pressable active:scale-95 transition-all flex items-center gap-2"
-                >
-                  <IDownload size={15} strokeWidth={2.4} />
-                  <span>Browse Content</span>
-                </button>
+                <div className="flex items-center gap-2.5 mt-6">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setView("overview");
+                      setTab("home");
+                    }}
+                    className="px-6 py-2.5 rounded-full bg-gradient-to-r from-[#1a73e8] to-[#2563eb] hover:from-[#1557b0] hover:to-[#1d4ed8] text-white font-bold text-[13.5px] shadow-md shadow-blue-500/25 pressable active:scale-95 transition-all flex items-center gap-2"
+                  >
+                    <IDownload size={15} strokeWidth={2.4} />
+                    <span>Browse Content</span>
+                  </button>
+                  {activeDownloads.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setDownloadHubTab("queue")}
+                      className="px-5 py-2.5 rounded-full bg-blue-50 dark:bg-blue-500/20 text-[#1a73e8] dark:text-blue-400 font-bold text-[13.5px] pressable active:scale-95 transition-all"
+                    >
+                      View Queue ({activeDownloads.length})
+                    </button>
+                  )}
+                </div>
               </div>
-            ) : null}
+            ))}
             {/* Safe bottom spacer for downloads list so floating bottom tabs never obstruct items */}
-            <div className="h-[calc(var(--sab,0px)+96px)] shrink-0 pointer-events-none" aria-hidden="true" />
+            <div className="h-[calc(var(--sab,0px)+120px)] shrink-0 pointer-events-none" aria-hidden="true" />
           </div>
         ) : view === "seriesDetail" && selectedSeriesGroup ? (
           /* =====================================================================

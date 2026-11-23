@@ -1,5 +1,6 @@
 import type { AICaptionConfig, SubtitleCue, SubtitleTrack, SubtitleStyleConfig } from "./types";
 import { normalizeCueText, parseVtt } from "./vttParser";
+import { translateTrackToEnglish } from "./translator";
 import { LOCAL, isLocalMedia } from "../api";
 import { parseExtXKey, parseHlsIv, sequenceToIv } from "../offline/exportService";
 import { decodeAacToWav16k, extractAacFromTs, isMpegTs } from "./tsAudioExtractor";
@@ -881,13 +882,14 @@ export async function getSubtitlesForEpisode(
         ? list.find((it: any) => it.videoId === videoId && it.episode === episode)
         : null;
       if (offlineItem?.cues && Array.isArray(offlineItem.cues) && offlineItem.cues.length > 0 && !isLegacyFakeTrack(offlineItem)) {
-        const track: SubtitleTrack = {
+        const rawTrack: SubtitleTrack = {
           videoId,
           episode,
           cues: offlineItem.cues,
           source: "offline_download",
           generatedAt: offlineItem.downloadedAt || Date.now(),
         };
+        const track = await translateTrackToEnglish(rawTrack);
         setCachedTrack(cacheKey, track);
         return track;
       }
@@ -904,13 +906,14 @@ export async function getSubtitlesForEpisode(
     try {
       const cues = await fetchHlsSubtitleCues(remoteVttUrl);
       if (cues.length > 0) {
-        const track: SubtitleTrack = {
+        const rawTrack: SubtitleTrack = {
           videoId,
           episode,
           cues,
           source: "upstream_vtt",
           generatedAt: Date.now(),
         };
+        const track = await translateTrackToEnglish(rawTrack);
         setCachedTrack(cacheKey, track);
         return track;
       }
@@ -938,13 +941,14 @@ export async function getSubtitlesForEpisode(
             if (subUri) {
               const cues = await fetchHlsSubtitleCues(subUri);
               if (cues.length > 0) {
-                const track: SubtitleTrack = {
+                const rawTrack: SubtitleTrack = {
                   videoId,
                   episode,
                   cues,
                   source: "upstream_vtt",
                   generatedAt: Date.now(),
                 };
+                const track = await translateTrackToEnglish(rawTrack);
                 setCachedTrack(cacheKey, track);
                 return track;
               }

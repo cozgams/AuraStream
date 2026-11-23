@@ -478,6 +478,10 @@ class MainActivity : TauriActivity() {
         AuraDownloadService.upsertDownload(id, title, subtitle, clampedProgress, speedFormatted, fileSizeFormatted)
         if (activity.activeDownloadCount > 0) {
           activity.updateDownloadService(id, clampedProgress, speedFormatted, fileSizeFormatted, title, subtitle, activity.activeDownloadCount)
+        } else {
+          activity.activeDownloadCount = 1
+          activity.startDownloadService(title, subtitle, 1)
+          activity.updateDownloadService(id, clampedProgress, speedFormatted, fileSizeFormatted, title, subtitle, 1)
         }
       }
     }

@@ -10,6 +10,12 @@ import type {
 import { getSubtitlesForEpisode, getSubtitleStyleConfig } from "../subtitles/aiSubtitleService";
 import type { PlaybackClock } from "../playbackClock";
 import { formatBalancedCaptionLines, normalizeCueText } from "../subtitles/vttParser";
+import {
+  containsForeignLanguage,
+  translateCuesToEnglish,
+  translateDialogueSync,
+  translateDialogueToEnglish,
+} from "../subtitles/translator";
 
 type Props = {
   videoId: number;
@@ -48,6 +54,7 @@ export default function SubtitleOverlay({
   const [trackSource, setTrackSource] = useState<SubtitleTrack["source"]>("none");
   const [trackFileName, setTrackFileName] = useState<string | undefined>(undefined);
   const [nativeCues, setNativeCues] = useState<SubtitleCue[]>([]);
+  const [liveTranslated, setLiveTranslated] = useState<Record<string, string>>({});
   const [styleConfig, setStyleConfig] = useState<SubtitleStyleConfig>(() => getSubtitleStyleConfig());
   const [videoFrameBottom, setVideoFrameBottom] = useState<number | null>(null);
   const prevEpisodeKeyRef = useRef<string>("");
@@ -220,6 +227,11 @@ export default function SubtitleOverlay({
         });
       }
       setNativeCues(extracted);
+      if (extracted.some((c) => containsForeignLanguage(c.en))) {
+        translateCuesToEnglish(extracted)
+          .then((translated) => setNativeCues(translated))
+          .catch(() => {});
+      }
     };
 
     readNativeCues();
@@ -288,7 +300,24 @@ export default function SubtitleOverlay({
     return null;
   }
 
-  const rawEnglish = activeCue ? normalizeCueText(activeCue.en || activeCue.zh) : "";
+  let rawEnglish = activeCue ? normalizeCueText(activeCue.en || activeCue.zh) : "";
+  if (rawEnglish && containsForeignLanguage(rawEnglish)) {
+    if (liveTranslated[rawEnglish]) {
+      rawEnglish = liveTranslated[rawEnglish];
+    } else {
+      const syncTr = translateDialogueSync(rawEnglish);
+      if (syncTr && !containsForeignLanguage(syncTr)) {
+        rawEnglish = syncTr;
+      }
+      translateDialogueToEnglish(rawEnglish)
+        .then((res) => {
+          if (res && res !== rawEnglish && !containsForeignLanguage(res)) {
+            setLiveTranslated((prev) => ({ ...prev, [rawEnglish]: res }));
+          }
+        })
+        .catch(() => {});
+    }
+  }
   const balancedCaption = rawEnglish ? formatBalancedCaptionLines(rawEnglish, 42) : "";
   const isVisible = Boolean(activeCue && balancedCaption);
 

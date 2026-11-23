@@ -18,6 +18,7 @@ export type VideoHandle = {
   mute: (m: boolean) => void;
   volume: (v: number) => void;
   reload?: () => void;
+  setAudioOffset?: (offsetMs: number) => void;
 };
 
 type Props = {
@@ -69,6 +70,9 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
   onSizeRef.current = onSize;
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const delayNodeRef = useRef<DelayNode | null>(null);
+  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
   const { trace, requestSeek } = usePlayerDiagnostics(videoRef, hlsRef, { ...diagnosticContext, active, resource: mediaResource(src) });
   const activity = usePlaybackActivity(videoRef, hlsRef, { active, autoPlay, src, trace });
   const proxyRecovery = useProxyPlaybackRecovery(videoRef, src, activity, trace);
@@ -110,6 +114,33 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
     rate: (r: number) => { const v = videoRef.current; if (v) v.playbackRate = r; },
     mute: (m: boolean) => { const v = videoRef.current; if (v) v.muted = m; },
     volume: (vol: number) => { const v = videoRef.current; if (v) v.volume = safeVolume(vol); },
+    setAudioOffset: (offsetMs: number) => {
+      const v = videoRef.current;
+      if (!v) return;
+      try {
+        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (!AudioCtx) return;
+        if (!audioCtxRef.current) {
+          audioCtxRef.current = new AudioCtx();
+        }
+        const ctx = audioCtxRef.current;
+        if (ctx.state === "suspended") {
+          void ctx.resume();
+        }
+        if (!sourceNodeRef.current) {
+          sourceNodeRef.current = ctx.createMediaElementSource(v);
+        }
+        if (!delayNodeRef.current) {
+          delayNodeRef.current = ctx.createDelay(1.0);
+          sourceNodeRef.current.connect(delayNodeRef.current);
+          delayNodeRef.current.connect(ctx.destination);
+        }
+        const delaySec = Math.max(0, offsetMs / 1000);
+        delayNodeRef.current.delayTime.setValueAtTime(delaySec, ctx.currentTime);
+      } catch {
+        // Ignored if cross-origin or unsupported
+      }
+    },
     reload: () => {
       const v = videoRef.current;
       const hls = hlsRef.current;
@@ -159,13 +190,14 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
     const useHls = (isHlsBlob || (!isBlob && !isDirectOfflineFile)) && !url.includes("/seg?u=");
     trace("source.load", { engine: useHls && Hls.isSupported() ? "hls.js" : "native", auto_play: autoPlay, resource: mediaResource(src), host: mediaHost(src) });
 
-    /* Restore volume and playback speed after HLS attach */
+    /* Restore volume, playback speed and audio pitch after HLS attach */
     const applySettings = () => {
       const v = videoRef.current;
       if (!v) return;
       v.volume = safeVolume(volume);
       v.muted = muted;
       v.playbackRate = rate;
+      (v as HTMLVideoElement).preservesPitch = true;
     };
     applySettings();
 
@@ -189,20 +221,24 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         lowLatencyMode: false,
         maxLoadingDelay: isOfflineLocal ? 0 : 0.5,
         startPosition: resume?.time ?? -1,
-        // Turbo Buffer: Eagerly pre-buffers up to 120s online; full episode buffer for offline local disk
-        maxBufferLength: isOfflineLocal ? 120 : (fullPreCache ? 120 : 60),
-        maxMaxBufferLength: isOfflineLocal ? 240 : (fullPreCache ? 240 : 120),
-        maxBufferSize: isOfflineLocal ? 120 * 1024 * 1024 : (fullPreCache ? 80 * 1024 * 1024 : 40 * 1024 * 1024),
-        backBufferLength: isOfflineLocal ? 90 : 45,
+        // Turbo Buffer: Eagerly pre-buffers up to 120s online; compact buffer for instant offline local disk start
+        maxBufferLength: isOfflineLocal ? 30 : (fullPreCache ? 120 : 60),
+        maxMaxBufferLength: isOfflineLocal ? 60 : (fullPreCache ? 240 : 120),
+        maxBufferSize: isOfflineLocal ? 30 * 1024 * 1024 : (fullPreCache ? 80 * 1024 * 1024 : 40 * 1024 * 1024),
+        backBufferLength: isOfflineLocal ? 30 : 45,
         highBufferWatchdogPeriod: 2,
-        maxBufferHole: 0.5,
-        nudgeOffset: 0.25,
-        nudgeMaxRetry: 6,
-        manifestLoadingTimeOut: 15000,
+        // Voice & Audio/Video synchronization hardening:
+        stretchShortVideoTrack: true,
+        maxAudioFramesDrift: 1,
+        forceKeyFrameOnDiscontinuity: true,
+        maxBufferHole: 0.1,
+        nudgeOffset: 0.05,
+        nudgeMaxRetry: 10,
+        manifestLoadingTimeOut: isOfflineLocal ? 5000 : 15000,
         manifestLoadingMaxRetry: 4,
-        fragLoadingTimeOut: 20000,
+        fragLoadingTimeOut: isOfflineLocal ? 5000 : 20000,
         fragLoadingMaxRetry: 6,
-        fragLoadingRetryDelay: 350,
+        fragLoadingRetryDelay: isOfflineLocal ? 50 : 350,
       });
       hlsRef.current = hls;
       observeHls(hls, trace);

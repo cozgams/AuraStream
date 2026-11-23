@@ -123,6 +123,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [cancelAutoNext, setCancelAutoNext] = useState(false);
   const cancelAutoNextRef = useRef(false);
   const [autoSkipSec, setAutoSkipSecState] = useState<number>(() => getAutoSkipIntroSec());
+  const [audioSyncOffset, setAudioSyncOffset] = useState<number>(0);
   /* Resume playback: seek to saved timestamp after duration is available */
   const resumeRef = useRef<{ key: string; t: number } | null>(
     startTime && startTime > 1 ? { key: `${videoIds[startIndex]}:${startEp || 1}`, t: startTime } : null,
@@ -2797,6 +2798,39 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       <span>Off</span>
                     </button>
                   </div>
+                </div>
+
+                {/* 3b. Voice & Audio Sync (Lip-Sync Correction) */}
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-mut">Voice & Audio Sync</span>
+                    <span className="text-[12px] font-bold text-primary tabular-nums">
+                      {audioSyncOffset === 0 ? "Synced (0ms)" : `${audioSyncOffset > 0 ? "+" : ""}${audioSyncOffset}ms`}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-5 gap-1 bg-s3 p-1 rounded-xl border border-border">
+                    {[-200, -100, 0, 100, 200].map((offset) => (
+                      <button
+                        key={offset}
+                        type="button"
+                        onClick={() => {
+                          setAudioSyncOffset(offset);
+                          videoRef.current?.setAudioOffset?.(offset);
+                          toast(offset === 0 ? "Voice synced to video" : `Voice offset: ${offset > 0 ? "+" : ""}${offset}ms`, "ok");
+                        }}
+                        className={`py-1.5 rounded-lg text-center text-[12px] font-bold transition-all ${
+                          audioSyncOffset === offset
+                            ? "bg-white dark:bg-neutral-800 text-on shadow-xs border border-black/5 dark:border-white/15"
+                            : "text-mut hover:text-on hover:bg-s4/10"
+                        }`}
+                      >
+                        {offset === 0 ? "0ms" : `${offset > 0 ? "+" : ""}${offset}ms`}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="text-[10px] text-mut px-0.5">
+                    Fine-tune dialogue timing if lips and voice are slightly mismatched
+                  </span>
                 </div>
 
                 {/* 4. Playback Speed */}
