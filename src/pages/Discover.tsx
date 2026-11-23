@@ -101,7 +101,6 @@ export function TopicPage({ slug, name, onBack, wide }: { slug: string; name: st
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const busy = useRef(false);
-  const sentinel = useRef<HTMLDivElement>(null);
 
   const loadMore = useCallback(async () => {
     if (busy.current || page >= pages) return;
@@ -172,7 +171,6 @@ export function TopicPage({ slug, name, onBack, wide }: { slug: string; name: st
         ) : (
           <Empty icon={<TopicIcon size={26} />} title="No content available" />
         )}
-        <div ref={sentinel} className="h-8" />
         {loading && videos.length > 0 && <div className="flex justify-center py-3"><Loader className="w-6 h-6 spinner" /></div>}
         {!loading && videos.length > 0 && page >= pages && <div className="text-center text-[12px] text-dim py-3">— You've reached the end —</div>}
         {wide && <div className="h-2" />}

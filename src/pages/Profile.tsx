@@ -155,6 +155,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
   const [view, setView] = useState<"overview" | "downloads" | "seriesDetail" | "favs" | "watchlater" | "history">("overview");
 
   const [cards, setCards] = useState<Detail[]>([]);
+  const [favSort, setFavSort] = useState<"recent" | "finished" | "episodes">("recent");
   const [downloads, setDownloads] = useState<OfflineEpisode[]>(() => getOfflineEpisodes());
   const [storageStats, setStorageStats] = useState<DeviceStorageStats | null>(null);
   const [batchProgress, setBatchProgress] = useState<BatchProgressState>(getBatchProgress);
@@ -714,6 +715,17 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
   }, [view, favs, watchLater, history]);
 
   const progressOf = (id: number) => (view === "history" ? history.find((h) => h.id === id) : undefined);
+
+  const displayedCards = useMemo(() => {
+    if ((view !== "favs" && view !== "watchlater") || favSort === "recent") return cards;
+    const copy = [...cards];
+    if (favSort === "finished") {
+      copy.sort((a, b) => (b.is_finished ? 1 : 0) - (a.is_finished ? 1 : 0));
+    } else if (favSort === "episodes") {
+      copy.sort((a, b) => (b.episode_count || 0) - (a.episode_count || 0));
+    }
+    return copy;
+  }, [cards, view, favSort]);
 
   // Fetch full cards when in a dedicated subview (with offline fallback to detailCache / history / downloads)
   useEffect(() => {
@@ -2623,8 +2635,33 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
               4. Media Grid View (Favorites, Watch Later, History Subviews)
               ===================================================================== */
           <div className="flex flex-col gap-2.5 a-rise">
+            {(view === "favs" || view === "watchlater") && cards.length > 1 && (
+              <div className="flex items-center gap-2 px-1 mb-1">
+                <span className="text-[12px] font-semibold text-[#64748b] dark:text-neutral-400">Sort:</span>
+                <div className="inline-flex rounded-full bg-slate-200/60 dark:bg-white/10 p-0.5 text-[12px]">
+                  {([
+                    { id: "recent", label: "Recent" },
+                    { id: "finished", label: "Finished First" },
+                    { id: "episodes", label: "Episodes" },
+                  ] as const).map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => setFavSort(s.id)}
+                      className={`px-3 py-1 rounded-full text-[11.5px] font-semibold transition-all pressable ${
+                        favSort === s.id
+                          ? "bg-primary text-on-primary shadow-xs"
+                          : "text-[#64748b] dark:text-neutral-400 hover:text-[#0f172a] dark:hover:text-white"
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className={`ios-media-grid ${wide ? "is-wide" : ""}`}>
-              {cards.map((c) => {
+              {displayedCards.map((c) => {
                 const progress = progressOf(c.id);
                 return (
                   <div key={c.id} className="relative group">
@@ -2639,8 +2676,8 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                       onOpen={() =>
                         push({
                           kind: "feed",
-                          videoIds: cards.map((x) => x.id),
-                          index: cards.findIndex((x) => x.id === c.id),
+                          videoIds: displayedCards.map((x) => x.id),
+                          index: displayedCards.findIndex((x) => x.id === c.id),
                           title:
                             view === "favs"
                               ? t("profile.favorites")
