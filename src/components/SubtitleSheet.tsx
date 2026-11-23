@@ -266,10 +266,10 @@ export default function SubtitleSheet({
   const modes: Array<{ id: SubtitleMode; label: string; desc: string; icon: React.ReactNode }> = [
     {
       id: "en",
-      label: hasRealTrack ? "Captions On" : "Captions Enabled",
+      label: hasRealTrack ? "Captions On (English)" : "Captions Enabled",
       desc: hasRealTrack
-        ? `Displaying ${trackInfo?.cueCount || 0} active lines`
-        : "Overlay on · Waiting for subtitle track",
+        ? `Displaying ${trackInfo?.cueCount || 0} active lines · Auto-translated to English`
+        : "Overlay on · Foreign dialogue auto-translates to English",
       icon: <ILangEn size={22} className="text-amber-500" />,
     },
     {

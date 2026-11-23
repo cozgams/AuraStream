@@ -216,7 +216,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         preferManagedMediaSource: false,
         autoStartLoad: isOfflineLocal || activity.isActive(),
         startFragPrefetch: true,
-        progressive: true,
+        progressive: !isOfflineLocal,
         capLevelToPlayerSize: true,
         lowLatencyMode: false,
         maxLoadingDelay: isOfflineLocal ? 0 : 0.5,
@@ -513,6 +513,9 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         reportSize(v);
       }}
       onPlay={() => {
+        if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
+          void audioCtxRef.current.resume();
+        }
         isBufferingRef.current = true;
         lastAdvanceTimeRef.current = Date.now();
       }}
@@ -535,6 +538,9 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         if (videoRef.current) lastPosRef.current = videoRef.current.currentTime;
       }}
       onPlaying={(e) => {
+        if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
+          void audioCtxRef.current.resume();
+        }
         const v = e.target as HTMLVideoElement;
         isBufferingRef.current = false;
         stallStageRef.current = 0;
