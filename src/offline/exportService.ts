@@ -53,10 +53,6 @@ export interface NativeExportBridge {
   exportSubtitleText?(fileName: string, content: string, action: string): string;
   getLastExportedUri?(): string;
   openInGallery?(pathOrUri?: string): boolean;
-  isPictureInPictureSupported?(): boolean;
-  enterPictureInPicture?(): boolean;
-  enterPictureInPictureWithAspect?(num: number, den: number): boolean;
-  setAutoPip?(enabled: boolean): void;
   getDeviceAbi?(): string;
   canInstallPackages?(): boolean;
   openInstallPermissionSettings?(): boolean;

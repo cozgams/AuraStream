@@ -522,7 +522,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const toast = useCallback((msg: string, icon?: Toast["icon"]) => {
     const id = ++toastSeq.current;
     setToasts((t) => [...t.slice(-2), { id, msg, icon }]);
-    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2200);
+    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200);
   }, []);
   /** Dispatched on successful automatic line switch */
   useEffect(() => {

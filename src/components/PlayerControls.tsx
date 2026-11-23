@@ -28,7 +28,6 @@ type Props = {
   onRate: (r: number) => void;
   onMute: () => void;
   onVolume: (v: number) => void;
-  onPip?: () => void;
   onLock: () => void;
   onTheater?: () => void;
   onFullscreen: () => void;
@@ -41,7 +40,7 @@ const formatClock = (s: number) => fmtTime(Math.max(0, s || 0)).padStart(5, "0")
 
 export default function PlayerControls({
   paused, clock, duration, buffered = 0, rate, muted, volume, theater = false, fullscreen = false,
-  visible = true, seekEnabled = true, seekKey, nextDisabled = false, nextTitle = "Next", swipeEp = false, onToggle, onSeek, onSeekInteraction, onRate, onMute, onVolume, onPip, onLock, onTheater, onFullscreen, onNext, onToggleSwipe, onOpenCaptions,
+  visible = true, seekEnabled = true, seekKey, nextDisabled = false, nextTitle = "Next", swipeEp = false, onToggle, onSeek, onSeekInteraction, onRate, onMute, onVolume, onLock, onTheater, onFullscreen, onNext, onToggleSwipe, onOpenCaptions,
 }: Props) {
   const store = useStore();
   const { t } = store;

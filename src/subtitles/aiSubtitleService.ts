@@ -216,7 +216,7 @@ export async function transcribeWithGemini(
   const key = apiKey || getAICaptionConfig().geminiKey;
   if (!key) throw new Error("Gemini API Key is required for speech recognition");
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(key)}`;
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(key)}`;
 
   const prompt = `You are an elite short drama subtitle transcriber and professional translator.
 Transcribe the speech in this audio track and generate timed English subtitle cues.
@@ -898,47 +898,50 @@ export async function getSubtitlesForEpisode(
 
     // Direct IndexedDB query fallback for offline downloads
     if (typeof indexedDB !== "undefined") {
-      const idbTrack = await new Promise<SubtitleTrack | null>((resolve) => {
-        try {
-          const req = indexedDB.open("aurastream_downloads_v1");
-          req.onsuccess = () => {
-            const db = req.result;
-            if (!db.objectStoreNames.contains("episodes")) {
-              db.close();
-              resolve(null);
-              return;
-            }
-            const tx = db.transaction("episodes", "readonly");
-            const getReq = tx.objectStore("episodes").get(`${videoId}_${episode}`);
-            getReq.onsuccess = () => {
-              const rec = getReq.result;
-              db.close();
-              if (rec?.cues && Array.isArray(rec.cues) && rec.cues.length > 0 && !isLegacyFakeTrack(rec)) {
-                resolve({
-                  videoId,
-                  episode,
-                  cues: rec.cues,
-                  source: "offline_download",
-                  generatedAt: rec.downloadedAt || Date.now(),
-                });
-              } else {
+      const dbNames = ["AuraStreamOfflineDB", "aurastream_offline_db"];
+      for (const dbName of dbNames) {
+        const idbTrack = await new Promise<SubtitleTrack | null>((resolve) => {
+          try {
+            const req = indexedDB.open(dbName);
+            req.onsuccess = () => {
+              const db = req.result;
+              if (!db.objectStoreNames.contains("episodes")) {
+                db.close();
                 resolve(null);
+                return;
               }
+              const tx = db.transaction("episodes", "readonly");
+              const getReq = tx.objectStore("episodes").get(`${videoId}_${episode}`);
+              getReq.onsuccess = () => {
+                const rec = getReq.result;
+                db.close();
+                if (rec?.cues && Array.isArray(rec.cues) && rec.cues.length > 0 && !isLegacyFakeTrack(rec)) {
+                  resolve({
+                    videoId,
+                    episode,
+                    cues: rec.cues,
+                    source: "offline_download",
+                    generatedAt: rec.downloadedAt || Date.now(),
+                  });
+                } else {
+                  resolve(null);
+                }
+              };
+              getReq.onerror = () => {
+                db.close();
+                resolve(null);
+              };
             };
-            getReq.onerror = () => {
-              db.close();
-              resolve(null);
-            };
-          };
-          req.onerror = () => resolve(null);
-        } catch {
-          resolve(null);
+            req.onerror = () => resolve(null);
+          } catch {
+            resolve(null);
+          }
+        });
+        if (idbTrack) {
+          const track = await translateTrackToEnglish(idbTrack);
+          setCachedTrack(cacheKey, track);
+          return track;
         }
-      });
-      if (idbTrack) {
-        const track = await translateTrackToEnglish(idbTrack);
-        setCachedTrack(cacheKey, track);
-        return track;
       }
     }
   } catch {

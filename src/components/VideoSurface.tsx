@@ -1,6 +1,6 @@
 import { useEffect, useImperativeHandle, useRef, forwardRef, useState } from "react";
 import Hls from "hls.js";
-import { isLocalMedia, platform, playlist } from "../api";
+import { isLocalMedia, isMobile, platform, playlist } from "../api";
 import { mediaErrorMessage } from "../mediaErrors";
 import { mediaHost, mediaResource, observeHls, usePlayerDiagnostics } from "../playbackDiagnostics";
 import { usePlaybackActivity } from "../usePlaybackActivity";
@@ -211,6 +211,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
 
     if (useHls && Hls.isSupported()) {
       const fullPreCache = isFullEpisodePreCacheEnabled();
+      const isMobileDevice = isMobile || platform === "android" || platform === "ios";
       const hls = new Hls({
         // Disable direct steering URLs
         interstitialsController: undefined,
@@ -229,11 +230,11 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         lowLatencyMode: false,
         maxLoadingDelay: isOfflineLocal ? 0 : 0.5,
         startPosition: resume?.time ?? -1,
-        // Turbo Buffer: Eagerly pre-buffers up to 120s online; compact buffer for instant offline local disk start
-        maxBufferLength: isOfflineLocal ? 30 : (fullPreCache ? 120 : 60),
-        maxMaxBufferLength: isOfflineLocal ? 60 : (fullPreCache ? 240 : 120),
-        maxBufferSize: isOfflineLocal ? 30 * 1024 * 1024 : (fullPreCache ? 80 * 1024 * 1024 : 40 * 1024 * 1024),
-        backBufferLength: isOfflineLocal ? 30 : 45,
+        // Calibrated buffer lengths to prevent Android WebView SourceBuffer QuotaExceededError
+        maxBufferLength: isOfflineLocal ? 15 : (isMobileDevice ? 20 : (fullPreCache ? 120 : 60)),
+        maxMaxBufferLength: isOfflineLocal ? 30 : (isMobileDevice ? 40 : (fullPreCache ? 240 : 120)),
+        maxBufferSize: isOfflineLocal ? 15 * 1024 * 1024 : (isMobileDevice ? 15 * 1024 * 1024 : (fullPreCache ? 80 * 1024 * 1024 : 40 * 1024 * 1024)),
+        backBufferLength: isMobileDevice ? 10 : (isOfflineLocal ? 20 : 45),
         highBufferWatchdogPeriod: 2,
         // Voice & Audio/Video synchronization hardening:
         stretchShortVideoTrack: true,
@@ -267,6 +268,16 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
       });
       hls.on(Hls.Events.ERROR, (_e, data) => {
         const isTrackRemoved = String(data.error || "").includes("SourceBuffer, but it does not exist");
+        const isBufferAppend = data.details === Hls.ErrorDetails.BUFFER_APPEND_ERROR;
+
+        if (isBufferAppend) {
+          try {
+            hls.config.maxBufferSize = Math.max(8 * 1024 * 1024, Math.floor((hls.config.maxBufferSize || 15 * 1024 * 1024) * 0.7));
+            hls.config.maxBufferLength = Math.max(8, Math.floor((hls.config.maxBufferLength || 20) * 0.7));
+            hls.config.backBufferLength = 5;
+          } catch { /* ignore */ }
+          if (!data.fatal) return;
+        }
 
         if (!data.fatal && !isTrackRemoved) {
           if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR && activity.isActive()) {
@@ -288,6 +299,10 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
               } else if (isTrackRemoved) {
                 hls.recoverMediaError();
                 hls.startLoad(video.currentTime || -1);
+              } else if (isBufferAppend) {
+                try { hls.swapAudioCodec(); } catch { /* ignore */ }
+                hls.recoverMediaError();
+                activity.play("error_recover", true);
               } else {
                 hls.recoverMediaError();
                 activity.play("error_recover", true);
@@ -329,13 +344,23 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src, proxyRecovery.revision]);
 
-  // Enable inline playback attributes for Android & mobile WebViews
+  // Enable inline playback attributes for Android & mobile WebViews and clean up audio context on unmount
   useEffect(() => {
     const v = videoRef.current;
     if (v) {
       v.setAttribute("playsinline", "true");
       v.setAttribute("webkit-playsinline", "true");
     }
+    return () => {
+      if (audioCtxRef.current) {
+        try {
+          void audioCtxRef.current.close();
+        } catch { /* ignore */ }
+        audioCtxRef.current = null;
+        delayNodeRef.current = null;
+        sourceNodeRef.current = null;
+      }
+    };
   }, []);
 
   useEffect(() => { if (videoRef.current) videoRef.current.muted = muted; }, [muted]);

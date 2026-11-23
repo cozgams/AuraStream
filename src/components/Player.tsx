@@ -149,10 +149,10 @@ export default function Player({
         capLevelToPlayerSize: true,
         startPosition: resume?.time ?? -1,
         lowLatencyMode: false,
-        maxBufferLength: isFullEpisodePreCacheEnabled() ? 600 : 30,
-        maxMaxBufferLength: isFullEpisodePreCacheEnabled() ? 1200 : 60,
-        maxBufferSize: isFullEpisodePreCacheEnabled() ? 80 * 1024 * 1024 : 30 * 1024 * 1024,
-        backBufferLength: isFullEpisodePreCacheEnabled() ? 120 : 30,
+        maxBufferLength: isMobile || platform === "android" || platform === "ios" ? 20 : (isFullEpisodePreCacheEnabled() ? 120 : 30),
+        maxMaxBufferLength: isMobile || platform === "android" || platform === "ios" ? 40 : (isFullEpisodePreCacheEnabled() ? 240 : 60),
+        maxBufferSize: isMobile || platform === "android" || platform === "ios" ? 15 * 1024 * 1024 : (isFullEpisodePreCacheEnabled() ? 80 * 1024 * 1024 : 30 * 1024 * 1024),
+        backBufferLength: isMobile || platform === "android" || platform === "ios" ? 10 : (isFullEpisodePreCacheEnabled() ? 60 : 30),
         highBufferWatchdogPeriod: isFullEpisodePreCacheEnabled() ? 2 : 4,
         // Voice & Audio/Video synchronization hardening:
         stretchShortVideoTrack: true,
@@ -188,6 +188,16 @@ export default function Player({
       });
       hls.on(Hls.Events.ERROR, (_e, data) => {
         const isTrackRemoved = String(data.error || "").includes("SourceBuffer, but it does not exist");
+        const isBufferAppend = data.details === Hls.ErrorDetails.BUFFER_APPEND_ERROR;
+
+        if (isBufferAppend) {
+          try {
+            hls.config.maxBufferSize = Math.max(8 * 1024 * 1024, Math.floor((hls.config.maxBufferSize || 15 * 1024 * 1024) * 0.7));
+            hls.config.maxBufferLength = Math.max(8, Math.floor((hls.config.maxBufferLength || 20) * 0.7));
+            hls.config.backBufferLength = 5;
+          } catch { /* ignore */ }
+          if (!data.fatal) return;
+        }
 
         if (!data.fatal && !isTrackRemoved) {
           if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR && activity.isActive()) {

@@ -150,6 +150,12 @@ export function containsForeignLanguage(text: string): boolean {
   return /[\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af]/.test(text);
 }
 
+function detectLangPair(text: string): { myMemoryPair: string; lingvaSrc: string } {
+  if (/[\uac00-\ud7af]/.test(text)) return { myMemoryPair: "ko|en", lingvaSrc: "ko" };
+  if (/[\u3040-\u30ff]/.test(text)) return { myMemoryPair: "ja|en", lingvaSrc: "ja" };
+  return { myMemoryPair: "zh|en", lingvaSrc: "zh" };
+}
+
 /**
  * Translates a single line or short paragraph of foreign dialogue to English
  */
@@ -171,8 +177,9 @@ export async function translateDialogueToEnglish(text: string): Promise<string> 
   }
 
   // 3. Query fast, free public translation endpoint (MyMemory)
+  const pair = detectLangPair(trimmed);
   try {
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(trimmed)}&langpair=zh|en`;
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(trimmed)}&langpair=${pair.myMemoryPair}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
     if (res.ok) {
       const data = await res.json();
@@ -193,7 +200,7 @@ export async function translateDialogueToEnglish(text: string): Promise<string> 
 
   // 3b. Fallback public translation endpoint
   try {
-    const url = `https://lingva.ml/api/v1/zh/en/${encodeURIComponent(trimmed)}`;
+    const url = `https://lingva.ml/api/v1/${pair.lingvaSrc}/en/${encodeURIComponent(trimmed)}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(3500) });
     if (res.ok) {
       const data = await res.json();

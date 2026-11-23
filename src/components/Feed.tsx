@@ -923,9 +923,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   useEffect(() => { videoRef.current?.rate(effRate); }, [effRate, playKey]);
   /* Voice & Audio Sync offset synchronization */
   useEffect(() => {
-    if (audioSyncOffset !== 0) {
-      videoRef.current?.setAudioOffset?.(audioSyncOffset);
-    }
+    videoRef.current?.setAudioOffset?.(audioSyncOffset);
   }, [audioSyncOffset, playKey]);
 
   /* Persist final progress and cleanup offline blob URLs */
@@ -1643,6 +1641,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                           }
                         }}
                         onError={(m) => {
+                          if (m.includes("bufferAppendError")) {
+                            videoRef.current?.reload?.();
+                            return;
+                          }
                           if (preferHevc && hevcUrl) {
                             setErr("");
                             setPreferHevc(false);

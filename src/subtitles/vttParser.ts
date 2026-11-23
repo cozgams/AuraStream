@@ -138,7 +138,7 @@ export function parseAss(content: string): SubtitleCue[] {
     const enLines: string[] = [];
     const zhLines: string[] = [];
     for (const tl of textLines) {
-      if (/[\u4e00-\u9fa5]/.test(tl)) zhLines.push(tl);
+      if (/[\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af]/.test(tl)) zhLines.push(tl);
       else enLines.push(tl);
     }
     const joinedEn = normalizeCueText(enLines.join("\n"));
@@ -246,8 +246,8 @@ export function parseVtt(content: string): SubtitleCue[] {
           const cleaned = line.replace(/^(\[ZH\]|ZH:)\s*/i, "").trim();
           if (cleaned) zhLines.push(cleaned);
         } else {
-          const hasChinese = /[\u4e00-\u9fa5]/.test(line);
-          if (hasChinese) {
+          const isForeign = /[\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af]/.test(line);
+          if (isForeign) {
             zhLines.push(line);
           } else {
             enLines.push(line);
