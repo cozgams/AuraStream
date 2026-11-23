@@ -123,7 +123,16 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [cancelAutoNext, setCancelAutoNext] = useState(false);
   const cancelAutoNextRef = useRef(false);
   const [autoSkipSec, setAutoSkipSecState] = useState<number>(() => getAutoSkipIntroSec());
-  const [audioSyncOffset, setAudioSyncOffset] = useState<number>(0);
+  const [audioSyncOffset, setAudioSyncOffset] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem("aurastream_audio_sync_offset");
+      if (raw !== null) {
+        const val = parseInt(raw, 10);
+        if (Number.isFinite(val) && val >= -500 && val <= 500) return val;
+      }
+    } catch {}
+    return 0;
+  });
   /* Resume playback: seek to saved timestamp after duration is available */
   const resumeRef = useRef<{ key: string; t: number } | null>(
     startTime && startTime > 1 ? { key: `${videoIds[startIndex]}:${startEp || 1}`, t: startTime } : null,
@@ -913,6 +922,12 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   useEffect(() => { videoRef.current?.volume(volume); }, [volume]);
   /* Playback speed synchronization */
   useEffect(() => { videoRef.current?.rate(effRate); }, [effRate, playKey]);
+  /* Voice & Audio Sync offset synchronization */
+  useEffect(() => {
+    if (audioSyncOffset !== 0) {
+      videoRef.current?.setAudioOffset?.(audioSyncOffset);
+    }
+  }, [audioSyncOffset, playKey]);
 
   /* Persist final progress and cleanup offline blob URLs */
   useEffect(() => () => {
@@ -2808,17 +2823,20 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       {audioSyncOffset === 0 ? "Synced (0ms)" : `${audioSyncOffset > 0 ? "+" : ""}${audioSyncOffset}ms`}
                     </span>
                   </div>
-                  <div className="grid grid-cols-5 gap-1 bg-s3 p-1 rounded-xl border border-border">
-                    {[-200, -100, 0, 100, 200].map((offset) => (
+                  <div className="grid grid-cols-7 gap-1 bg-s3 p-1 rounded-xl border border-border">
+                    {[-200, -100, -50, 0, 50, 100, 200].map((offset) => (
                       <button
                         key={offset}
                         type="button"
                         onClick={() => {
                           setAudioSyncOffset(offset);
+                          try {
+                            localStorage.setItem("aurastream_audio_sync_offset", String(offset));
+                          } catch {}
                           videoRef.current?.setAudioOffset?.(offset);
                           toast(offset === 0 ? "Voice synced to video" : `Voice offset: ${offset > 0 ? "+" : ""}${offset}ms`, "ok");
                         }}
-                        className={`py-1.5 rounded-lg text-center text-[12px] font-bold transition-all ${
+                        className={`py-1.5 rounded-lg text-center text-[11px] font-bold transition-all ${
                           audioSyncOffset === offset
                             ? "bg-white dark:bg-neutral-800 text-on shadow-xs border border-black/5 dark:border-white/15"
                             : "text-mut hover:text-on hover:bg-s4/10"

@@ -1,12 +1,13 @@
 import { Button, Surface } from "../components/ios/controls";
 import { Loader } from "../components/ios/effects";
 import { useEffect, useMemo, useState } from "react";
-import { api, APP_VERSION, cover as getCoverUrl, fmtTime, isMobile, platform } from "../api";
+import { api, APP_VERSION, cover as getCoverUrl, fmtTime, isMobile, platform, type UpdateInfo } from "../api";
 import type { Detail } from "../types";
 import { useStore } from "../store";
 import { Avatar, Empty, Modal, Toggle } from "../components/ui";
 import { MediaCard } from "../components/cards";
 import ExportSheet from "../components/ExportSheet";
+import UpdateModal from "../components/UpdateModal";
 import { registerOverlayBack } from "../back";
 import {
   IBack,
@@ -175,6 +176,24 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
   const [smartDl, setSmartDl] = useState<boolean>(() => isSmartDownloadEnabled());
   const [androidPerms, setAndroidPerms] = useState<AndroidPermissionsStatus | null>(() => getAndroidPermissionsStatus());
   const [permBannerDismissed, setPermBannerDismissed] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+
+  const handleCheckUpdate = async () => {
+    setCheckingUpdate(true);
+    try {
+      const res = await api.checkUpdate();
+      if (res?.has_update) {
+        setUpdateInfo(res);
+      } else {
+        toast("You are using the latest version of AuraStream", "ok");
+      }
+    } catch {
+      toast("Unable to check for updates. Check connection.", "info");
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
 
   useEffect(() => {
     const syncConfig = () => {
@@ -1319,8 +1338,18 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
             </div>
 
             {/* Footer */}
-            <div className="text-center text-[10.5px] text-[#94a3b8] font-medium pt-0.5 pb-1 tracking-tight">
-              AuraStream v{APP_VERSION} · This App Created by AAA. All rights reserved.
+            <div className="flex flex-col items-center justify-center gap-1.5 pt-1 pb-1">
+              <button
+                type="button"
+                onClick={handleCheckUpdate}
+                disabled={checkingUpdate}
+                className="px-3 py-1 rounded-full bg-slate-200/80 dark:bg-neutral-800 text-[10.5px] font-bold text-[#64748b] dark:text-neutral-300 hover:text-primary pressable disabled:opacity-50 transition-colors"
+              >
+                {checkingUpdate ? "Checking for Updates..." : "Check for Updates"}
+              </button>
+              <div className="text-center text-[10.5px] text-[#94a3b8] font-medium tracking-tight">
+                AuraStream v{APP_VERSION} · This App Created by AAA. All rights reserved.
+              </div>
             </div>
           </div>
         ) : view === "downloads" ? (
@@ -2917,6 +2946,9 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
         totalEpisodes={batchSheet.totalEpisodes}
         episodeNumbers={batchSheet.episodeNumbers}
       />
+
+      {/* In-App Update Modal */}
+      <UpdateModal info={updateInfo} onClose={() => setUpdateInfo(null)} />
     </div>
   );
 }

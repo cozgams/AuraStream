@@ -2776,6 +2776,12 @@ export async function executeBatchDownload(
       return [];
     };
     const episodeIds = unDownloaded.map((ep) => `${videoId}_${ep}`);
+
+    // Background prefetch real subtitles for batch episodes so English CC is available offline
+    for (const ep of unDownloaded) {
+      void getSubtitlesForEpisode(videoId, ep, title).catch(() => {});
+    }
+
     await invoke("native_download_enqueue", {
       items: unDownloaded.map((ep) => ({
         videoId,

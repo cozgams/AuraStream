@@ -145,7 +145,7 @@ export default function Player({
         preferManagedMediaSource: false,
         autoStartLoad: isOfflineLocal || activity.isActive(),
         startFragPrefetch: true,
-        progressive: true,
+        progressive: !isOfflineLocal,
         capLevelToPlayerSize: true,
         startPosition: resume?.time ?? -1,
         lowLatencyMode: false,

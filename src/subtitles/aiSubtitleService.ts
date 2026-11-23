@@ -2,6 +2,7 @@ import type { AICaptionConfig, SubtitleCue, SubtitleTrack, SubtitleStyleConfig }
 import { normalizeCueText, parseVtt } from "./vttParser";
 import { translateTrackToEnglish } from "./translator";
 import { LOCAL, isLocalMedia } from "../api";
+import { readStorage, STORAGE_KEYS as APP_STORAGE_KEYS } from "../storage";
 import { parseExtXKey, parseHlsIv, sequenceToIv } from "../offline/exportService";
 import { decodeAacToWav16k, extractAacFromTs, isMpegTs } from "./tsAudioExtractor";
 
@@ -875,7 +876,7 @@ export async function getSubtitlesForEpisode(
 
   // 2. Check offline downloads metadata (only non-procedural cues)
   try {
-    const rawOffline = localStorage.getItem("aurastream_offline_episodes_v1");
+    const rawOffline = readStorage(APP_STORAGE_KEYS.downloads) || localStorage.getItem("aurastream_offline_episodes_v1");
     if (rawOffline) {
       const list = JSON.parse(rawOffline);
       const offlineItem = Array.isArray(list)
