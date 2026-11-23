@@ -1248,7 +1248,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                           {dramaTitle}
                         </div>
                         <div className="text-[10px] text-[#64748b] dark:text-neutral-400 truncate">
-                          {isFinished ? "Ended" : `${epCount} ${epCount === 1 ? "ep" : "eps"}`} · Ep. {h.ep}
+                          {isFinished ? "Finished" : `${epCount} ${epCount === 1 ? "ep" : "eps"}`} · Ep. {h.ep}
                         </div>
                       </div>
                     );
@@ -2632,7 +2632,8 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                       title={c.title}
                       cover={c.cover}
                       score={c.score}
-                      badge={c.is_finished ? "Ended" : `${c.episode_count} eps`}
+                      badge={c.is_finished ? "Finished" : `${c.episode_count} eps`}
+                      isFinished={c.is_finished}
                       subtitle={c.tags?.slice(0, 2).map(formatDramaTag).join(" · ")}
                       progress={progress ? `Ep. ${progress.ep} · ${fmtTime(progress.t)}` : undefined}
                       onOpen={() =>

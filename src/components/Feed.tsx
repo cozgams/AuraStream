@@ -1522,7 +1522,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       onKeyDownCapture={() => { if (isDesktop || fs) wake(); }}>
       <div className="absolute inset-0" inert={controlsLocked}>
       {/* Ambient glow background */}
-      {!isDesktop && posterUrl && (
+      {active && !isDesktop && posterUrl && (
         <div className="absolute inset-0 scale-110 blur-3xl opacity-25 pointer-events-none">
           <Image src={posterUrl} alt="" className="w-full h-full object-cover" />
         </div>
@@ -2306,6 +2306,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           visible={active && !idle}
           seekEnabled={active && !controlsLocked}
           seekKey={playKey}
+          episodeHint={episodes.length > 1 ? `Ep. ${curEp} / ${episodes.length}` : undefined}
           nextDisabled={!nextEpObj && index >= videoIds.length - 1}
           nextTitle={nextEpObj ? `${t("player.next_ep")} ${nextEpObj.ep_num}` : `${t("player.next")} ↓`}
           swipeEp={swipeEp}
@@ -2390,6 +2391,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               {paused ? <IPlayF size={18} /> : <IPauseF size={17} />}
             </Button>
             <span className="shrink-0 text-[12px] font-semibold hg-ink-2 tabular-nums">{fmtTime(time)}</span>
+            {paused && episodes.length > 1 && (
+              <span className="shrink-0 px-2 py-0.5 rounded-full bg-white/15 text-white/90 text-[11px] font-bold tracking-tight">
+                {`Ep. ${curEp} / ${episodes.length}`}
+              </span>
+            )}
             <Button
               onClick={() => {
                 if (speedLock) { setSpeedLock(false); return; }

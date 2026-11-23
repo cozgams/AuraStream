@@ -11,14 +11,14 @@ function ScoreBadge({ score }: { score: number }) {
   </span> : null;
 }
 
-export function MediaCard({ title, cover, subtitle, badge, progress, score, priority = false, onOpen }: {
-  title: string; cover: string; subtitle?: string; badge?: string; progress?: string; score?: number; priority?: boolean; onOpen: () => void;
+export function MediaCard({ title, cover, subtitle, badge, isFinished, progress, score, priority = false, onOpen }: {
+  title: string; cover: string; subtitle?: string; badge?: string; isFinished?: boolean; progress?: string; score?: number; priority?: boolean; onOpen: () => void;
 }) {
   const displayTitle = formatDramaTitle(title);
   return <Button onClick={onOpen} className="ios-poster" aria-label={displayTitle}>
     <span className={`ios-poster-art ${badge ? "has-poster-badge" : ""}`}>
       <Img src={cover} alt="" eager={priority} />
-      {badge && <span className="ios-poster-badge">{badge}</span>}
+      {badge && <span className={`ios-poster-badge ${isFinished ? "is-finished" : ""}`}>{badge}</span>}
       {typeof score === "number" && <ScoreBadge score={score} />}
       {progress && <span className="ios-poster-progress"><IPlayF size={12} />{progress}</span>}
       <span className="ios-poster-play" aria-hidden="true"><IPlayF size={23} /></span>
@@ -32,7 +32,8 @@ export function WaterfallCard({ v, onOpen, priority = false }: { v: VideoCard; o
   const tagsStr = v.tags?.slice(0, 2).map(formatDramaTag).join(" · ");
   const authorStr = v.author?.name ? formatDramaAuthor(v.author.name) : "AAA";
   return <MediaCard title={v.title} cover={v.cover} onOpen={onOpen} priority={priority} score={v.score}
-    badge={v.is_finished ? "Completed" : `Ep. ${v.episode_count}`}
+    badge={v.is_finished ? "Finished" : `Ep. ${v.episode_count}`}
+    isFinished={v.is_finished}
     subtitle={tagsStr || authorStr}
     progress={`${fmt(v.hot)} plays`} />;
 }
@@ -49,7 +50,8 @@ export function RowCard({ v, onOpen }: { v: VideoCard; onOpen: () => void }) {
   const tag0 = v.tags?.[0] ? formatDramaTag(v.tags[0]) : "Drama";
   const tagsStr = v.tags?.slice(0, 2).map(formatDramaTag).join(" · ");
   return <div className="ios-row-card"><MediaCard title={v.title} cover={v.cover} score={v.score} onOpen={onOpen}
-    badge={v.is_finished ? "Completed" : `${v.episode_count} Eps`}
+    badge={v.is_finished ? "Finished" : `${v.episode_count} Eps`}
+    isFinished={v.is_finished}
     subtitle={tagsStr || tag0 || "AuraStream"} />
   </div>;
 }

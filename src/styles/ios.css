@@ -158,9 +158,11 @@ html.theme-light[data-accent="violet"] {
 .ios-media-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px 14px; align-items:start; }
 .ios-media-grid.is-wide { grid-template-columns:repeat(auto-fill,minmax(164px,1fr)); gap:28px 22px; }
 .ios-poster { display:flex; flex-direction:column; align-items:stretch; text-align:left; padding:0; width:100%; min-width:0; background:none; border:0; border-radius:18px; }
-.ios-poster-art { position:relative; display:block; width:100%; aspect-ratio:3/4; border-radius:18px; overflow:hidden; background:var(--p-s3); box-shadow:0 4px 12px rgb(0 0 0 / .06); transform:translateZ(0); }
+.ios-poster-art { position:relative; display:block; width:100%; aspect-ratio:3/4; border-radius:18px; overflow:hidden; background:var(--p-s3); box-shadow:0 4px 12px rgb(0 0 0 / .06); isolation:isolate; }
 .ios-poster-art::after { content:""; position:absolute; inset:0; pointer-events:none; border-radius:inherit; box-shadow:inset 0 0 0 .5px rgb(0 0 0 / .10); }
-.ios-poster-badge { position:absolute; top:9px; left:9px; max-width:calc(100% - 18px); padding:5px 8px; background:rgb(20 20 25 / .74); color:#fff; border:1px solid rgb(255 255 255 / .22); border-radius:999px; font-size:12px; line-height:1.25;  }
+.ios-poster-badge { position:absolute; top:9px; left:9px; max-width:calc(100% - 18px); padding:5px 8px; background:rgb(20 20 25 / .74); color:#fff; border:1px solid rgb(255 255 255 / .22); border-radius:999px; font-size:12px; line-height:1.25; font-weight:600; }
+.ios-poster-badge.is-finished { background:linear-gradient(135deg,#059669,#10b981); border-color:transparent; color:#fff; }
+.ios-poster-flag.is-finished { background:#059669; color:#fff; }
 .ios-poster-progress { position:absolute; inset:auto 0 0; display:flex; align-items:center; gap:4px; padding:24px 12px 11px; background:linear-gradient(transparent,rgb(0 0 0 / .8)); color:#fff; font-size:12px; }
 .ios-poster-play { position:absolute; left:calc(50% - 25px); top:calc(50% - 25px); display:grid; place-items:center; width:50px; height:50px; border-radius:50%; color:#fff; background:rgb(20 20 25 / .6); border:1px solid rgb(255 255 255 / .35);  opacity:0; transition:opacity .16s; }
 .ios-poster:hover .ios-poster-play,.ios-poster:focus-visible .ios-poster-play { opacity:1; }

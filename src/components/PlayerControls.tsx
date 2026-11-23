@@ -19,6 +19,7 @@ type Props = {
   visible?: boolean;
   seekEnabled?: boolean;
   seekKey?: string;
+  episodeHint?: string;
   nextDisabled?: boolean;
   nextTitle?: string;
   swipeEp?: boolean;
@@ -40,7 +41,7 @@ const formatClock = (s: number) => fmtTime(Math.max(0, s || 0)).padStart(5, "0")
 
 export default function PlayerControls({
   paused, clock, duration, buffered = 0, rate, muted, volume, theater = false, fullscreen = false,
-  visible = true, seekEnabled = true, seekKey, nextDisabled = false, nextTitle = "Next", swipeEp = false, onToggle, onSeek, onSeekInteraction, onRate, onMute, onVolume, onLock, onTheater, onFullscreen, onNext, onToggleSwipe, onOpenCaptions,
+  visible = true, seekEnabled = true, seekKey, episodeHint, nextDisabled = false, nextTitle = "Next", swipeEp = false, onToggle, onSeek, onSeekInteraction, onRate, onMute, onVolume, onLock, onTheater, onFullscreen, onNext, onToggleSwipe, onOpenCaptions,
 }: Props) {
   const store = useStore();
   const { t } = store;
@@ -114,6 +115,11 @@ export default function PlayerControls({
           </Button>
         )}
         <span className="player-timecode"><span>{formatClock(seek.time)}</span><span className="player-time-separator">/</span>{formatClock(duration)}</span>
+        {fullscreen && paused && episodeHint && (
+          <span className="player-control-hint-badge px-2.5 py-0.5 rounded-full bg-white/10 text-white/90 text-[12px] font-semibold tracking-wide">
+            {episodeHint}
+          </span>
+        )}
         <div className="player-control-spacer" />
         <div className="player-speed-slot">
           <Button className={`player-control player-cc ${store.subtitleMode !== "off" ? "is-on" : ""}`} aria-label={t("captions.title")} aria-haspopup="menu" aria-expanded={ccOpen}
