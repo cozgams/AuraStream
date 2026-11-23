@@ -688,9 +688,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const setTab = useCallback((t: Tab) => { setTabRaw(t); setStack(s => s.length ? [] : s); }, []);
+  const setTab = useCallback((t: Tab) => {
+    setTabRaw((prev) => {
+      if (prev === t && t === "search") {
+        window.dispatchEvent(new Event("hg:search-reset"));
+      }
+      return t;
+    });
+    setStack((s) => (s.length ? [] : s));
+  }, []);
   const push = useCallback((pg: PageInput) => {
-    setStack((s) => [...s, { ...pg, key: `p${++seq}` } as Page]);
+    setStack((s) => {
+      if (s.length >= 8) {
+        return [...s.slice(-7), { ...pg, key: `p${++seq}` } as Page];
+      }
+      return [...s, { ...pg, key: `p${++seq}` } as Page];
+    });
   }, []);
   const pop = useCallback(() => setStack((s) => s.slice(0, -1)), []);
 

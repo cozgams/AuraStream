@@ -32,6 +32,39 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
   const [hotError, setHotError] = useState<string | null>(null);
   const hotBusy = useRef(false);
   const hotLoadedAt = useRef(0);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    const onReset = () => {
+      setQ("");
+      setSubmitted("");
+      setItems([]);
+      setPosts([]);
+      setErr(null);
+    };
+    window.addEventListener("hg:search-reset", onReset);
+    return () => window.removeEventListener("hg:search-reset", onReset);
+  }, []);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (!touchStartRef.current || e.changedTouches.length === 0) return;
+    const dx = e.changedTouches[0].clientX - touchStartRef.current.x;
+    const dy = e.changedTouches[0].clientY - touchStartRef.current.y;
+    touchStartRef.current = null;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      if (dx < 0 && tab === "video") {
+        changeTab("post");
+      } else if (dx > 0 && tab === "post") {
+        changeTab("video");
+      }
+    }
+  };
 
   useEffect(() => {
     if (active && !isMobile) inputRef.current?.focus();
@@ -295,7 +328,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
             </div>
           </>
         ) : (
-          <>
+          <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd} className="touch-pan-y">
             <SegmentedControl className="mt-1 mb-3" aria-label="Result Type" activeIndex={tab === "video" ? 0 : 1}>
               {([["video", "Dramas"], ["post", "Posts"]] as const).map(([k, label]) => (
                 <Button aria-pressed={tab === k} key={k} onClick={() => changeTab(k)}>{label}</Button>
@@ -333,7 +366,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
                 onAction={err ? () => run(submitted, 1) : () => push({ kind: "ranks" })}
               />
             )}
-          </>
+          </div>
         )}
       </div>
     </div>

@@ -42,9 +42,13 @@ static BASE_FILE: Lazy<RwLock<Option<PathBuf>>> = Lazy::new(|| RwLock::new(None)
 
 /// Current upstream base URL.
 pub fn base() -> String {
-    BASE.read()
+    let current = BASE.read()
         .map(|b| b.base.clone())
-        .unwrap_or_else(|_| DEFAULT_BASE.to_string())
+        .unwrap_or_else(|_| DEFAULT_BASE.to_string());
+    if current == "https://huangguoai.ai" || current == "https://api.huangguoai.com" || current == "https://mirror.huangguoai.com" {
+        return DEFAULT_BASE.to_string();
+    }
+    current
 }
 
 pub fn is_custom_line() -> bool {
@@ -78,6 +82,9 @@ fn persisted_base(text: &str) -> Option<String> {
 
 fn persisted_line(text: &str) -> Option<LineConfig> {
     let base = persisted_base(text)?;
+    if base == "https://huangguoai.ai" || base == "https://api.huangguoai.com" || base == "https://mirror.huangguoai.com" {
+        return Some(LineConfig::default());
+    }
     let value: Value = serde_json::from_str(text).ok()?;
     // Accept the fork's v2 format as well as legacy {base}. Only explicit v2
     // custom selections carry custom-origin consent across restarts.
