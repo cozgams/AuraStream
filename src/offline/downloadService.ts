@@ -9,8 +9,16 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { api, cover as getRemoteCoverUrl, isLocalMedia, LOCAL, logLine } from "../api";
 import { readStorage, writeStorage, STORAGE_KEYS } from "../storage";
-import { getSubtitlesForEpisode } from "../subtitles/aiSubtitleService";
-import { translateTrackToEnglish } from "../subtitles/translator";
+import {
+  getAICaptionConfig,
+  getSubtitlesForEpisode,
+  transcribeEpisodeWithAI,
+} from "../subtitles/aiSubtitleService";
+import {
+  containsForeignLanguage,
+  translateDialogueSync,
+  translateTrackToEnglish,
+} from "../subtitles/translator";
 import type { SubtitleCue } from "../subtitles/types";
 import type { PlayInfo } from "../types";
 import type { NativeExportBridge } from "./exportService";
@@ -239,6 +247,7 @@ function applyNativeDownloadSnapshot(payload: { queue?: unknown[]; completed?: u
         const quality = (
           c.quality === "hevc" ? "hevc" : c.quality === "standard" ? "standard" : "auto"
         ) as DownloadQuality;
+        const cues = Array.isArray(c.cues) ? (c.cues as SubtitleCue[]) : undefined;
         return {
           id,
           videoId,
@@ -252,6 +261,7 @@ function applyNativeDownloadSnapshot(payload: { queue?: unknown[]; completed?: u
           isHevc,
           hasLocalCover,
           quality,
+          cues,
           storage: "native" as const,
         };
       });
@@ -1806,7 +1816,7 @@ export async function startEpisodeDownload(
     }
   }
 
-  // Native Rust background downloader path (survives app switch / backgrounding cleanly)
+    // Native Rust background downloader path (survives app switch / backgrounding cleanly)
   if (isNativeRustDownloaderAvailable()) {
     let cues: SubtitleCue[] = [];
     try {
@@ -1814,6 +1824,16 @@ export async function startEpisodeDownload(
       if (track && track.source !== "none" && track.cues.length > 0) {
         const translated = await translateTrackToEnglish(track);
         cues = translated.cues;
+      } else if (streamUrl) {
+        const aiConfig = getAICaptionConfig();
+        if (aiConfig.provider !== "none" || aiConfig.geminiKey || aiConfig.groqKey) {
+          try {
+            const aiTrack = await transcribeEpisodeWithAI(videoId, episode, streamUrl);
+            if (aiTrack?.cues?.length) cues = aiTrack.cues;
+          } catch {
+            // ignore AI generation error
+          }
+        }
       }
     } catch {
       // ignore subtitle fetch error
@@ -1926,6 +1946,16 @@ export async function startEpisodeDownload(
       if (track && track.source !== "none" && track.cues.length > 0) {
         const translated = await translateTrackToEnglish(track);
         cues = translated.cues;
+      } else if (streamUrl) {
+        const aiConfig = getAICaptionConfig();
+        if (aiConfig.provider !== "none" || aiConfig.geminiKey || aiConfig.groqKey) {
+          try {
+            const aiTrack = await transcribeEpisodeWithAI(videoId, episode, streamUrl);
+            if (aiTrack?.cues?.length) cues = aiTrack.cues;
+          } catch {
+            // ignore AI generation error
+          }
+        }
       }
     } catch {
       // Subtitle fallback if offline or request failed
@@ -2770,7 +2800,17 @@ export async function executeBatchDownload(
         if (!raw || raw.includes('"procedural"') || raw.includes('"mock"')) return [];
         const parsed = JSON.parse(raw);
         if (parsed && parsed.source !== "procedural" && parsed.source !== "mock" && Array.isArray(parsed.cues)) {
-          return parsed.cues;
+          return (parsed.cues as SubtitleCue[]).map((cue) => {
+            if (cue.en && containsForeignLanguage(cue.en)) {
+              const tr = translateDialogueSync(cue.en);
+              return { ...cue, en: tr };
+            }
+            if (!cue.en && cue.zh) {
+              const tr = translateDialogueSync(cue.zh);
+              return { ...cue, en: tr, zh: cue.zh };
+            }
+            return cue;
+          });
         }
       } catch {
         // ignore

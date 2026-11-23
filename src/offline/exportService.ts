@@ -2,7 +2,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { LOCAL } from "../api";
 import { formatDramaTitle } from "../subtitles/dramaTranslator";
 import { getOfflineEpisodes } from "./downloadService";
-import { exportToSrt, exportToVtt, getSubtitlesForEpisode } from "../subtitles/aiSubtitleService";
+import {
+  exportToSrt,
+  exportToVtt,
+  getAICaptionConfig,
+  getSubtitlesForEpisode,
+  transcribeEpisodeWithAI,
+} from "../subtitles/aiSubtitleService";
+import { translateTrackToEnglish } from "../subtitles/translator";
 
 export interface StorageInfo {
   hasSdCard: boolean;
@@ -113,6 +120,25 @@ export async function processSubtitleExport(
         source: "native_track",
         generatedAt: Date.now(),
       };
+    }
+    // If no cues yet, and streamUrl is provided and AI caption provider is configured, attempt AI transcription
+    if ((!track?.cues?.length) && streamUrl) {
+      const aiConfig = getAICaptionConfig();
+      if (aiConfig.provider !== "none" || aiConfig.geminiKey || aiConfig.groqKey) {
+        try {
+          track = await transcribeEpisodeWithAI(videoId, episode, streamUrl);
+        } catch {
+          // ignore error
+        }
+      }
+    }
+    // If English export is requested and track has cues, translate foreign cues to English
+    if (track?.cues?.length && lang === "en") {
+      try {
+        track = await translateTrackToEnglish(track);
+      } catch {
+        // keep existing track
+      }
     }
     const cleanTitle = formatDramaTitle(title || `Episode_${episode}`);
     const safeTitle = sanitizeFileName(cleanTitle);

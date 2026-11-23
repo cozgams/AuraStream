@@ -305,14 +305,15 @@ export default function SubtitleOverlay({
     if (liveTranslated[rawEnglish]) {
       rawEnglish = liveTranslated[rawEnglish];
     } else {
-      const syncTr = translateDialogueSync(rawEnglish);
+      const originalForeign = rawEnglish;
+      const syncTr = translateDialogueSync(originalForeign);
       if (syncTr && !containsForeignLanguage(syncTr)) {
         rawEnglish = syncTr;
       }
-      translateDialogueToEnglish(rawEnglish)
+      translateDialogueToEnglish(originalForeign)
         .then((res) => {
-          if (res && res !== rawEnglish && !containsForeignLanguage(res)) {
-            setLiveTranslated((prev) => ({ ...prev, [rawEnglish]: res }));
+          if (res && res !== originalForeign && !containsForeignLanguage(res)) {
+            setLiveTranslated((prev) => ({ ...prev, [originalForeign]: res }));
           }
         })
         .catch(() => {});
