@@ -14,7 +14,7 @@ const HOT_TAGS = ["Urban", "Revenge", "Costume", "System", "Romance", "Campus", 
 const DISCOVERY_THEMES = ["CEO Romance", "Secret Identity", "Revenge", "Time Travel", "Martial Arts", "Family Drama", "Undercover", "Second Chance"];
 
 export default function Search({ active, wide }: { active: boolean; wide: boolean }) {
-  const { push, searchHist, addSearch, removeSearch, clearSearchHist, toast, t } = useStore();
+  const { push, searchHist, addSearch, removeSearch, clearSearchHist, toast, t, lineEpoch } = useStore();
   const [q, setQ] = useState("");
   const [submitted, setSubmitted] = useState("");
   const [tab, setTab] = useState<"video" | "post">("video");
@@ -56,6 +56,12 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
   useEffect(() => {
     if (active && Date.now() - hotLoadedAt.current > 60_000) void refreshHot();
   }, [active]);
+
+  useEffect(() => {
+    if (!lineEpoch || !active) return;
+    hotLoadedAt.current = 0;
+    void refreshHot();
+  }, [lineEpoch, active]);
 
   const run = async (keyword: string, p: number, kind: "video" | "post" = tab) => {
     if (p > 1 && (busy.current || p > pages)) return;
@@ -156,9 +162,23 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
                   {hotLoading ? <Loader className="w-3 h-3" /> : <IRefresh size={12} />}
                 </Button>
               </div>
-              {hotError && <p role="status" className="mt-2 text-[12px] text-mut leading-relaxed">
-                {hotVideos.length > 0 ? t("search.hot_error_refresh") : t("search.hot_error")}
-              </p>}
+              {hotError && (
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <p role="status" className="text-[12px] text-mut leading-relaxed">
+                    {hotVideos.length > 0 ? t("search.hot_error_refresh") : t("search.hot_error")}
+                  </p>
+                  <Button
+                    onClick={async () => {
+                      await api.lineReset();
+                      window.dispatchEvent(new Event("hg:line-changed"));
+                      void refreshHot();
+                    }}
+                    className="text-[11px] text-primary shrink-0 pressable"
+                  >
+                    Reset Line
+                  </Button>
+                </div>
+              )}
               {hotVideos.length > 0 ? (
                 <ol className="ios-search-hot-grid mt-3" aria-busy={hotLoading}>
                   {hotVideos.map((video, i) => (

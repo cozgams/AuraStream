@@ -38,13 +38,58 @@ fn video_id_from_href(href: &str) -> Option<i64> {
 
 fn parse_items(html: &str) -> Result<Vec<HotVideo>, String> {
     let document = Document::from(html);
+    let mut seen = HashSet::new();
+    let mut items = Vec::new();
+
+    // 1. Modern selector: .hg-search-suggest__hot-item
+    let modern_items = document.select(".hg-search-suggest__hot-item");
+    if !modern_items.is_empty() {
+        for node in modern_items.iter() {
+            let anchor = node.select("a.hg-search-suggest__hot-title, a[href^='/video/']");
+            let href = anchor.attr("href");
+            let Some(video_id) = href.and_then(|h| video_id_from_href(&h)) else {
+                continue;
+            };
+            if seen.contains(&video_id) {
+                continue;
+            }
+
+            let mut title = normalized_text(anchor);
+            if title.is_empty() {
+                title = node
+                    .attr("data-search-hot")
+                    .map(|t| normalized_string(&t))
+                    .unwrap_or_default();
+            }
+            let mut plays = normalized_text(node.select(".hg-search-suggest__heat, .hg-search-suggest__plays"));
+            if plays.is_empty() {
+                plays = "Hot".to_string();
+            }
+            if title.is_empty() {
+                continue;
+            }
+
+            seen.insert(video_id);
+            items.push(HotVideo {
+                video_id,
+                title,
+                plays,
+            });
+            if items.len() == MAX_ITEMS {
+                return Ok(items);
+            }
+        }
+        if !items.is_empty() {
+            return Ok(items);
+        }
+    }
+
+    // 2. Legacy fallback selector: section.hg-search-hot
     let sections = document.select("section.hg-search-hot");
-    if sections.is_empty() {
+    if sections.is_empty() && modern_items.is_empty() {
         return Err("Trending section not found on search page".into());
     }
 
-    let mut seen = HashSet::new();
-    let mut items = Vec::new();
     for section in sections.iter() {
         for anchor in section.select("a.hg-search-hot__item").iter() {
             let Some(video_id) = anchor
@@ -220,5 +265,31 @@ mod tests {
             parse_items("<section class=\"hg-search-hot\"></section>").unwrap_err(),
             "No available entries on trending ranking"
         );
+    }
+
+    #[test]
+    fn parses_modern_upstream_suggest_hot_format() {
+        let html = r#"
+            <div class="hg-search-suggest__hot">
+              <div class="hg-search-suggest__hot-item" data-search-hot="First Drama" data-rank-hot="1">
+                <span class="hg-search-suggest__rank is-top">1</span>
+                <a class="hg-search-suggest__hot-title" href="/video/15341/">First Drama</a>
+                <span class="hg-search-suggest__heat">91.3w</span>
+              </div>
+              <div class="hg-search-suggest__hot-item" data-search-hot="Second Drama" data-rank-hot="2">
+                <span class="hg-search-suggest__rank is-top">2</span>
+                <a class="hg-search-suggest__hot-title" href="/video/15342/">Second Drama</a>
+                <span class="hg-search-suggest__heat">85.0w</span>
+              </div>
+            </div>
+        "#;
+        let items = parse_items(html).unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].video_id, 15341);
+        assert_eq!(items[0].title, "First Drama");
+        assert_eq!(items[0].plays, "91.3w");
+        assert_eq!(items[1].video_id, 15342);
+        assert_eq!(items[1].title, "Second Drama");
+        assert_eq!(items[1].plays, "85.0w");
     }
 }

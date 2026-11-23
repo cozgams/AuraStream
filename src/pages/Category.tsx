@@ -194,10 +194,33 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
 }
 
 function PreviewStatus({ name, loading, error, onRetry }: { name: string; loading: boolean; error?: string; onRetry: () => void }) {
-  return <div className="h-[150px] flex flex-col justify-center items-start gap-2 text-[12px] text-dim px-1">
-    <span>{loading ? "Loading…" : error || "No content"}</span>
-    {!loading && error && <Button aria-label={`Retry ${name}`} onClick={onRetry} className="text-primary pressable">Retry</Button>}
-  </div>;
+  const isHttpError = Boolean(error && /HTTP (404|500|502|503|504)/i.test(error));
+
+  return (
+    <div className="h-[150px] flex flex-col justify-center items-start gap-2 text-[12px] text-dim px-1">
+      <span>{loading ? "Loading…" : error || "No content"}</span>
+      {!loading && error && (
+        <div className="flex items-center gap-2">
+          <Button aria-label={`Retry ${name}`} onClick={onRetry} className="text-primary pressable">
+            Retry
+          </Button>
+          {isHttpError && (
+            <Button
+              aria-label="Reset to Official Line"
+              onClick={async () => {
+                await api.lineReset();
+                window.dispatchEvent(new Event("hg:line-changed"));
+                onRetry();
+              }}
+              className="text-mut hover:text-on underline pressable"
+            >
+              Reset to Official Line
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /* ================= Channel Detail Page ================= */
