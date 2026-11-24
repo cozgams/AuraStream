@@ -342,12 +342,6 @@ pub async fn check_update() -> Result<Value, String> {
     .await
     {
         let status = resp.status();
-        if status.as_u16() == 404 {
-            return Ok(json!({
-                "current": current, "latest": "", "has_update": false,
-                "url": format!("https://github.com/{REPO}/releases"),
-            }));
-        }
         if status.is_success() {
             if let Ok(v) = resp.json::<Value>().await {
                 let tag = v
@@ -369,8 +363,8 @@ pub async fn check_update() -> Result<Value, String> {
                         found
                     }
                 };
-                let assets = v.get("assets").and_then(Value::as_array).cloned().unwrap_or_default();
-                let asset = assets
+                let raw_assets = v.get("assets").and_then(Value::as_array).cloned().unwrap_or_default();
+                let matching_assets: Vec<(String, String, Option<u64>)> = raw_assets
                     .iter()
                     .filter_map(|a| {
                         let name = a.get("name").and_then(Value::as_str)?;
@@ -379,10 +373,18 @@ pub async fn check_update() -> Result<Value, String> {
                         Some((name.to_string(), url.to_string(), size))
                     })
                     .filter(|(n, _, _)| asset_rank(n) > 0)
-                    .max_by_key(|(n, _, _)| asset_rank(n));
+                    .collect();
+                let asset = matching_assets
+                    .iter()
+                    .max_by_key(|(n, _, _)| asset_rank(n))
+                    .cloned();
                 let resolved_asset = asset
                     .map(|(name, url, size)| json!({ "name": name, "url": url, "size": size }))
                     .or_else(|| fallback_android_asset(&latest, &tag));
+                let all_assets: Vec<Value> = matching_assets
+                    .into_iter()
+                    .map(|(name, url, size)| json!({ "name": name, "url": url, "size": size }))
+                    .collect();
                 return Ok(json!({
                     "current": current,
                     "latest": latest,
@@ -390,6 +392,7 @@ pub async fn check_update() -> Result<Value, String> {
                     "arch": std::env::consts::ARCH,
                     "has_update": !latest.is_empty() && is_newer(&latest, &current),
                     "asset": resolved_asset,
+                    "assets": all_assets,
                     "url": html,
                     "name": v.get("name").and_then(|x| x.as_str()).unwrap_or(""),
                     "published_at": v.get("published_at").and_then(|x| x.as_str()).unwrap_or(""),
@@ -404,10 +407,7 @@ pub async fn check_update() -> Result<Value, String> {
     let (status, base_target, location) =
         crate::net::get_redirect_location(&web_url, timeout, Some(&ua)).await?;
     if status.as_u16() == 404 {
-        return Ok(json!({
-            "current": current, "latest": "", "has_update": false,
-            "url": format!("https://github.com/{REPO}/releases"),
-        }));
+        return Err("Releases unreachable (HTTP 404 — repository may be private or have no published releases)".into());
     }
     if let Some(loc) = location {
         let resolved = crate::network_policy::redirect_target(&base_target, &loc)?;

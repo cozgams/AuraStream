@@ -3,6 +3,27 @@ import type { NativeExportBridge } from "./offline/exportService";
 
 const AUTO_UPDATE_KEY = "aurastream_auto_update_check_v1";
 const SKIPPED_VERSION_KEY = "aurastream_skipped_update_v1";
+let availableUpdateInfo: UpdateInfo | null = null;
+
+export function getAvailableUpdateInfo(): UpdateInfo | null {
+  return availableUpdateInfo;
+}
+
+export function setAvailableUpdateInfo(info: UpdateInfo | null): void {
+  availableUpdateInfo = info?.has_update ? info : null;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("aurastream:update-available", { detail: availableUpdateInfo }));
+  }
+}
+
+export function subscribeAvailableUpdate(listener: (info: UpdateInfo | null) => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const handler = (ev: Event) => {
+    listener((ev as CustomEvent<UpdateInfo | null>).detail ?? availableUpdateInfo);
+  };
+  window.addEventListener("aurastream:update-available", handler);
+  return () => window.removeEventListener("aurastream:update-available", handler);
+}
 
 export type OtaProgressEvent = {
   status: "downloading" | "downloaded" | "cancelled" | "error";
@@ -108,6 +129,16 @@ export function resolveBestUpdateAsset(
       name: info.asset.name,
       url: info.asset.url,
       size: info.asset.size ?? null,
+      abi,
+    };
+  }
+
+  const matched = (info.assets || []).find((item) => item?.url && assetMatchesAbi(item.name, abi));
+  if (matched) {
+    return {
+      name: matched.name,
+      url: matched.url,
+      size: matched.size ?? null,
       abi,
     };
   }

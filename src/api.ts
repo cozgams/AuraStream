@@ -324,9 +324,13 @@ export const api = {
 
 /* ── Update Checking ───────────────────────────────────── */
 
+export type UpdateAsset = { name: string; url: string; size?: number | null };
+
 export type UpdateInfo = {
   /** Platform-specific update asset */
-  asset?: { name: string; url: string; size?: number | null } | null;
+  asset?: UpdateAsset | null;
+  /** All release assets matching this OS so exact ABI URL & size can be resolved */
+  assets?: UpdateAsset[];
   current: string;
   latest: string;
   tag?: string;

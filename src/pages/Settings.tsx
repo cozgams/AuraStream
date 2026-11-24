@@ -28,7 +28,7 @@ import {
   ISettings,
 } from "../icons";
 import UpdateModal from "../components/UpdateModal";
-import { isAutoUpdateCheckEnabled, setAutoUpdateCheckEnabled, isAndroidNativeOtaSupported } from "../otaUpdater";
+import { getAvailableUpdateInfo, isAutoUpdateCheckEnabled, setAutoUpdateCheckEnabled, setAvailableUpdateInfo, isAndroidNativeOtaSupported, subscribeAvailableUpdate } from "../otaUpdater";
 import { getAndroidPermissionsStatus, type AndroidPermissionsStatus } from "../offline/exportService";
 import { clearSubtitleCache } from "../subtitles/aiSubtitleService";
 import {
@@ -150,6 +150,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
   const [clearing, setClearing] = useState(false);
   const [checking, setChecking] = useState(false);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo | null>(() => getAvailableUpdateInfo());
   const [autoUpdateOn, setAutoUpdateOn] = useState(() => isAutoUpdateCheckEnabled());
   const [androidPerms, setAndroidPerms] = useState<AndroidPermissionsStatus | null>(() => getAndroidPermissionsStatus());
   const playbackLog = usePlaybackLog();
@@ -176,6 +177,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
       setNextPreload(isNextEpisodePreloadEnabled());
     };
     const syncOtaCfg = () => setAutoUpdateOn(isAutoUpdateCheckEnabled());
+    const unsubAvailUpdate = subscribeAvailableUpdate(setAvailableUpdate);
     const refreshPerms = () => setAndroidPerms(getAndroidPermissionsStatus());
     const onVis = () => {
       if (document.visibilityState === "visible") refreshPerms();
@@ -187,6 +189,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
     window.addEventListener("aurastream:permissions-changed", refreshPerms);
     document.addEventListener("visibilitychange", onVis);
     return () => {
+      unsubAvailUpdate();
       window.removeEventListener("aurastream:storage-config-changed", syncStorageCfg);
       window.removeEventListener("aurastream:playback-config-changed", syncPlaybackCfg);
       window.removeEventListener("aurastream:ota-config-changed", syncOtaCfg);
@@ -219,13 +222,19 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
   }, []);
 
   const checkUpdate = async () => {
+    if (availableUpdate?.has_update && typeof navigator !== "undefined" && navigator.onLine === false) {
+      setUpdate(availableUpdate);
+      return;
+    }
     setChecking(true);
     try {
       const info = await api.checkUpdate();
+      setAvailableUpdateInfo(info?.has_update ? info : null);
       if (info.has_update) setUpdate(info);
       else toast(`Already on latest version v${info.current}`, "ok");
     } catch (e) {
-      toast(errorMessage(e, "Failed to check for updates"), "info");
+      if (availableUpdate?.has_update) setUpdate(availableUpdate);
+      else toast(errorMessage(e, "Failed to check for updates"), "info");
     } finally {
       setChecking(false);
     }
@@ -842,9 +851,15 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
               disabled={checking}
               onClick={checkUpdate}
               badge={
-                <span className="px-2 py-0.5 rounded-full bg-s2 text-primary font-mono text-[11px] font-semibold">
-                  v{APP_VERSION}
-                </span>
+                availableUpdate?.has_update ? (
+                  <span className="px-2 py-0.5 rounded-full bg-primary/15 text-primary font-mono text-[11px] font-bold border border-primary/25">
+                    v{availableUpdate.latest} Ready
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-full bg-s2 text-primary font-mono text-[11px] font-semibold">
+                    v{APP_VERSION}
+                  </span>
+                )
               }
             />
 

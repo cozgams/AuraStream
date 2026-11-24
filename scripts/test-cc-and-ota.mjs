@@ -139,6 +139,20 @@ try {
     const arm64Asset = otaMod.resolveBestUpdateAsset(rateLimitedInfo, "arm64");
     const armAsset = otaMod.resolveBestUpdateAsset(rateLimitedInfo, "arm");
     const x86Asset = otaMod.resolveBestUpdateAsset(rateLimitedInfo, "x86_64");
+    const multiAssetInfo = {
+      current: "0.1.54",
+      latest: "0.1.55",
+      tag: "v0.1.55",
+      has_update: true,
+      url: "https://github.com/cozgams/AuraStream/releases/tag/v0.1.55",
+      asset: { name: "AuraStream_0.1.55_arm.apk", url: "https://github.com/cozgams/AuraStream/releases/download/v0.1.55/AuraStream_0.1.55_arm.apk", size: 11800000 },
+      assets: [
+        { name: "AuraStream_0.1.55_arm.apk", url: "https://github.com/cozgams/AuraStream/releases/download/v0.1.55/AuraStream_0.1.55_arm.apk", size: 11800000 },
+        { name: "AuraStream_0.1.55_arm64.apk", url: "https://github.com/cozgams/AuraStream/releases/download/v0.1.55/AuraStream_0.1.55_arm64.apk", size: 14400000 },
+        { name: "AuraStream_0.1.55_x86_64.apk", url: "https://github.com/cozgams/AuraStream/releases/download/v0.1.55/AuraStream_0.1.55_x86_64.apk", size: 15200000 },
+      ],
+    };
+    const exactArm64Asset = otaMod.resolveBestUpdateAsset(multiAssetInfo, "arm64");
 
     // F. Offline zero-internet safeguards: Smart Download defaults OFF & preloadEpisode skips downloaded ep
     const smartDefault = dlMod.isSmartDownloadEnabled();
@@ -269,6 +283,7 @@ try {
       arm64Url: arm64Asset?.url,
       armUrl: armAsset?.url,
       x86Url: x86Asset?.url,
+      exactArm64Size: exactArm64Asset?.size,
       smartDefault,
       preloadedDownloaded,
       playCalls: window.__playCalls,
@@ -323,6 +338,7 @@ try {
     results.x86Url,
     `https://github.com/cozgams/AuraStream/releases/download/v${pkgVersion}/AuraStream_${pkgVersion}_x86_64.apk`
   );
+  assert.equal(results.exactArm64Size, 14400000, "Multi-ABI release asset list must preserve exact APK byte size");
   assert.equal(results.smartDefault, false, "Smart Auto-Download must default OFF to save data");
   assert.equal(results.preloadedDownloaded, false, "preloadEpisode must skip already-downloaded episodes");
   assert.equal(results.playCalls, 0, "preloadEpisode must make 0 api.play calls for downloaded episodes");

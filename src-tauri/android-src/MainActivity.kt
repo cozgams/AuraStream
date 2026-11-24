@@ -1097,7 +1097,8 @@ class MainActivity : TauriActivity() {
       }
       return host == "objects.githubusercontent.com" ||
         host == "release-assets.githubusercontent.com" ||
-        host == "github-releases.githubusercontent.com"
+        host == "github-releases.githubusercontent.com" ||
+        host.endsWith(".githubusercontent.com")
     }
 
     @JavascriptInterface
@@ -1318,6 +1319,23 @@ class MainActivity : TauriActivity() {
             header[3] == 0x04.toByte()
           if (!validZip) {
             throw IllegalStateException("Downloaded file is not a valid APK package")
+          }
+
+          val pkgInfo = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+              activity.packageManager.getPackageArchiveInfo(
+                partFile.absolutePath,
+                android.content.pm.PackageManager.PackageInfoFlags.of(0)
+              )
+            } else {
+              @Suppress("DEPRECATION")
+              activity.packageManager.getPackageArchiveInfo(partFile.absolutePath, 0)
+            }
+          } catch (_: Exception) {
+            null
+          }
+          if (pkgInfo == null || pkgInfo.packageName != activity.packageName) {
+            throw IllegalStateException("Downloaded file does not match ${activity.packageName}")
           }
 
           if (apkFile.exists()) apkFile.delete()

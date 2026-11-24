@@ -1,13 +1,14 @@
 import { Button, Surface } from "../components/ios/controls";
 import { Loader } from "../components/ios/effects";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, APP_VERSION, cover as getCoverUrl, fmtTime, isMobile, platform, type UpdateInfo } from "../api";
+import { api, APP_VERSION, cover as getCoverUrl, errorMessage, fmtTime, isMobile, platform, type UpdateInfo } from "../api";
 import type { Detail } from "../types";
 import { useStore } from "../store";
 import { Avatar, Empty, Modal, Toggle } from "../components/ui";
 import { MediaCard } from "../components/cards";
 import ExportSheet from "../components/ExportSheet";
 import UpdateModal from "../components/UpdateModal";
+import { getAvailableUpdateInfo, setAvailableUpdateInfo, subscribeAvailableUpdate } from "../otaUpdater";
 import { registerOverlayBack } from "../back";
 import {
   IBack,
@@ -197,18 +198,30 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
   const [permBannerDismissed, setPermBannerDismissed] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo | null>(() => getAvailableUpdateInfo());
+
+  useEffect(() => subscribeAvailableUpdate(setAvailableUpdate), []);
 
   const handleCheckUpdate = async () => {
+    if (availableUpdate?.has_update && typeof navigator !== "undefined" && navigator.onLine === false) {
+      setUpdateInfo(availableUpdate);
+      return;
+    }
     setCheckingUpdate(true);
     try {
       const res = await api.checkUpdate();
+      setAvailableUpdateInfo(res?.has_update ? res : null);
       if (res?.has_update) {
         setUpdateInfo(res);
       } else {
         toast("You are using the latest version of AuraStream", "ok");
       }
-    } catch {
-      toast("Unable to check for updates. Check connection.", "info");
+    } catch (e) {
+      if (availableUpdate?.has_update) {
+        setUpdateInfo(availableUpdate);
+      } else {
+        toast(errorMessage(e, "Unable to check for updates"), "info");
+      }
     } finally {
       setCheckingUpdate(false);
     }
@@ -1507,9 +1520,17 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                 type="button"
                 onClick={handleCheckUpdate}
                 disabled={checkingUpdate}
-                className="px-3 py-1 rounded-full bg-slate-200/80 dark:bg-neutral-800 text-[10.5px] font-bold text-[#64748b] dark:text-neutral-300 hover:text-primary pressable disabled:opacity-50 transition-colors"
+                className={`px-3 py-1 rounded-full text-[10.5px] font-bold pressable disabled:opacity-50 transition-colors ${
+                  availableUpdate?.has_update
+                    ? "bg-primary/15 text-primary border border-primary/30"
+                    : "bg-slate-200/80 dark:bg-neutral-800 text-[#64748b] dark:text-neutral-300 hover:text-primary"
+                }`}
               >
-                {checkingUpdate ? "Checking for Updates..." : "Check for Updates"}
+                {checkingUpdate
+                  ? "Checking for Updates..."
+                  : availableUpdate?.has_update
+                  ? `Update Ready: v${availableUpdate.latest}`
+                  : "Check for Updates"}
               </button>
               <div className="text-center text-[10.5px] text-[#94a3b8] font-medium tracking-tight">
                 AuraStream v{APP_VERSION} · This App Created by AAA. All rights reserved.

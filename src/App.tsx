@@ -16,7 +16,7 @@ import { TopicsPage, TopicPage, TagsPage, TagPage } from "./pages/Discover";
 import { FollowingPage, UserPage } from "./pages/User";
 import LoginModal from "./components/LoginModal";
 import UpdateModal from "./components/UpdateModal";
-import { getSkippedUpdateVersion, isAndroidNativeOtaSupported, isAutoUpdateCheckEnabled } from "./otaUpdater";
+import { getSkippedUpdateVersion, isAndroidNativeOtaSupported, isAutoUpdateCheckEnabled, setAvailableUpdateInfo } from "./otaUpdater";
 import { ToastHost } from "./components/ui";
 import { DesktopRail, DesktopTitleBar } from "./components/DesktopChrome";
 import ResizeHandles from "./components/ResizeHandles";
@@ -436,19 +436,30 @@ export default function App() {
     if (!isAndroidNativeOtaSupported() && (import.meta.env.DEV || !hasTauri)) return;
 
     let alive = true;
-    const timer = window.setTimeout(() => {
-      if (!alive || (typeof navigator !== "undefined" && navigator.onLine === false)) return;
+    let checked = false;
+    const runCheck = () => {
+      if (!alive || checked || (typeof navigator !== "undefined" && navigator.onLine === false)) return;
       api.checkUpdate()
         .then((info) => {
-          if (!alive || !info?.has_update || !info.latest) return;
+          if (!alive) return;
+          checked = true;
+          setAvailableUpdateInfo(info?.has_update ? info : null);
+          if (!info?.has_update || !info.latest) return;
           if (info.latest === getSkippedUpdateVersion()) return;
           setStartupUpdate(info);
         })
         .catch(() => {});
-    }, 3500);
+    };
+
+    const timer = window.setTimeout(runCheck, 3500);
+    const onOnline = () => {
+      if (!checked) runCheck();
+    };
+    window.addEventListener("online", onOnline);
     return () => {
       alive = false;
       window.clearTimeout(timer);
+      window.removeEventListener("online", onOnline);
     };
   }, []);
 
