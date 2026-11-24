@@ -7,12 +7,29 @@ import { useStore } from "../store";
 import { Masonry } from "../components/cards";
 import { InplaceSearch } from "../components/InplaceSearch";
 import { Empty, Img } from "../components/ui";
-import { IBack, IGrid, IGlobe, IRefresh, ISearch } from "../icons";
+import { IBack, IGrid, IGlobe, IPin, IPinF, IRefresh, ISearch } from "../icons";
 import { formatDramaDesc, formatDramaTag, formatDramaTitle } from "../subtitles/dramaTranslator";
 import { localizeError } from "../i18n";
 
 const TopicIcon = IGrid;
 const TagIcon = IGlobe;
+const PINNED_TAGS_STORAGE_KEY = "aurastream_pinned_tags_v1";
+
+function readPinnedTags(): string[] {
+  try {
+    const raw = localStorage.getItem(PINNED_TAGS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePinnedTags(tags: string[]) {
+  try {
+    localStorage.setItem(PINNED_TAGS_STORAGE_KEY, JSON.stringify(tags.slice(0, 24)));
+    window.dispatchEvent(new CustomEvent("aurastream:pinned-tags-changed"));
+  } catch {}
+}
 
 /* ================= Topics List Page ================= */
 export function TopicsPage({ onBack, wide }: { onBack: () => void; wide: boolean }) {
@@ -187,6 +204,22 @@ export function TagsPage({ onBack, wide }: { onBack: () => void; wide: boolean }
   const [groups, setGroups] = useState<TagGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [pinnedTags, setPinnedTags] = useState<string[]>(readPinnedTags);
+
+  useEffect(() => {
+    const onPinChange = () => setPinnedTags(readPinnedTags());
+    window.addEventListener("aurastream:pinned-tags-changed", onPinChange);
+    return () => window.removeEventListener("aurastream:pinned-tags-changed", onPinChange);
+  }, []);
+
+  const togglePin = useCallback((name: string) => {
+    const isPinned = pinnedTags.includes(name);
+    const updated = isPinned ? pinnedTags.filter((t) => t !== name) : [name, ...pinnedTags].slice(0, 24);
+    setPinnedTags(updated);
+    writePinnedTags(updated);
+    try { (navigator as any).vibrate?.(25); } catch {}
+    toast(isPinned ? `Unpinned ${name}` : `Pinned ${name} to top`, "ok");
+  }, [pinnedTags, toast]);
 
   const load = useCallback(() => {
     let alive = true;
@@ -221,6 +254,25 @@ export function TagsPage({ onBack, wide }: { onBack: () => void; wide: boolean }
       </div>
 
       <div className="flex-1 scroll-y px-4 pt-3 pb-[calc(var(--sab,48px)+24px)]">
+        {pinnedTags.length > 0 && (
+          <section className="mb-5 p-3 rounded-2xl bg-s1/60 border border-s3 a-rise">
+            <div className="flex items-center gap-2 mb-2">
+              <IPinF size={14} className="text-primary" />
+              <span className="text-[14px] font-bold text-on">Pinned Tags</span>
+              <span className="text-[11px] text-dim ml-auto">Tap to view · Hold to unpin</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {pinnedTags.map((name) => (
+                <Button key={name} onClick={() => push({ kind: "tag", tag: name, name: formatDramaTag(name) })}
+                  onContextMenu={(e) => { e.preventDefault(); togglePin(name); }}
+                  className="ios-filter-pill flex items-center gap-1.5 border-primary/40 bg-primary/10 text-primary">
+                  <IPin size={11} />
+                  {formatDramaTag(name)}
+                </Button>
+              ))}
+            </div>
+          </section>
+        )}
         {loading ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
         ) : err && !groups.length ? (
@@ -233,13 +285,18 @@ export function TagsPage({ onBack, wide }: { onBack: () => void; wide: boolean }
                 <span className="text-[12px] text-dim">{g.tags?.length || 0} tags</span>
               </div>
               <div className="flex flex-wrap gap-2">
-                {g.tags.map((t) => (
-                  <Button key={t.id} onClick={() => push({ kind: "tag", tag: t.name, name: formatDramaTag(t.name) })}
-                    className="ios-filter-pill flex items-center gap-1">
-                    {formatDramaTag(t.name)}
-                    {!!t.hot_score && <span className="text-[12px] text-dim">{fmt(t.hot_score)}</span>}
-                  </Button>
-                ))}
+                {g.tags.map((t) => {
+                  const isPinned = pinnedTags.includes(t.name);
+                  return (
+                    <Button key={t.id} onClick={() => push({ kind: "tag", tag: t.name, name: formatDramaTag(t.name) })}
+                      onContextMenu={(e) => { e.preventDefault(); togglePin(t.name); }}
+                      className={`ios-filter-pill flex items-center gap-1 ${isPinned ? "border-primary/40 bg-primary/10 text-primary" : ""}`}>
+                      {isPinned && <IPin size={11} />}
+                      {formatDramaTag(t.name)}
+                      {!!t.hot_score && <span className="text-[12px] text-dim">{fmt(t.hot_score)}</span>}
+                    </Button>
+                  );
+                })}
               </div>
             </section>
           ))
@@ -271,6 +328,16 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
   const [err, setErr] = useState("");
   const busy = useRef(false);
   const sentinel = useRef<HTMLDivElement>(null);
+  const [pinnedTags, setPinnedTags] = useState<string[]>(readPinnedTags);
+  const isPinned = pinnedTags.includes(tag);
+
+  const togglePin = useCallback(() => {
+    const nextPinned = isPinned ? pinnedTags.filter((t) => t !== tag) : [tag, ...pinnedTags].slice(0, 24);
+    setPinnedTags(nextPinned);
+    writePinnedTags(nextPinned);
+    try { (navigator as any).vibrate?.(25); } catch {}
+    toast(isPinned ? `Unpinned ${name}` : `Pinned ${name} to top`, "ok");
+  }, [isPinned, name, pinnedTags, tag, toast]);
 
   const displayedItems = useMemo(() => {
     if (tagSort === "default") return items;
@@ -325,7 +392,10 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
           <Button aria-label="Back" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={20} /></Button>
           <span className="text-[16px] font-bold text-on">{name}</span>
           <span className="text-[12px] text-mut">{items.length} titles</span>
-          <Button onClick={() => setSearching(true)} aria-label="Search dramas" className="ml-auto w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><ISearch size={19} /></Button>
+          <Button onClick={togglePin} aria-label={isPinned ? "Unpin tag" : "Pin tag"} className={`ml-auto w-9 h-9 rounded-full flex items-center justify-center pressable ${isPinned ? "text-primary bg-primary/10" : "text-mut hover:bg-s3"}`}>
+            {isPinned ? <IPinF size={18} /> : <IPin size={18} />}
+          </Button>
+          <Button onClick={() => setSearching(true)} aria-label="Search dramas" className="w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><ISearch size={19} /></Button>
         </div>
         {items.length > 1 && (
           <div className="px-4 pb-2.5 flex items-center gap-2">

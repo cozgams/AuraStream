@@ -9,12 +9,28 @@ import { autoLineEnabled, setAutoLine } from "../autoLine";
 import { copyPlaybackLog, initPlaybackLog, setPlaybackLog, tracePlayback, usePlaybackLog } from "../playbackDiagnostics";
 import { formatNetDiag, shortVerdict } from "../netDiagReport";
 import { copyText } from "../clipboard";
-import { IBack, IBoltF, IBroom, ICaptionsF, ICheck, IChevR, IDownload, IHeart, IInfo, ILink, ILockF, IMoon, IPalette, IRefresh, ISun, IVolMute } from "../icons";
+import {
+  IBack,
+  IBoltF,
+  IBroom,
+  ICheck,
+  IChevR,
+  IDownload,
+  IHeart,
+  IInfo,
+  ILink,
+  ILockF,
+  IMoon,
+  IPalette,
+  IRefresh,
+  ISun,
+  IVolMute,
+  ISettings,
+} from "../icons";
 import UpdateModal from "../components/UpdateModal";
 import { isAutoUpdateCheckEnabled, setAutoUpdateCheckEnabled, isAndroidNativeOtaSupported } from "../otaUpdater";
 import { getAndroidPermissionsStatus, type AndroidPermissionsStatus } from "../offline/exportService";
-import { clearSubtitleCache, getSubtitleStyleConfig, setSubtitleStyleConfig } from "../subtitles/aiSubtitleService";
-import type { SubtitleStyleConfig } from "../subtitles/types";
+import { clearSubtitleCache } from "../subtitles/aiSubtitleService";
 import {
   getDownloadQualityPreference,
   setDownloadQualityPreference,
@@ -35,12 +51,72 @@ import {
 } from "../playbackFeatures";
 import type { AccentColor } from "../store";
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function SettingsSection({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+}) {
   return (
-    <>
-      <div className="ios-section-label">{title}</div>
-      <Surface className="ios-setting-group">{children}</Surface>
-    </>
+    <div className="flex flex-col gap-2 mb-5">
+      <div className="px-3.5">
+        <h2 className="text-[11.5px] font-bold uppercase tracking-wider text-mut/80">{title}</h2>
+        {subtitle && <p className="text-[11px] text-dim mt-0.5 leading-snug">{subtitle}</p>}
+      </div>
+      <Surface className="ios-setting-group rounded-2xl bg-s1/95 border border-edge/30 shadow-xs divide-y divide-edge/20 overflow-hidden">
+        {children}
+      </Surface>
+    </div>
+  );
+}
+
+function SettingItem({
+  icon,
+  iconBg = "bg-primary/10 text-primary",
+  title,
+  description,
+  badge,
+  action,
+  onClick,
+  hasChevron = false,
+  disabled = false,
+  className = "",
+}: {
+  icon: ReactNode;
+  iconBg?: string;
+  title: string;
+  description?: string;
+  badge?: ReactNode;
+  action?: ReactNode;
+  onClick?: () => void;
+  hasChevron?: boolean;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const Component = onClick ? "button" : "div";
+  return (
+    <Component
+      type={onClick ? "button" : undefined}
+      onClick={onClick}
+      disabled={disabled}
+      className={`w-full flex items-center gap-3.5 px-4 py-3 text-left transition-colors ${
+        onClick ? "pressable hover:bg-s2/40 active:bg-s2/60 cursor-pointer" : ""
+      } ${disabled ? "opacity-60 pointer-events-none" : ""} ${className}`}
+    >
+      <span className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-2xs ${iconBg}`}>
+        {icon}
+      </span>
+      <div className="flex-1 min-w-0 pr-1">
+        <div className="text-[13.5px] font-medium text-on leading-snug">{title}</div>
+        {description && <div className="text-[11px] text-mut leading-snug mt-0.5 truncate">{description}</div>}
+      </div>
+      {badge && <div className="shrink-0 text-[12px] font-medium">{badge}</div>}
+      {action && <div className="shrink-0 flex items-center ml-2">{action}</div>}
+      {hasChevron && <IChevR size={14} className="shrink-0 text-mut/60 ml-1.5" />}
+    </Component>
   );
 }
 
@@ -81,7 +157,6 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
   const [diagnosing, setDiagnosing] = useState(false);
   const [diagReport, setDiagReport] = useState<string | null>(null);
   const [copyingReport, setCopyingReport] = useState(false);
-  const [subStyle, setSubStyle] = useState<SubtitleStyleConfig>(() => getSubtitleStyleConfig());
   const [downloadQuality, setDownloadQuality] = useState<DownloadQuality>(() => getDownloadQualityPreference());
   const [downloadNotifs, setDownloadNotifs] = useState(() => isDownloadNotificationEnabled());
   const [wifiOnlyDl, setWifiOnlyDl] = useState(() => isWifiOnlyDownloadEnabled());
@@ -122,16 +197,6 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
   }, []);
 
   useEffect(() => {
-    const onStyleChange = (e: Event) => {
-      const customEvent = e as CustomEvent<SubtitleStyleConfig>;
-      if (customEvent.detail) setSubStyle(customEvent.detail);
-      else setSubStyle(getSubtitleStyleConfig());
-    };
-    window.addEventListener("aurastream:subtitlestyle-changed", onStyleChange);
-    return () => window.removeEventListener("aurastream:subtitlestyle-changed", onStyleChange);
-  }, []);
-
-  useEffect(() => {
     void initPlaybackLog();
   }, []);
 
@@ -167,10 +232,10 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
   };
 
   return (
-    <div className="ios-page absolute inset-0 bg-bg flex flex-col">
-      {/* Top App Bar Header */}
-      <div
-        className="shrink-0 px-4 flex items-center justify-between border-b border-edge/30 bg-bg/90 backdrop-blur-md z-10"
+    <div className="ios-page absolute inset-0 bg-bg flex flex-col select-none">
+      {/* Top Header Bar */}
+      <header
+        className="shrink-0 px-4 flex items-center justify-between border-b border-edge/30 bg-bg/95 backdrop-blur-md z-10"
         style={{ paddingTop: "calc(var(--sat, 0px) + 8px)", paddingBottom: "10px" }}
       >
         <div className="flex items-center gap-3">
@@ -179,34 +244,42 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
           </Button>
           <div>
             <h1 className="text-[18px] font-bold text-on tracking-tight leading-tight">{t("settings.title")}</h1>
-            <p className="text-[11px] text-mut leading-none mt-0.5">Customize your experience</p>
+            <p className="text-[11px] text-mut leading-none mt-0.5">Preferences, playback, network & offline</p>
           </div>
         </div>
-      </div>
+        <div className="px-2.5 py-1 rounded-full bg-s2 border border-edge/30 text-[10.5px] font-mono text-mut">
+          v{APP_VERSION}
+        </div>
+      </header>
 
+      {/* Main Settings Content */}
       <div
-        className="ios-page-body flex-1 scroll-y px-4 pt-3"
-        style={{ paddingBottom: "calc(var(--sab, 48px) + 40px)" }}
+        className="ios-page-body flex-1 scroll-y px-4 pt-3.5"
+        style={{ paddingBottom: "calc(var(--sab, 48px) + 48px)" }}
       >
-        <div className={wide ? "max-w-[720px] mx-auto" : ""}>
-          {/* Appearance Section */}
-          <Section title={t("settings.appearance")}>
-            <div className="ios-appearance-row items-center">
-              <span className="ios-setting-icon">
-                {themePreference === "system" ? <IRefresh size={16} /> : theme === "dark" ? <IMoon size={16} /> : <ISun size={16} />}
-              </span>
-              <div className="flex-1">
-                <div className="text-[14px] text-on">{t("settings.appearance")}</div>
-                <div className="text-[12px] text-mut">
-                  {themePreference === "system"
-                    ? `Follow system (${theme === "dark" ? "Dark" : "Light"})`
-                    : theme === "dark"
-                    ? "Dark appearance"
-                    : "Light appearance"}
+        <div className={wide ? "max-w-[700px] mx-auto" : ""}>
+          {/* Section 1: Appearance & Accent */}
+          <SettingsSection title={t("settings.appearance")} subtitle="Theme appearance and system accent color">
+            <div className="flex flex-col gap-3 px-4 py-3.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="w-8 h-8 rounded-xl flex items-center justify-center bg-indigo-500/10 text-indigo-500">
+                    {themePreference === "system" ? <IRefresh size={15} /> : theme === "dark" ? <IMoon size={15} /> : <ISun size={15} />}
+                  </span>
+                  <div>
+                    <div className="text-[13.5px] font-medium text-on">Appearance Theme</div>
+                    <div className="text-[11px] text-mut">
+                      {themePreference === "system"
+                        ? `Follows system (${theme === "dark" ? "Dark" : "Light"})`
+                        : theme === "dark"
+                        ? "Dark theme active"
+                        : "Light theme active"}
+                    </div>
+                  </div>
                 </div>
               </div>
               <SegmentedControl
-                className="ios-appearance-picker"
+                className="ios-appearance-picker w-full"
                 aria-label="Appearance Mode"
                 activeIndex={(["system", "light", "dark"] as const).indexOf(themePreference)}
               >
@@ -228,16 +301,19 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 ))}
               </SegmentedControl>
             </div>
-            {/* Accent Color Picker */}
-            <div className="flex flex-col gap-2.5 px-3.5 py-3">
+
+            {/* Accent Color Palette */}
+            <div className="flex flex-col gap-2.5 px-4 py-3.5">
               <div className="flex items-center gap-3">
-                <span className="ios-setting-icon"><IPalette size={16} /></span>
+                <span className="w-8 h-8 rounded-xl flex items-center justify-center bg-rose-500/10 text-rose-500">
+                  <IPalette size={15} />
+                </span>
                 <div className="flex-1 min-w-0">
-                  <div className="text-[14px] text-on">{t("settings.accent")}</div>
-                  <div className="text-[12px] text-mut">{t("settings.accent_desc")}</div>
+                  <div className="text-[13.5px] font-medium text-on">{t("settings.accent")}</div>
+                  <div className="text-[11px] text-mut">{t("settings.accent_desc")}</div>
                 </div>
               </div>
-              <div className="grid grid-cols-6 gap-2 pt-0.5">
+              <div className="grid grid-cols-6 gap-2 pt-1">
                 {(
                   [
                     ["blue", "Blue", "#1a73e8"],
@@ -259,150 +335,92 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                         setAccent(key as AccentColor);
                         toast(`Accent color: ${label}`, "ok");
                       }}
-                      className={`flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-xl border transition-all pressable ${
+                      className={`flex flex-col items-center justify-center gap-1.5 py-2 px-1 rounded-xl border transition-all pressable ${
                         active
-                          ? "bg-s2 border-primary text-on font-bold shadow-xs"
-                          : "bg-s3/60 border-edge/30 text-mut hover:text-on"
+                          ? "bg-s2 border-primary text-on font-semibold shadow-xs"
+                          : "bg-s3/40 border-edge/20 text-mut hover:text-on hover:bg-s3/70"
                       }`}
                     >
                       <span
-                        className="w-5 h-5 rounded-full flex items-center justify-center text-white shadow-xs"
+                        className="w-5 h-5 rounded-full flex items-center justify-center text-white shadow-2xs"
                         style={{ backgroundColor: swatch }}
                       >
                         {active && <ICheck size={11} strokeWidth={3} />}
                       </span>
-                      <span className="text-[10.5px] leading-tight">{label}</span>
+                      <span className="text-[10px] leading-tight">{label}</span>
                     </button>
                   );
                 })}
               </div>
             </div>
-          </Section>
+          </SettingsSection>
 
-          {/* Subtitles & Closed Captions (CC) Section */}
-          <Section title="Subtitles & Closed Captions (CC)">
-            <div className="flex flex-col gap-2 px-3.5 py-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="ios-setting-icon"><ICaptionsF size={16} /></span>
-                  <div>
-                    <div className="text-[14px] text-on font-medium">Caption Screen Position</div>
-                    <div className="text-[12px] text-mut">Vertical placement on screen & video</div>
-                  </div>
-                </div>
-                <span className="text-[12px] font-mono text-amber-500 font-semibold">
-                  {subStyle.position === "custom" && typeof subStyle.customOffsetPercent === "number"
-                    ? `Custom ${subStyle.customOffsetPercent}%`
-                    : typeof subStyle.customOffsetPercent === "number"
-                    ? `${subStyle.customOffsetPercent}%`
-                    : subStyle.position === "top"
-                    ? "85%"
-                    : subStyle.position === "middle"
-                    ? "50%"
-                    : subStyle.position === "above_title"
-                    ? "32%"
-                    : "12%"}
-                </span>
-              </div>
-              <SegmentedControl
-                className="ios-appearance-picker mt-1"
-                aria-label="Caption Position"
-                activeIndex={(["bottom", "above_title", "middle", "top"] as const).indexOf(
-                  subStyle.position as "bottom" | "above_title" | "middle" | "top"
-                )}
-              >
-                {(
-                  [
-                    ["bottom", "Downside", 12],
-                    ["above_title", "Above Title", 32],
-                    ["middle", "Middle", 50],
-                    ["top", "Top", 85],
-                  ] as const
-                ).map(([pos, label, defaultPct]) => (
-                  <Button
-                    key={pos}
-                    type="button"
-                    aria-pressed={subStyle.position === pos}
-                    className="text-[11.5px] whitespace-nowrap px-1"
-                    onClick={() => {
-                      const updated: SubtitleStyleConfig = {
-                        ...subStyle,
-                        position: pos,
-                        customOffsetPercent: defaultPct,
-                      };
-                      setSubStyle(updated);
-                      setSubtitleStyleConfig(updated);
-                      toast(`Caption position: ${label}`, "ok");
-                    }}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </SegmentedControl>
-              <div className="flex items-center gap-2 mt-2">
-                <span className="text-[11px] text-mut shrink-0 font-medium">Fine-tune:</span>
-                <input
-                  type="range"
-                  min={5}
-                  max={90}
-                  step={1}
-                  value={
-                    typeof subStyle.customOffsetPercent === "number"
-                      ? subStyle.customOffsetPercent
-                      : subStyle.position === "top"
-                      ? 85
-                      : subStyle.position === "middle"
-                      ? 50
-                      : subStyle.position === "above_title"
-                      ? 32
-                      : 12
-                  }
-                  onChange={(e) => {
-                    const pct = Number(e.target.value);
-                    const updated: SubtitleStyleConfig = {
-                      ...subStyle,
-                      position: "custom",
-                      customOffsetPercent: pct,
-                    };
-                    setSubStyle(updated);
-                    setSubtitleStyleConfig(updated);
+          {/* Section 2: Playback & Streaming */}
+          <SettingsSection title={t("settings.playback")} subtitle="Audio, stream decoding, and buffer management">
+            <SettingItem
+              icon={<IVolMute size={15} />}
+              iconBg="bg-blue-500/10 text-blue-500"
+              title="Mute on Startup"
+              description="Starts video muted by default; remember previous volume when off"
+              action={<Toggle on={muteOnStartup} onChange={setMuteOnStartup} label="Mute on Startup" />}
+            />
+            <SettingItem
+              icon={<IBoltF size={15} />}
+              iconBg="bg-cyan-500/10 text-cyan-500"
+              title="Prefer High Quality (HEVC)"
+              description="Streams hardware-accelerated HEVC when available for higher quality"
+              action={<Toggle on={preferHevc} onChange={setPreferHevc} label="Prefer High Quality (HEVC)" />}
+            />
+            <SettingItem
+              icon={<IBoltF size={15} />}
+              iconBg="bg-emerald-500/10 text-emerald-500"
+              title="Instant Next-Episode Preload"
+              description="Pre-fetches upcoming episode segments for zero-wait transition"
+              action={
+                <Toggle
+                  on={nextPreload}
+                  onChange={(enabled) => {
+                    setNextPreload(enabled);
+                    setNextEpisodePreloadEnabled(enabled);
+                    toast(enabled ? "Instant next-episode preload enabled" : "Next-episode preload disabled", "info");
                   }}
-                  className="flex-1 accent-amber-500 cursor-pointer h-2 bg-s4 rounded-lg"
-                  aria-label="Caption Position Fine Tune Slider"
+                  label="Instant Next-Episode Preload"
                 />
-              </div>
-            </div>
-          </Section>
+              }
+            />
+            <SettingItem
+              icon={<IBoltF size={15} />}
+              iconBg="bg-indigo-500/10 text-indigo-500"
+              title="Turbo Full-Episode Pre-Cache"
+              description="Buffers full short episode ahead on Wi-Fi to eliminate pauses"
+              action={
+                <Toggle
+                  on={fullPreCache}
+                  onChange={(enabled) => {
+                    setFullPreCache(enabled);
+                    setFullEpisodePreCacheEnabled(enabled);
+                    toast(enabled ? "Turbo full-episode pre-cache enabled" : "Standard buffer window enabled", "info");
+                  }}
+                  label="Turbo Full-Episode Pre-Cache"
+                />
+              }
+            />
+          </SettingsSection>
 
-          {/* Playback & Download Settings */}
-          <Section title={t("settings.playback")}>
-            <div className="flex items-center gap-3 px-3.5 py-3">
-              <span className="ios-setting-icon"><IVolMute size={16} /></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-on">Mute on Startup</div>
-                <div className="text-[12px] text-mut">Starts playback muted by default. Toggle off to remember previous volume.</div>
-              </div>
-              <Toggle on={muteOnStartup} onChange={setMuteOnStartup} label="Mute on Startup" />
-            </div>
-            <div className="flex items-center gap-3 px-3.5 py-3">
-              <span className="ios-setting-icon"><IBoltF size={16} /></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-on">Prefer High Quality (HEVC)</div>
-                <div className="text-[12px] text-mut">Streams HEVC high-efficiency video when available, falls back to standard automatically</div>
-              </div>
-              <Toggle on={preferHevc} onChange={setPreferHevc} label="Prefer High Quality (HEVC)" />
-            </div>
-            {/* Download Quality Preference */}
-            <div className="flex flex-col gap-1.5 px-3.5 py-3">
+          {/* Section 4: Offline & Downloads */}
+          <SettingsSection title="Offline & Downloads" subtitle="Storage formats, cellular policies, and notifications">
+            <div className="flex flex-col gap-2.5 px-4 py-3.5">
               <div className="flex items-center gap-3">
-                <span className="ios-setting-icon"><IDownload size={16} /></span>
+                <span className="w-8 h-8 rounded-xl flex items-center justify-center bg-sky-500/10 text-sky-500">
+                  <IDownload size={15} />
+                </span>
                 <div className="flex-1 min-w-0">
-                  <div className="text-[14px] text-on">Download Quality</div>
-                  <div className="text-[12px] text-mut">Preferred resolution and codec for offline downloads</div>
+                  <div className="text-[13.5px] font-medium text-on">Download Quality</div>
+                  <div className="text-[11px] text-mut">Preferred resolution and codec for offline media</div>
                 </div>
               </div>
               <SegmentedControl
-                className="ios-appearance-picker mt-1"
+                className="ios-appearance-picker w-full mt-1"
                 aria-label="Download Quality"
                 activeIndex={(["auto", "hevc", "standard"] as const).indexOf(downloadQuality)}
               >
@@ -428,300 +446,133 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 ))}
               </SegmentedControl>
             </div>
-            <div className="flex items-center gap-3 px-3.5 py-3 border-t border-edge/20">
-              <span className="ios-setting-icon"><IDownload size={16} /></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-on">{t("profile.wifi_only")}</div>
-                <div className="text-[12px] text-mut">{t("profile.wifi_only_desc")}</div>
-              </div>
-              <Toggle
-                on={wifiOnlyDl}
-                onChange={(enabled) => {
-                  setWifiOnlyDl(enabled);
-                  setWifiOnlyDownloadEnabled(enabled);
-                  toast(enabled ? "Download on Wi-Fi Only enabled" : "Cellular downloads allowed", "info");
-                }}
-                label={t("profile.wifi_only")}
-              />
-            </div>
-            <div className="flex items-center gap-3 px-3.5 py-3 border-t border-edge/20">
-              <span className="ios-setting-icon"><IDownload size={16} /></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-on">{t("profile.auto_dl_next")}</div>
-                <div className="text-[12px] text-mut">{t("profile.auto_dl_next_desc")}</div>
-              </div>
-              <Toggle
-                on={smartDl}
-                onChange={(enabled) => {
-                  setSmartDl(enabled);
-                  setSmartDownloadEnabled(enabled);
-                  toast(enabled ? "Smart Auto-Download enabled" : "Smart Auto-Download disabled", "info");
-                }}
-                label={t("profile.auto_dl_next")}
-              />
-            </div>
-            <div className="flex items-center gap-3 px-3.5 py-3 border-t border-edge/20">
-              <span className="ios-setting-icon"><IBoltF size={16} /></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-on">Turbo Full-Episode Pre-Cache</div>
-                <div className="text-[12px] text-mut">Buffers entire short episode ahead on Wi-Fi to eliminate mid-scene pauses</div>
-              </div>
-              <Toggle
-                on={fullPreCache}
-                onChange={(enabled) => {
-                  setFullPreCache(enabled);
-                  setFullEpisodePreCacheEnabled(enabled);
-                  toast(enabled ? "Turbo full-episode pre-cache enabled" : "Standard buffer window enabled", "info");
-                }}
-                label="Turbo Full-Episode Pre-Cache"
-              />
-            </div>
-            <div className="flex items-center gap-3 px-3.5 py-3 border-t border-edge/20">
-              <span className="ios-setting-icon"><IBoltF size={16} /></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-on">Instant Next-Episode Preload</div>
-                <div className="text-[12px] text-mut">Pre-fetches upcoming episode playlist and first segments for zero-wait transitions</div>
-              </div>
-              <Toggle
-                on={nextPreload}
-                onChange={(enabled) => {
-                  setNextPreload(enabled);
-                  setNextEpisodePreloadEnabled(enabled);
-                  toast(enabled ? "Instant next-episode preload enabled" : "Next-episode preload disabled", "info");
-                }}
-                label="Instant Next-Episode Preload"
-              />
-            </div>
-            <div className="flex items-center gap-3 px-3.5 py-3 border-t border-edge/20">
-              <span className="ios-setting-icon"><IDownload size={16} /></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-on">Background Download Alerts</div>
-                <div className="text-[12px] text-mut">Show progress notifications in system bar when app is minimized</div>
-              </div>
-              <Toggle
-                on={downloadNotifs}
-                onChange={(enabled) => {
-                  setDownloadNotifs(enabled);
-                  setDownloadNotificationEnabled(enabled);
-                  toast(enabled ? "Download notifications enabled" : "Download notifications disabled", "info");
-                }}
-                label="Background Download Alerts"
-              />
-            </div>
-          </Section>
 
-          {/* Android Permissions & Background Execution */}
-          {androidPerms !== null && (
-            <Section title="Permissions & Background">
-              <Button
-                onClick={() => {
-                  window.AuraNativeExport?.requestIgnoreBatteryOptimizations?.();
-                  window.setTimeout(() => setAndroidPerms(getAndroidPermissionsStatus()), 400);
-                }}
-                className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable"
-              >
-                <span className="ios-setting-icon"><IBoltF size={16} /></span>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[14px] text-on">Unrestricted Background Downloads</div>
-                  <div className="text-[12px] text-mut">Prevents Android from pausing downloads when you leave the app</div>
-                </div>
-                <span
-                  className={`px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0 ${
-                    androidPerms.batteryOptimizationIgnored
-                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                      : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                  }`}
-                >
-                  {androidPerms.batteryOptimizationIgnored ? "Granted" : "Action Needed"}
-                </span>
-              </Button>
-              <Button
-                onClick={() => {
-                  window.AuraNativeExport?.requestNotificationPermissionNow?.();
-                  window.setTimeout(() => setAndroidPerms(getAndroidPermissionsStatus()), 400);
-                }}
-                className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable"
-              >
-                <span className="ios-setting-icon"><IDownload size={16} /></span>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[14px] text-on">Download Notifications</div>
-                  <div className="text-[12px] text-mut">Live speed, progress bar, and Pause/Cancel controls in notification shade</div>
-                </div>
-                <span
-                  className={`px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0 ${
-                    androidPerms.notificationsGranted
-                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                      : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                  }`}
-                >
-                  {androidPerms.notificationsGranted ? "Granted" : "Action Needed"}
-                </span>
-              </Button>
-              <Button
-                onClick={() => {
-                  window.AuraNativeExport?.openInstallPermissionSettings?.();
-                  window.setTimeout(() => setAndroidPerms(getAndroidPermissionsStatus()), 400);
-                }}
-                className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable"
-              >
-                <span className="ios-setting-icon"><IRefresh size={16} /></span>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[14px] text-on">In-App Updates (Install APKs)</div>
-                  <div className="text-[12px] text-mut">Required on Android to install GitHub OTA updates inside the app</div>
-                </div>
-                <span
-                  className={`px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0 ${
-                    androidPerms.canInstallPackages
-                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                      : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                  }`}
-                >
-                  {androidPerms.canInstallPackages ? "Granted" : "Action Needed"}
-                </span>
-              </Button>
-              <Button
-                onClick={() => {
-                  if (androidPerms.storageGranted) {
-                    toast("Media & Downloads export permission is active", "ok");
-                    return;
-                  }
-                  window.AuraNativeExport?.requestLegacyStoragePermission?.();
-                  window.setTimeout(() => setAndroidPerms(getAndroidPermissionsStatus()), 400);
-                }}
-                className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable"
-              >
-                <span className="ios-setting-icon"><IInfo size={16} /></span>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[14px] text-on">Storage & Gallery Export</div>
-                  <div className="text-[12px] text-mut">Save offline episodes to Movies/AuraStream or Download/AuraStream</div>
-                </div>
-                <span
-                  className={`px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0 ${
-                    androidPerms.storageGranted
-                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                      : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                  }`}
-                >
-                  {androidPerms.storageGranted ? "Granted" : "Action Needed"}
-                </span>
-              </Button>
-              <Button
-                onClick={() => {
-                  window.AuraNativeExport?.openAppSettings?.();
-                }}
-                className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable"
-              >
-                <span className="ios-setting-icon"><ILockF size={16} /></span>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[14px] text-on">Open Android App Settings</div>
-                  <div className="text-[12px] text-mut">Inspect Battery, Notifications, and App permissions in system settings</div>
-                </div>
-                <IChevR size={15} className="text-mut" />
-              </Button>
-            </Section>
-          )}
+            <SettingItem
+              icon={<IDownload size={15} />}
+              iconBg="bg-sky-500/10 text-sky-500"
+              title={t("profile.wifi_only")}
+              description={t("profile.wifi_only_desc")}
+              action={
+                <Toggle
+                  on={wifiOnlyDl}
+                  onChange={(enabled) => {
+                    setWifiOnlyDl(enabled);
+                    setWifiOnlyDownloadEnabled(enabled);
+                    toast(enabled ? "Download on Wi-Fi Only enabled" : "Cellular downloads allowed", "info");
+                  }}
+                  label={t("profile.wifi_only")}
+                />
+              }
+            />
 
-          {/* Storage & Data */}
-          <Section title="Storage & Data">
-            <div className="flex items-center gap-3 px-3.5 py-3">
-              <span className="ios-setting-icon"><IHeart size={16} /></span>
-              <div className="flex-1">
-                <div className="text-[14px] text-on">Local Library</div>
-                <div className="text-[12px] text-mut">{favs.length} favorites · {history.length} watch history items</div>
-              </div>
-            </div>
-            <Button
-              disabled={purgingRam}
-              onClick={async () => {
-                setPurgingRam(true);
-                try {
-                  const res = await runDeepRamPurge();
-                  toast(`Memory optimized · Freed ${res.freedFormatted}`, "ok");
-                } catch {
-                  toast("Memory & temporary buffers optimized", "ok");
-                } finally {
-                  setPurgingRam(false);
-                }
-              }}
-              className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable disabled:opacity-60"
-            >
-              <span className="ios-setting-icon"><IBoltF size={16} /></span>
-              <div className="flex-1">
-                <div className="text-[14px] text-on">{purgingRam ? "Optimizing Memory..." : "Optimize Memory & Temp Buffers"}</div>
-                <div className="text-[12px] text-mut">Purges inactive preloaded segments and frees RAM while keeping all downloads</div>
-              </div>
-              <IChevR size={15} className="text-mut" />
-            </Button>
-            <Button onClick={() => setClearOpen(true)} className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable">
-              <span className="ios-setting-icon"><IBroom size={16} /></span>
-              <div className="flex-1">
-                <div className="text-[14px] text-on">{t("settings.clear_cache")}</div>
-                <div className="text-[12px] text-mut">{t("settings.clear_cache_desc")}</div>
-              </div>
-              <IChevR size={15} className="text-mut" />
-            </Button>
-          </Section>
+            <SettingItem
+              icon={<IDownload size={15} />}
+              iconBg="bg-teal-500/10 text-teal-500"
+              title={t("profile.auto_dl_next")}
+              description={t("profile.auto_dl_next_desc")}
+              action={
+                <Toggle
+                  on={smartDl}
+                  onChange={(enabled) => {
+                    setSmartDl(enabled);
+                    setSmartDownloadEnabled(enabled);
+                    toast(enabled ? "Smart Auto-Download enabled" : "Smart Auto-Download disabled", "info");
+                  }}
+                  label={t("profile.auto_dl_next")}
+                />
+              }
+            />
 
-          {/* Network & Source */}
-          <Section title={t("settings.network")}>
+            <SettingItem
+              icon={<IDownload size={15} />}
+              iconBg="bg-cyan-500/10 text-cyan-500"
+              title="Background Download Alerts"
+              description="Live progress and controls in Android notification shade"
+              action={
+                <Toggle
+                  on={downloadNotifs}
+                  onChange={(enabled) => {
+                    setDownloadNotifs(enabled);
+                    setDownloadNotificationEnabled(enabled);
+                    toast(enabled ? "Download notifications enabled" : "Download notifications disabled", "info");
+                  }}
+                  label="Background Download Alerts"
+                />
+              }
+            />
+          </SettingsSection>
+
+          {/* Section 5: Streaming Network & Line Selection */}
+          <SettingsSection title={t("settings.network")} subtitle="Route selection, security boundaries, and diagnostics">
             <ProxySettings />
-            <Button onClick={() => setLineOpen(true)} className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable">
-              <span className="ios-setting-icon"><IBoltF size={16} /></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-on">Streaming Source</div>
-                <div className="text-[12px] text-mut truncate">{lineBase ? hostOf(lineBase) : "Loading..."}</div>
-              </div>
-              <IChevR size={15} className="text-mut" />
-            </Button>
-            <div className="flex items-center gap-3 px-3.5 py-3">
-              <span className="ios-setting-icon"><IRefresh size={15} /></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-on">Auto-Select Best Line</div>
-                <div className="text-[12px] text-mut">Detects active published mirrors when official source is slow or unavailable</div>
-              </div>
-              <Toggle
-                label="Auto-Select Best Line"
-                on={autoLineOn}
-                onChange={async (on) => {
-                  setAutoLineOn(on);
-                  try {
-                    await setAutoLine(on);
-                    toast(
-                      on ? "Auto-select line enabled" : "Auto-select line disabled, manual selection preserved",
-                      "info"
-                    );
-                  } catch {
-                    setAutoLineOn(!on);
-                    toast("Failed to update auto-select line, please retry", "info");
-                  }
-                }}
-              />
-            </div>
-            <div className="flex items-center gap-3 px-3.5 py-3">
-              <span className="ios-setting-icon"><ILockF size={15} /></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-on">Strict Security Mode</div>
-                <div className="text-[12px] text-mut">
-                  {cliRelaxed
-                    ? "Running in compatibility mode via --no-strict; can be re-enabled manually"
-                    : "Default enabled to guard against upstream tampering and intranet probing; toggle off for compatibility"}
-                </div>
-              </div>
-              <Toggle
-                on={strictSecurity}
-                disabled={!strictSecurityReady || securityPending}
-                onChange={(on) => {
-                  void setStrictSecurity(on)
-                    .then(() => {
-                      toast(on ? "Strict security mode enabled" : "Compatibility mode enabled", "info");
-                    })
-                    .catch(() => toast("Failed to save security mode, preserved original setting", "info"));
-                }}
-                label="Strict Security Mode"
-              />
-            </div>
-            {/* Network Diagnostics */}
-            <Button
+
+            <SettingItem
+              icon={<IBoltF size={15} />}
+              iconBg="bg-amber-500/10 text-amber-500"
+              title="Streaming Source"
+              description={lineBase ? hostOf(lineBase) : "Loading..."}
+              hasChevron
+              onClick={() => setLineOpen(true)}
+              badge={
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10.5px] font-semibold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  Active
+                </span>
+              }
+            />
+
+            <SettingItem
+              icon={<IRefresh size={15} />}
+              iconBg="bg-blue-500/10 text-blue-500"
+              title="Auto-Select Best Line"
+              description="Automatically discovers responsive mirrors when official route slows down"
+              action={
+                <Toggle
+                  label="Auto-Select Best Line"
+                  on={autoLineOn}
+                  onChange={async (on) => {
+                    setAutoLineOn(on);
+                    try {
+                      await setAutoLine(on);
+                      toast(on ? "Auto-select line enabled" : "Auto-select line disabled, manual preserved", "info");
+                    } catch {
+                      setAutoLineOn(!on);
+                      toast("Failed to update auto-select line", "info");
+                    }
+                  }}
+                />
+              }
+            />
+
+            <SettingItem
+              icon={<ILockF size={15} />}
+              iconBg="bg-violet-500/10 text-violet-500"
+              title="Strict Security Mode"
+              description={
+                cliRelaxed
+                  ? "Running in compatibility mode via --no-strict"
+                  : "Guards against upstream tampering and intranet probing"
+              }
+              action={
+                <Toggle
+                  on={strictSecurity}
+                  disabled={!strictSecurityReady || securityPending}
+                  onChange={(on) => {
+                    void setStrictSecurity(on)
+                      .then(() => toast(on ? "Strict security enabled" : "Compatibility mode enabled", "info"))
+                      .catch(() => toast("Failed to save security mode", "info"));
+                  }}
+                  label="Strict Security Mode"
+                />
+              }
+            />
+
+            <SettingItem
+              icon={<ILink size={15} />}
+              iconBg="bg-slate-500/10 text-slate-500"
+              title={diagnosing ? "Diagnosing Network..." : "Network Diagnostics"}
+              description="Checks DNS resolution, TCP handshakes, proxies, and latency"
+              hasChevron
               disabled={diagnosing}
               onClick={async () => {
                 setDiagnosing(true);
@@ -747,47 +598,200 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                     toast(`Diagnostics copied · ${shortVerdict(diag)}`, "ok");
                   } catch {
                     setDiagReport(report);
-                    toast("Diagnostics completed, copy failed, select text below to copy", "info");
+                    toast("Diagnostics completed, copy report below", "info");
                   }
                 } catch (e) {
-                  const detail = e instanceof Error ? e.message : typeof e === "string" ? e : "Please retry later";
+                  const detail = e instanceof Error ? e.message : typeof e === "string" ? e : "Retry later";
                   toast(`Diagnostics error: ${detail}`, "info");
                 } finally {
                   setDiagnosing(false);
                 }
               }}
-              className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable disabled:opacity-60"
-            >
-              <span className="ios-setting-icon"><ILink size={16} /></span>
-              <div className="flex-1">
-                <div className="text-[14px] text-on">{diagnosing ? "Diagnosing..." : "Network Diagnostics"}</div>
-                <div className="text-[12px] text-mut">DNS / TCP / Proxy / Server connectivity diagnostic report</div>
-              </div>
-              <IChevR size={15} className="text-mut" />
-            </Button>
-          </Section>
+            />
+          </SettingsSection>
 
-          {/* Playback Diagnostics */}
-          <Section title="Playback Diagnostics">
-            <div className="flex items-center gap-3 px-3.5 py-3">
-              <span className="ios-setting-icon"><IInfo size={16} /></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-on">Playback Diagnostics Log</div>
-                <div className="text-[12px] text-mut">Version, platform, current line, and error events are always recorded; toggle enables sub-frame buffering logs</div>
-                {playbackLog.error && <div role="alert" className="text-[12px] text-danger">{playbackLog.error}</div>}
-              </div>
-              <Toggle
-                label="Playback Diagnostics Log"
-                on={playbackLog.enabled}
-                disabled={!playbackLog.ready || playbackLog.pending}
-                onChange={(on) => {
-                  void setPlaybackLog(on)
-                    .then(() => toast(on ? "Playback diagnostics enabled" : "Playback diagnostics disabled", "ok"))
-                    .catch(() => toast("Failed to save log configuration, please retry", "info"));
+          {/* Section 6: Android Permissions & Execution */}
+          {androidPerms !== null && (
+            <SettingsSection
+              title="Permissions & Background"
+              subtitle="Android OS battery, notification, and package permissions"
+            >
+              <SettingItem
+                icon={<IBoltF size={15} />}
+                iconBg="bg-amber-500/10 text-amber-500"
+                title="Unrestricted Background Downloads"
+                description="Prevents system from pausing active downloads when app is backgrounded"
+                hasChevron
+                badge={
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10.5px] font-bold ${
+                      androidPerms.batteryOptimizationIgnored
+                        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                        : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                    }`}
+                  >
+                    {androidPerms.batteryOptimizationIgnored ? "Granted" : "Action Needed"}
+                  </span>
+                }
+                onClick={() => {
+                  window.AuraNativeExport?.requestIgnoreBatteryOptimizations?.();
+                  window.setTimeout(() => setAndroidPerms(getAndroidPermissionsStatus()), 400);
                 }}
               />
-            </div>
-            <Button
+
+              <SettingItem
+                icon={<IDownload size={15} />}
+                iconBg="bg-blue-500/10 text-blue-500"
+                title="Download Notifications"
+                description="Shows speed, progress bar, and Pause/Cancel in status bar"
+                hasChevron
+                badge={
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10.5px] font-bold ${
+                      androidPerms.notificationsGranted
+                        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                        : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                    }`}
+                  >
+                    {androidPerms.notificationsGranted ? "Granted" : "Action Needed"}
+                  </span>
+                }
+                onClick={() => {
+                  window.AuraNativeExport?.requestNotificationPermissionNow?.();
+                  window.setTimeout(() => setAndroidPerms(getAndroidPermissionsStatus()), 400);
+                }}
+              />
+
+              <SettingItem
+                icon={<IRefresh size={15} />}
+                iconBg="bg-teal-500/10 text-teal-500"
+                title="In-App Updates (Install APKs)"
+                description="Required to install new GitHub OTA updates inside the app"
+                hasChevron
+                badge={
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10.5px] font-bold ${
+                      androidPerms.canInstallPackages
+                        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                        : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                    }`}
+                  >
+                    {androidPerms.canInstallPackages ? "Granted" : "Action Needed"}
+                  </span>
+                }
+                onClick={() => {
+                  window.AuraNativeExport?.openInstallPermissionSettings?.();
+                  window.setTimeout(() => setAndroidPerms(getAndroidPermissionsStatus()), 400);
+                }}
+              />
+
+              <SettingItem
+                icon={<IInfo size={15} />}
+                iconBg="bg-indigo-500/10 text-indigo-500"
+                title="Storage & Gallery Export"
+                description="Saves offline episodes to Movies/AuraStream or Download/AuraStream"
+                hasChevron
+                badge={
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10.5px] font-bold ${
+                      androidPerms.storageGranted
+                        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                        : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                    }`}
+                  >
+                    {androidPerms.storageGranted ? "Granted" : "Action Needed"}
+                  </span>
+                }
+                onClick={() => {
+                  if (androidPerms.storageGranted) {
+                    toast("Media & Downloads export permission is active", "ok");
+                    return;
+                  }
+                  window.AuraNativeExport?.requestLegacyStoragePermission?.();
+                  window.setTimeout(() => setAndroidPerms(getAndroidPermissionsStatus()), 400);
+                }}
+              />
+
+              <SettingItem
+                icon={<ISettings size={15} />}
+                iconBg="bg-neutral-500/10 text-neutral-500"
+                title="Open Android App Settings"
+                description="Manage battery, notifications, and permissions in system settings"
+                hasChevron
+                onClick={() => {
+                  window.AuraNativeExport?.openAppSettings?.();
+                }}
+              />
+            </SettingsSection>
+          )}
+
+          {/* Section 7: Storage & Maintenance */}
+          <SettingsSection title="Storage & Data" subtitle="Cache management, device memory, and saved items">
+            <SettingItem
+              icon={<IHeart size={15} />}
+              iconBg="bg-pink-500/10 text-pink-500"
+              title="Local Library Data"
+              description={`${favs.length} favorites · ${history.length} watch history entries`}
+              badge={<span className="text-[11.5px] text-mut font-mono">Protected</span>}
+            />
+
+            <SettingItem
+              icon={<IBoltF size={15} />}
+              iconBg="bg-amber-500/10 text-amber-500"
+              title={purgingRam ? "Optimizing Memory..." : "Optimize Memory & Temp Buffers"}
+              description="Purges inactive preloaded buffers and frees RAM while keeping all downloads"
+              hasChevron
+              disabled={purgingRam}
+              onClick={async () => {
+                setPurgingRam(true);
+                try {
+                  const res = await runDeepRamPurge();
+                  toast(`Memory optimized · Freed ${res.freedFormatted}`, "ok");
+                } catch {
+                  toast("Memory & temporary buffers optimized", "ok");
+                } finally {
+                  setPurgingRam(false);
+                }
+              }}
+            />
+
+            <SettingItem
+              icon={<IBroom size={15} />}
+              iconBg="bg-rose-500/10 text-rose-500"
+              title={t("settings.clear_cache")}
+              description={t("settings.clear_cache_desc")}
+              hasChevron
+              onClick={() => setClearOpen(true)}
+            />
+          </SettingsSection>
+
+          {/* Section 8: Diagnostics & Support */}
+          <SettingsSection title="Playback Diagnostics" subtitle="Troubleshooting logs and performance telemetry">
+            <SettingItem
+              icon={<IInfo size={15} />}
+              iconBg="bg-blue-500/10 text-blue-500"
+              title="Playback Diagnostics Log"
+              description="Records version, platform, current line, and stream events for support"
+              action={
+                <Toggle
+                  label="Playback Diagnostics Log"
+                  on={playbackLog.enabled}
+                  disabled={!playbackLog.ready || playbackLog.pending}
+                  onChange={(on) => {
+                    void setPlaybackLog(on)
+                      .then(() => toast(on ? "Playback diagnostics enabled" : "Playback diagnostics disabled", "ok"))
+                      .catch(() => toast("Failed to save log config", "info"));
+                  }}
+                />
+              }
+            />
+
+            <SettingItem
+              icon={<ILink size={15} />}
+              iconBg="bg-sky-500/10 text-sky-500"
+              title={copyingLog ? "Copying Diagnostics..." : "Copy Playback Diagnostics"}
+              description={`Includes version, platform, active line, and errors${playbackLog.path ? ` · ${playbackLog.path}` : ""}`}
+              hasChevron
               disabled={!playbackLog.ready || playbackLog.pending || copyingLog}
               onClick={async () => {
                 setCopyingLog(true);
@@ -800,63 +804,64 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                   setCopyingLog(false);
                 }
               }}
-              className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable disabled:opacity-60"
-            >
-              <span className="ios-setting-icon"><ILink size={16} /></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-on">{copyingLog ? "Copying..." : "Copy Playback Diagnostics"}</div>
-                <div className="text-[12px] text-mut break-all">
-                  Includes version, platform, current line, and playback errors{playbackLog.path ? ` · ${playbackLog.path}` : ""}
-                </div>
-              </div>
-              <IChevR size={15} className="text-mut" />
-            </Button>
-          </Section>
+            />
+          </SettingsSection>
 
-          {/* About & Updates Section */}
-          <Section title="About">
-            <div className="flex items-center gap-3 px-3.5 py-3">
-              <span className="ios-setting-icon"><IRefresh size={16} /></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-on">Auto-Check for Updates</div>
-                <div className="text-[12px] text-mut">Check GitHub Releases on launch when online</div>
-              </div>
-              <Toggle
-                label="Auto-Check for Updates"
-                on={autoUpdateOn}
-                onChange={(on) => {
-                  setAutoUpdateOn(on);
-                  setAutoUpdateCheckEnabled(on);
-                  toast(on ? "Auto-check for updates enabled" : "Auto-check for updates disabled", "info");
-                }}
-              />
-            </div>
-            <Button onClick={checkUpdate} disabled={checking} className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable disabled:opacity-60">
-              <span className="ios-setting-icon"><IRefresh size={16} /></span>
-              <div className="flex-1">
-                <div className="text-[14px] text-on">Check for Updates</div>
-                <div className="text-[12px] text-mut">
-                  {checking
-                    ? "Checking..."
-                    : isAndroidNativeOtaSupported()
-                    ? `Current v${APP_VERSION} · In-app GitHub OTA`
-                    : `Current v${APP_VERSION} · Compare with GitHub Release`}
-                </div>
-              </div>
-              <IChevR size={15} className="text-mut" />
-            </Button>
-            <Button onClick={() => setAbout(true)} className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable">
-              <span className="ios-setting-icon"><IInfo size={16} /></span>
-              <div className="flex-1">
-                <div className="text-[14px] text-on">{t("settings.about")}</div>
-                <div className="text-[12px] text-mut">Version {APP_VERSION} · Open-source non-commercial</div>
-              </div>
-              <IChevR size={15} className="text-mut" />
-            </Button>
-          </Section>
+          {/* Section 9: About & Updates */}
+          <SettingsSection title="About & Updates" subtitle="Version details, licensing, and updates">
+            <SettingItem
+              icon={<IRefresh size={15} />}
+              iconBg="bg-emerald-500/10 text-emerald-500"
+              title="Auto-Check for Updates"
+              description="Check GitHub Releases on startup when online"
+              action={
+                <Toggle
+                  label="Auto-Check for Updates"
+                  on={autoUpdateOn}
+                  onChange={(on) => {
+                    setAutoUpdateOn(on);
+                    setAutoUpdateCheckEnabled(on);
+                    toast(on ? "Auto-check for updates enabled" : "Auto-check for updates disabled", "info");
+                  }}
+                />
+              }
+            />
 
-          <div className="text-center text-[12px] text-dim mt-5">
-            AuraStream v{APP_VERSION} · {platform === "android" ? "Android" : platform === "ios" ? "iOS" : platform === "macos" ? "macOS" : platform === "linux" ? "Linux" : "Windows"} Client
+            <SettingItem
+              icon={<IRefresh size={15} />}
+              iconBg="bg-cyan-500/10 text-cyan-500"
+              title="Check for Updates"
+              description={
+                checking
+                  ? "Checking GitHub Releases..."
+                  : isAndroidNativeOtaSupported()
+                  ? `Current v${APP_VERSION} · In-app GitHub OTA`
+                  : `Current v${APP_VERSION} · Compare with GitHub Release`
+              }
+              hasChevron
+              disabled={checking}
+              onClick={checkUpdate}
+              badge={
+                <span className="px-2 py-0.5 rounded-full bg-s2 text-primary font-mono text-[11px] font-semibold">
+                  v{APP_VERSION}
+                </span>
+              }
+            />
+
+            <SettingItem
+              icon={<IInfo size={15} />}
+              iconBg="bg-indigo-500/10 text-indigo-500"
+              title={t("settings.about")}
+              description="Version, licensing terms, and project information"
+              hasChevron
+              onClick={() => setAbout(true)}
+            />
+          </SettingsSection>
+
+          {/* Clean App Signature Footer */}
+          <div className="text-center text-[11.5px] text-dim/80 py-4 leading-relaxed">
+            AuraStream v{APP_VERSION} ({platform === "android" ? "Android" : platform === "ios" ? "iOS" : "Mobile Client"})
+            <div className="text-[10.5px] text-dim/60 mt-0.5">This App Created by AAA. All rights reserved.</div>
           </div>
         </div>
       </div>
@@ -867,15 +872,15 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
       <Modal open={diagReport !== null} onClose={() => setDiagReport(null)} width={520} label="Network Diagnostics Report">
         <div className="p-5">
           <h2 className="text-[15px] font-bold text-on">Network Diagnostics Report</h2>
-          <p className="text-[13px] text-mut mt-2">Diagnostics completed. Automatic clipboard copy was blocked. You can retry or copy below.</p>
+          <p className="text-[12.5px] text-mut mt-1.5">Diagnostics completed. Automatic clipboard copy was blocked. You can copy the diagnostic details below.</p>
           <TextArea
             readOnly
             aria-label="Network diagnostics report"
             value={diagReport ?? ""}
-            className="w-full h-64 mt-3 p-3 rounded-(--r-sm) bg-s3 text-[12px] text-on resize-none"
+            className="w-full h-56 mt-3 p-3 rounded-xl bg-s3 text-[11.5px] font-mono text-on resize-none border border-edge/30"
           />
-          <div className="flex gap-2 mt-4">
-            <Button onClick={() => setDiagReport(null)} className="flex-1 h-9 rounded-(--r-ctl) bg-s3 text-[14px] text-on pressable">
+          <div className="flex gap-2.5 mt-4">
+            <Button onClick={() => setDiagReport(null)} className="flex-1 h-9 rounded-xl bg-s3 text-[13.5px] text-on pressable">
               Close
             </Button>
             <Button
@@ -888,12 +893,12 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                   toast("Report copied", "ok");
                   setDiagReport(null);
                 } catch {
-                  toast("Copy failed, please select and copy text manually", "info");
+                  toast("Copy failed, please select text manually", "info");
                 } finally {
                   setCopyingReport(false);
                 }
               }}
-              className="flex-1 h-9 rounded-(--r-ctl) brand-grad text-[14px] pressable disabled:opacity-60"
+              className="flex-1 h-9 rounded-xl brand-grad text-[13.5px] text-on-primary font-medium pressable disabled:opacity-60"
             >
               {copyingReport ? "Copying..." : "Copy Report"}
             </Button>
@@ -902,27 +907,27 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
       </Modal>
 
       {/* About Modal */}
-      <Modal open={about} onClose={() => setAbout(false)} width={392} label={t("settings.about")}>
+      <Modal open={about} onClose={() => setAbout(false)} width={390} label={t("settings.about")}>
         <div className="p-5">
-          <div className="flex items-center gap-3">
-            <span className="w-11 h-11 rounded-(--r-sm) brand-grad glow-neon flex items-center justify-center text-on-primary text-[17px] font-black">
+          <div className="flex items-center gap-3.5">
+            <span className="w-11 h-11 rounded-2xl brand-grad shadow-md flex items-center justify-center text-on-primary text-[17px] font-black">
               A
             </span>
             <div>
               <div className="text-[16px] font-bold text-on leading-tight">AuraStream</div>
-              <div className="text-[12px] text-mut mt-0.5">AuraStream Client v{APP_VERSION} · This App Created by AAA. All rights reserved.</div>
+              <div className="text-[11.5px] text-mut mt-0.5">v{APP_VERSION} · This App Created by AAA. All rights reserved.</div>
             </div>
           </div>
 
-          <p className="text-[13px] text-on/70 leading-relaxed mt-4">
-            Modern cross-platform streaming media client built with Rust and Tauri 2, featuring an immersive mobile-first media feed, high-performance offline downloads, and customizable real-time closed captions.
+          <p className="text-[12.5px] text-on/80 leading-relaxed mt-3.5">
+            Modern mobile streaming media client built with Rust and Tauri 2, featuring an immersive mobile-first feed, hardware-accelerated offline downloads, and high-performance playback.
           </p>
 
-          <Surface className="mt-4 rounded-(--r-sm) bg-s3/60 p-3 text-[12px] text-mut leading-relaxed">
+          <Surface className="mt-3.5 rounded-xl bg-s3/60 p-3 text-[11.5px] text-mut leading-relaxed border border-edge/20">
             This project is provided for research and personal use. All content is fetched live from upstream video endpoints; the client does not store or distribute copyrighted material.
           </Surface>
 
-          <div className="mt-4 divide-y divide-s3">
+          <div className="mt-4 divide-y divide-s3/60">
             <Button
               onClick={() => {
                 api.openUrl("https://github.com/cozgams/AuraStream").catch(() => {
@@ -931,20 +936,20 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                     .catch(() => {});
                 });
               }}
-              className="w-full flex items-center gap-2 py-2.5 text-left pressable"
+              className="w-full flex items-center gap-2.5 py-2.5 text-left pressable"
             >
-              <ILink size={15} className="text-mut" />
-              <span className="text-[13px] text-on/85">github.com/cozgams/AuraStream</span>
-              <span className="ml-auto text-[12px] text-primary">Open</span>
+              <ILink size={15} className="text-primary" />
+              <span className="text-[12.5px] text-on/85">github.com/cozgams/AuraStream</span>
+              <span className="ml-auto text-[11.5px] text-primary font-medium">Open</span>
             </Button>
-            <div className="flex items-center gap-2 py-2.5">
+            <div className="flex items-center gap-2.5 py-2.5">
               <IInfo size={15} className="text-mut" />
-              <span className="text-[13px] text-on/85">PolyForm Noncommercial 1.0.0</span>
-              <span className="ml-auto text-[12px] text-mut">Noncommercial</span>
+              <span className="text-[12.5px] text-on/85">PolyForm Noncommercial 1.0.0</span>
+              <span className="ml-auto text-[11.5px] text-mut">Noncommercial</span>
             </div>
           </div>
 
-          <Button onClick={() => setAbout(false)} className="mt-4 w-full h-9 rounded-(--r-ctl) bg-s3 text-[14px] text-on pressable">
+          <Button onClick={() => setAbout(false)} className="mt-4 w-full h-9 rounded-xl bg-s3 text-[13.5px] text-on font-medium pressable">
             Close
           </Button>
         </div>
@@ -954,11 +959,11 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
       <Modal open={clearOpen} onClose={() => setClearOpen(false)} width={330} label="Clear Cache">
         <div className="p-5">
           <div className="text-[15px] font-bold text-on">Clear Cache</div>
-          <p className="text-[13px] text-mut leading-relaxed mt-2">
+          <p className="text-[12.5px] text-mut leading-relaxed mt-2">
             Clears cover thumbnails and decrypted stream manifests. Favorites, watch history, offline downloads, and login state are completely preserved.
           </p>
-          <div className="flex gap-2 mt-5">
-            <Button onClick={() => setClearOpen(false)} className="flex-1 h-9 rounded-(--r-ctl) bg-s3 text-[14px] text-on/80 pressable">
+          <div className="flex gap-2.5 mt-5">
+            <Button onClick={() => setClearOpen(false)} className="flex-1 h-9 rounded-xl bg-s3 text-[13.5px] text-on/80 pressable">
               Cancel
             </Button>
             <Button
@@ -975,7 +980,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 setClearOpen(false);
                 toast(t("settings.cache_cleared"), "ok");
               }}
-              className="flex-1 h-9 rounded-(--r-ctl) bg-primary text-[14px] font-semibold text-on-primary pressable disabled:opacity-60"
+              className="flex-1 h-9 rounded-xl bg-primary text-[13.5px] font-semibold text-on-primary pressable disabled:opacity-60"
             >
               {clearing ? "Clearing..." : "Clear"}
             </Button>

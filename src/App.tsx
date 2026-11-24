@@ -85,6 +85,65 @@ function StackPage({ page, onBack, wide, top, bottomInset }: {
 }
 
 /* ============ Main Application ============ */
+/** Hide covered pages from the compositor to save GPU/RAM while keeping scroll offsets intact */
+function LayerBox({
+  hidden,
+  inert,
+  ariaHidden,
+  className,
+  style,
+  children,
+}: {
+  hidden: boolean;
+  inert: boolean;
+  ariaHidden: boolean;
+  className: string;
+  style?: React.CSSProperties;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const scrollOffsetsRef = useRef<Map<HTMLElement, number>>(new Map());
+  const hiddenRef = useRef(hidden);
+  hiddenRef.current = hidden;
+
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    const onScroll = (e: Event) => {
+      if (hiddenRef.current) return;
+      const target = e.target;
+      if (target instanceof HTMLElement && root.contains(target)) {
+        scrollOffsetsRef.current.set(target, target.scrollTop);
+      }
+    };
+    root.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    return () => {
+      root.removeEventListener("scroll", onScroll, true);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (hidden) return;
+    const saved = scrollOffsetsRef.current;
+    if (!saved.size) return;
+    for (const [el, top] of Array.from(saved.entries())) {
+      if (!el.isConnected) {
+        saved.delete(el);
+        continue;
+      }
+      if (Math.abs(el.scrollTop - top) > 1) el.scrollTop = top;
+    }
+  }, [hidden]);
+
+  const boxClass = hidden ? `${className} hidden pointer-events-none` : className;
+
+  return (
+    <div ref={ref} inert={inert} aria-hidden={ariaHidden} className={boxClass} style={style}>
+      {children}
+    </div>
+  );
+}
+
 function AppBody() {
   const { platform, tab, setTab, stack, pop, loginOpen, setLoginOpen, fs, clean } = useStore();
   const mainRef = useRef<HTMLDivElement>(null);
@@ -125,15 +184,23 @@ function AppBody() {
     <div className={`absolute inset-0 flex bg-canvas plat-${platform}`}>
       {!isMobile && <DesktopRail collapsed={collapsed} />}
       <div ref={mainRef} className="relative flex-1 min-w-0 overflow-hidden win-main">
-        <div className={vis("home")} inert={!pageActive || tab !== "home"} aria-hidden={!pageActive || tab !== "home"}><Home active={pageActive && tab === "home"} bottomInset={bottomInset} /></div>
-        <div className={vis("search")} inert={!pageActive || tab !== "search"} aria-hidden={!pageActive || tab !== "search"}><Search active={pageActive && tab === "search"} wide={wide} /></div>
-        <div className={vis("category")} inert={!pageActive || tab !== "category"} aria-hidden={!pageActive || tab !== "category"}><Category wide={wide} active={pageActive && tab === "category"} /></div>
-        <div className={vis("profile")} inert={!pageActive || tab !== "profile"} aria-hidden={!pageActive || tab !== "profile"}><Profile wide={wide} active={pageActive && tab === "profile"} /></div>
+        <LayerBox hidden={stack.length > 0} inert={!pageActive} ariaHidden={!pageActive} className="absolute inset-0">
+          <div className={vis("home")} inert={!pageActive || tab !== "home"} aria-hidden={!pageActive || tab !== "home"}><Home active={pageActive && tab === "home"} bottomInset={bottomInset} /></div>
+          <div className={vis("search")} inert={!pageActive || tab !== "search"} aria-hidden={!pageActive || tab !== "search"}><Search active={pageActive && tab === "search"} wide={wide} /></div>
+          <div className={vis("category")} inert={!pageActive || tab !== "category"} aria-hidden={!pageActive || tab !== "category"}><Category wide={wide} active={pageActive && tab === "category"} /></div>
+          <div className={vis("profile")} inert={!pageActive || tab !== "profile"} aria-hidden={!pageActive || tab !== "profile"}><Profile wide={wide} active={pageActive && tab === "profile"} /></div>
+        </LayerBox>
 
         {stack.map((p, i) => (
-          <div key={p.key} inert={i !== stack.length - 1 || loginOpen} aria-hidden={i !== stack.length - 1 || loginOpen} className="absolute inset-0 z-30 bg-bg a-page-in" style={{ boxShadow: "-18px 0 40px rgba(0,0,0,.5)" }}>
+          <LayerBox
+            key={p.key}
+            hidden={i !== stack.length - 1}
+            inert={i !== stack.length - 1 || loginOpen}
+            ariaHidden={i !== stack.length - 1 || loginOpen}
+            className="absolute inset-0 z-30 bg-bg a-page-in"
+            style={{ zIndex: 30 + i, boxShadow: "-18px 0 40px rgba(0,0,0,.5)" }}>
             <StackPage page={p} onBack={pop} wide={wide} top={i === stack.length - 1} bottomInset={stackInset} />
-          </div>
+          </LayerBox>
         ))}
 
         {isMobile && !fs && !clean && stack.length === 0 && !loginOpen && tab !== "home" && tab !== "profile" && <ContinueWatchingBar />}
@@ -204,14 +271,22 @@ function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boole
     <div className={`absolute inset-0 flex bg-canvas plat-${platform}`}>
       {!theater && <DesktopRail collapsed={collapsed} />}
       <div ref={mainRef} className={`relative flex-1 min-w-0 overflow-hidden win-main ${theater ? "is-theater-main" : ""}`}>
-        <div className={vis("home")} inert={!pageActive || tab !== "home"} aria-hidden={!pageActive || tab !== "home"}><Home active={pageActive && tab === "home"} bottomInset={14} /></div>
-        <div className={vis("search")} inert={!pageActive || tab !== "search"} aria-hidden={!pageActive || tab !== "search"}><Search active={pageActive && tab === "search"} wide={wide} /></div>
-        <div className={vis("category")} inert={!pageActive || tab !== "category"} aria-hidden={!pageActive || tab !== "category"}><Category wide={wide} active={pageActive && tab === "category"} /></div>
-        <div className={vis("profile")} inert={!pageActive || tab !== "profile"} aria-hidden={!pageActive || tab !== "profile"}><Profile wide={wide} active={pageActive && tab === "profile"} /></div>
+        <LayerBox hidden={stack.length > 0} inert={!pageActive} ariaHidden={!pageActive} className="absolute inset-0">
+          <div className={vis("home")} inert={!pageActive || tab !== "home"} aria-hidden={!pageActive || tab !== "home"}><Home active={pageActive && tab === "home"} bottomInset={14} /></div>
+          <div className={vis("search")} inert={!pageActive || tab !== "search"} aria-hidden={!pageActive || tab !== "search"}><Search active={pageActive && tab === "search"} wide={wide} /></div>
+          <div className={vis("category")} inert={!pageActive || tab !== "category"} aria-hidden={!pageActive || tab !== "category"}><Category wide={wide} active={pageActive && tab === "category"} /></div>
+          <div className={vis("profile")} inert={!pageActive || tab !== "profile"} aria-hidden={!pageActive || tab !== "profile"}><Profile wide={wide} active={pageActive && tab === "profile"} /></div>
+        </LayerBox>
         {stack.map((p, i) => (
-          <div key={p.key} inert={i !== stack.length - 1 || loginOpen} aria-hidden={i !== stack.length - 1 || loginOpen} className="absolute inset-0 z-30 bg-bg win-page-in" style={{ boxShadow: "-18px 0 40px rgba(0,0,0,.5)" }}>
+          <LayerBox
+            key={p.key}
+            hidden={i !== stack.length - 1}
+            inert={i !== stack.length - 1 || loginOpen}
+            ariaHidden={i !== stack.length - 1 || loginOpen}
+            className="absolute inset-0 z-30 bg-bg win-page-in"
+            style={{ zIndex: 30 + i, boxShadow: "-18px 0 40px rgba(0,0,0,.5)" }}>
             <StackPage page={p} onBack={pop} wide={wide} top={i === stack.length - 1} bottomInset={14} />
-          </div>
+          </LayerBox>
         ))}
         {stack.length === 0 && !loginOpen && tab !== "home" && <ContinueWatchingBar />}
       </div>

@@ -955,6 +955,12 @@ pub async fn api_search_hot(_state: State<'_, Api>) -> Result<Value, String> {
     crate::search_hot::fetch().await
 }
 
+/// Popular tags from official homepage SSR.
+#[tauri::command]
+pub async fn api_hot_tags(_state: State<'_, Api>) -> Result<Value, String> {
+    crate::search_hot::fetch_hot_tags().await
+}
+
 #[tauri::command]
 pub async fn api_posts(
     state: State<'_, Api>,

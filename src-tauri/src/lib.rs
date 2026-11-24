@@ -259,6 +259,7 @@ pub fn run() {
             api::api_rank,
             api::api_search,
             api::api_search_hot,
+            api::api_hot_tags,
             api::cache_clear,
             api::api_posts,
             api::api_post,

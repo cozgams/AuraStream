@@ -72,7 +72,7 @@ const NET_FAIL = /dns|timed? ?out|timeout|connection|connect|refused|reset|unrea
 const READ_ONLY = new Set([
   "api_me", "api_feed", "api_original_videos", "api_category", "api_rank", "api_search",
   "api_posts", "api_post", "api_post_comments", "api_video", "api_play", "api_comments",
-  "api_topics", "api_topic", "api_tags", "api_tag_videos", "api_search_hot",
+  "api_topics", "api_topic", "api_tags", "api_tag_videos", "api_search_hot", "api_hot_tags",
   "api_post_playback", "api_post_categories", "api_post_category", "api_related", "api_following", "api_user", "api_user_stats", "api_user_videos",
 ]);
 /** Observer hook for auto line selector */
@@ -235,6 +235,7 @@ export const api = {
   topics: () => call<{ items: TopicCard[] }>("api_topics"),
   topic: (slug: string) => call<TopicDetail>("api_topic", { slug }),
   tags: () => call<{ categories: TagGroup[] }>("api_tags"),
+  hotTags: () => call<{ items: { name: string; slug: string }[] }>("api_hot_tags"),
   tagVideos: (tag: string, page = 1, size = 20) =>
     call<Paged<VideoCard>>("api_tag_videos", { tag, page, size }),
   category: (cate: string, page = 1, size = 20, sort?: string) =>

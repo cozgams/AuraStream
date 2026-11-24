@@ -55,7 +55,7 @@ import {
 import { processEpisodeExport } from "../offline/exportService";
 import { useMediaSession } from "../useMediaSession";
 import {
-  IBack, IBoltF, ICaptions, ICaptionsF, ICheck, IChevR, IChevronDown, IChevronUp, IClock, IClose, ICommentF, ICompress, IDownload, IEye, IExpand, IExport, IFileText,
+  IBack, IBoltF, ICheck, IChevR, IChevronDown, IChevronUp, IClock, IClose, ICommentF, ICompress, IDownload, IEye, IExpand, IExport, IFileText,
   IFastForwardF, ILink, IList, ILockF, IMore, IPauseF, IPlayF, IRewindF, ISearch, IStar, IStarF, ISun, IVertSwap, IVol, IVolMute,
 } from "../icons";
 
@@ -227,6 +227,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [starBurst, setStarBurst] = useState(0);
   /* --- Mobile Gestures --- */
   const [holdSpeed, setHoldSpeed] = useState(false);
+  const [holdRate, setHoldRate] = useState<number>(2);
   const [speedLock, setSpeedLock] = useState(false);
   const [lockArmed, setLockArmed] = useState(false);
   const holdRef = useRef(false);
@@ -603,8 +604,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     copyText(u).then(() => toast(t("player.link_copied") || "Link copied to clipboard", "ok")).catch(() => toast("Failed to copy", "info"));
   };
 
-  /* Playback speed: long press/lock -> 2.0x, else base speed */
-  const effRate = holdSpeed || speedLock ? 2 : rate;
+  /* Playback speed: hold (right 2x..6x, left 0.5x) / lock -> rate */
+  const effRate = holdSpeed ? holdRate : (speedLock ? 2 : rate);
   /* Scrub bar progress percentage */
   const barProgress = barPct ?? (duration ? time / duration : 0);
   /* Fullscreen landscape orientation rotation */
@@ -1017,10 +1018,13 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     const rect = el.getBoundingClientRect();
     const width = rect.width || el.clientWidth || 1;
     try { el.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    const isLeftHalf = (e.clientX - rect.left) < width * 0.5;
+    const initialHoldRate = isLeftHalf ? 0.5 : 2;
     const g = {
       x: e.clientX, y: e.clientY, left: rect.left, startY: e.clientY, t: Date.now(), base: time, width,
       mode: "idle" as "idle" | "hold" | "scrub" | "pan" | "brightness" | "volume",
       startVal: 1,
+      initialRate: initialHoldRate,
       playing: videoRef.current?.el()?.paused === false,
       timer: window.setTimeout(() => {
         const cur = gesture.current;
@@ -1028,11 +1032,12 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         cur.mode = "hold";
         holdRef.current = true;
         setHoldSpeed(true);
+        setHoldRate(initialHoldRate);
         setLockArmed(false);
         lockArmedRef.current = false;
         try { (window as any).AuraNativeExport?.vibrateHaptic?.("medium"); } catch {}
         try { navigator.vibrate?.(25); } catch { /* ignore */ }
-      }, 380) as unknown as number,
+      }, 260) as unknown as number,
     };
     gesture.current = g;
   };
@@ -1056,8 +1061,13 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     const dx = e.clientX - g.x;
     const dy = e.clientY - g.y;
 
-    /* Long press: slide up 64px to lock 2.0x speed */
+    /* Long press: horizontal gear shift (2x, 3x, 4x, 6x) or slide up 64px to lock 2.0x speed */
     if (g.mode === "hold") {
+      if ((g as any).initialRate >= 2) {
+        const STEPS = [2, 3, 4, 6];
+        const stepIdx = Math.max(0, Math.min(STEPS.length - 1, Math.floor((e.clientX - g.x) / 68)));
+        setHoldRate(STEPS[stepIdx]);
+      }
       const armed = g.startY - e.clientY > 64;
       if (armed !== lockArmedRef.current) {
         lockArmedRef.current = armed;
@@ -2354,7 +2364,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           className={`absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 px-3.5 h-8 rounded-full backdrop-blur-md whitespace-nowrap max-w-[calc(100vw-32px)] text-[12px] font-bold elev-2 pressable ${speedLock ? "bg-primary text-on-primary" : "hg-chip hg-gold"}`}
           style={{ top: rotated ? 56 : "calc(max(var(--sat, 0px), 36px) + 54px)" }}>
           <IBoltF size={13} />
-          {effRate}x {speedLock ? "Locked · Tap to unlock" : holdSpeed ? "2.0x · Release to restore" : "Speed"}
+          {effRate}x {speedLock ? "Locked · Tap to unlock" : holdSpeed ? (effRate < 1 ? "Slow-mo · Release to restore" : `${effRate}x · Release to restore`) : "Speed"}
         </Button>
       )}
       {!isDesktop && holdSpeed && (
@@ -2601,124 +2611,114 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               <div className="flex flex-col max-h-[calc(85dvh-52px)] scroll-y px-4 pt-2 pb-5 gap-2.5">
                 {/* 1. Quick Access Action Grid */}
                 <div className="grid grid-cols-4 gap-2">
-                  <Button
+                  <button
                     type="button"
-                    data-card={true}
-                    onClick={() => {
-                      setPanel("episodes");
-                    }}
-                    className="flex flex-col items-center justify-center py-2 px-1 rounded-xl bg-s2 hover:bg-s3 border border-border text-center pressable transition-all"
+                    onClick={() => setPanel("episodes")}
+                    className="flex flex-col items-center justify-center p-2 rounded-2xl bg-s2/90 hover:bg-s3/90 border border-edge/30 text-center pressable transition-all shadow-2xs"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-purple-500/15 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+                    <div className="w-8 h-8 rounded-xl bg-purple-500/15 text-purple-600 dark:text-purple-400 flex items-center justify-center shadow-2xs">
                       <IList size={16} />
                     </div>
-                    <span className="text-[11px] font-bold text-on mt-1 leading-tight">Episodes</span>
-                    <span className="text-[9.5px] text-mut">{episodes.length || 1} eps</span>
-                  </Button>
+                    <span className="text-[11px] font-bold text-on mt-1.5 leading-tight">Episodes</span>
+                    <span className="text-[9.5px] text-mut mt-0.5">{episodes.length || 1} eps</span>
+                  </button>
 
-                  <Button
+                  <button
                     type="button"
-                    data-card={true}
                     onClick={() => {
                       setPanel(null);
                       setDownloadChoiceOpen(true);
                     }}
-                    className="flex flex-col items-center justify-center py-2 px-1 rounded-xl bg-s2 hover:bg-s3 border border-border text-center pressable transition-all"
+                    className="flex flex-col items-center justify-center p-2 rounded-2xl bg-s2/90 hover:bg-s3/90 border border-edge/30 text-center pressable transition-all shadow-2xs"
                   >
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center shadow-2xs ${
                       isDownloaded ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : isDownloadingCurrent ? "bg-amber-500/20 text-amber-600 dark:text-amber-400" : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
                     }`}>
                       {isDownloaded ? <ICheck size={16} strokeWidth={2.6} /> : isDownloadingCurrent ? <Loader className="w-3.5 h-3.5 spinner" /> : <IDownload size={16} />}
                     </div>
-                    <span className="text-[11px] font-bold text-on mt-1 leading-tight">Download</span>
-                    <span className="text-[9.5px] text-mut">{isDownloaded ? "Saved" : "Offline"}</span>
-                  </Button>
+                    <span className="text-[11px] font-bold text-on mt-1.5 leading-tight">Download</span>
+                    <span className="text-[9.5px] text-mut mt-0.5">{isDownloaded ? "Saved" : "Offline"}</span>
+                  </button>
 
-                  <Button
+                  <button
                     type="button"
-                    data-card={true}
                     onClick={() => {
                       const next = store.toggleWatchLaterLocal(curId);
                       toast(next ? "Saved to Watch Later" : "Removed from Watch Later", "ok");
                     }}
-                    className="flex flex-col items-center justify-center py-2 px-1 rounded-xl bg-s2 hover:bg-s3 border border-border text-center pressable transition-all"
+                    className="flex flex-col items-center justify-center p-2 rounded-2xl bg-s2/90 hover:bg-s3/90 border border-edge/30 text-center pressable transition-all shadow-2xs"
                   >
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center shadow-2xs ${
                       store.isWatchLater(curId) ? "bg-amber-500/20 text-amber-600 dark:text-amber-400" : "bg-s3 text-mut"
                     }`}>
                       <IClock size={16} />
                     </div>
-                    <span className="text-[11px] font-bold text-on mt-1 leading-tight">Watch Later</span>
-                    <span className="text-[9.5px] text-mut">{store.isWatchLater(curId) ? "Saved" : "Save"}</span>
-                  </Button>
+                    <span className="text-[11px] font-bold text-on mt-1.5 leading-tight">Watch Later</span>
+                    <span className="text-[9.5px] text-mut mt-0.5">{store.isWatchLater(curId) ? "Saved" : "Save"}</span>
+                  </button>
 
-                  <Button
+                  <button
                     type="button"
-                    data-card={true}
                     onClick={() => {
                       setPanel(null);
                       setClean(true);
                       toast("Clean Screen active (tap video to restore controls)", "info");
                     }}
-                    className="flex flex-col items-center justify-center py-2 px-1 rounded-xl bg-s2 hover:bg-s3 border border-border text-center pressable transition-all"
+                    className="flex flex-col items-center justify-center p-2 rounded-2xl bg-s2/90 hover:bg-s3/90 border border-edge/30 text-center pressable transition-all shadow-2xs"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400 flex items-center justify-center">
+                    <div className="w-8 h-8 rounded-xl bg-sky-500/15 text-sky-600 dark:text-sky-400 flex items-center justify-center shadow-2xs">
                       <IEye size={16} />
                     </div>
-                    <span className="text-[11px] font-bold text-on mt-1 leading-tight">Clean View</span>
-                    <span className="text-[9.5px] text-mut">Hide UI</span>
-                  </Button>
+                    <span className="text-[11px] font-bold text-on mt-1.5 leading-tight">Clean View</span>
+                    <span className="text-[9.5px] text-mut mt-0.5">Hide UI</span>
+                  </button>
                 </div>
 
                 {/* 2. Stream Quality */}
-                <div className="flex flex-col gap-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10.5px] font-bold uppercase tracking-wider text-mut">Stream Quality</span>
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between px-0.5">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-mut">Stream Quality</span>
                     <span className="text-[10px] text-dim">Auto-reconnects on switch</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
-                    <Button
+                    <button
                       type="button"
-                      data-card={true}
-                      style={{ borderRadius: 12 }}
                       aria-pressed={preferHevc}
                       onClick={() => {
                         setPreferHevc(true);
                         toast("HD 1080p HEVC enabled", "ok");
                       }}
-                      className={`p-2.5 rounded-xl border flex flex-col text-left transition-all pressable ${
+                      className={`p-3 rounded-2xl border flex flex-col text-left transition-all pressable shadow-2xs ${
                         preferHevc
-                          ? "border-amber-500/50 bg-white dark:bg-neutral-800 text-on shadow-xs ring-1 ring-amber-500/30"
-                          : "border-border bg-s2 text-on/80 hover:bg-s3"
+                          ? "border-primary/60 bg-primary/10 text-on ring-1 ring-primary/30"
+                          : "border-edge/30 bg-s2/90 text-on/80 hover:bg-s3"
                       }`}
                     >
                       <div className="flex items-center justify-between w-full">
                         <div className="flex items-center gap-1.5">
                           <span className="text-[13px] font-bold text-on">HD 1080p</span>
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-s3 text-mut">HEVC</span>
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">HEVC</span>
                         </div>
                         {preferHevc && (
-                          <div className="w-4 h-4 rounded-full bg-amber-500 flex items-center justify-center text-white">
+                          <div className="w-4 h-4 rounded-full bg-primary flex items-center justify-center text-white shadow-2xs">
                             <ICheck size={11} strokeWidth={3} />
                           </div>
                         )}
                       </div>
-                      <span className="text-[10.5px] text-mut mt-0.5 leading-snug">Ultra clear high definition</span>
-                    </Button>
+                      <span className="text-[10.5px] text-mut mt-1 leading-snug">Ultra clear high definition</span>
+                    </button>
 
-                    <Button
+                    <button
                       type="button"
-                      data-card={true}
-                      style={{ borderRadius: 12 }}
                       aria-pressed={!preferHevc}
                       onClick={() => {
                         setPreferHevc(false);
                         toast("Standard SD 720p enabled", "ok");
                       }}
-                      className={`p-2.5 rounded-xl border flex flex-col text-left transition-all pressable ${
+                      className={`p-3 rounded-2xl border flex flex-col text-left transition-all pressable shadow-2xs ${
                         !preferHevc
-                          ? "border-amber-500/50 bg-white dark:bg-neutral-800 text-on shadow-xs ring-1 ring-amber-500/30"
-                          : "border-border bg-s2 text-on/80 hover:bg-s3"
+                          ? "border-primary/60 bg-primary/10 text-on ring-1 ring-primary/30"
+                          : "border-edge/30 bg-s2/90 text-on/80 hover:bg-s3"
                       }`}
                     >
                       <div className="flex items-center justify-between w-full">
@@ -2727,118 +2727,128 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                           <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-s3 text-mut">Saver</span>
                         </div>
                         {!preferHevc && (
-                          <div className="w-4 h-4 rounded-full bg-amber-500 flex items-center justify-center text-white">
+                          <div className="w-4 h-4 rounded-full bg-primary flex items-center justify-center text-white shadow-2xs">
                             <ICheck size={11} strokeWidth={3} />
                           </div>
                         )}
                       </div>
-                      <span className="text-[10.5px] text-mut mt-0.5 leading-snug">Fast load & data saver</span>
-                    </Button>
+                      <span className="text-[10.5px] text-mut mt-1 leading-snug">Fast load & data saver</span>
+                    </button>
                   </div>
                 </div>
 
-                {/* 2b. Streaming Source & CDN Lines (Feature 3) */}
-                <div className="flex flex-col gap-1 p-2.5 rounded-xl bg-s2 border border-border">
-                  <div className="flex items-center justify-between">
-                    <div className="flex flex-col">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[12.5px] font-bold text-on">Streaming Source</span>
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
-                          4 Lines Active
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-mut mt-0.5">
-                        Primary, Fast CDN & Backup lines with live ping test
+                {/* 2b. Streaming Source & CDN Lines */}
+                <div className="p-3 rounded-2xl bg-s2/90 border border-edge/30 flex items-center justify-between shadow-2xs">
+                  <div className="flex flex-col">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="text-[13px] font-bold text-on">Streaming Source</span>
+                      <span className="text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                        4 Lines Active
                       </span>
                     </div>
-                    <Button
-                      type="button"
-                      data-card={true}
-                      onClick={() => {
-                        setPanel(null);
-                        setLineOpen(true);
-                      }}
-                      className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-neutral-800 border border-border text-[11.5px] font-bold text-on shadow-xs hover:bg-s3 pressable flex items-center gap-1"
-                    >
-                      <span>Switch Line</span>
-                      <IChevR size={12} className="text-mut" />
-                    </Button>
+                    <span className="text-[10.5px] text-mut mt-0.5">
+                      Fast CDN & auto-failover backup
+                    </span>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPanel(null);
+                      setLineOpen(true);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-s1 border border-edge/30 text-[12px] font-bold text-on shadow-2xs hover:bg-s3 pressable flex items-center gap-1"
+                  >
+                    <span>Switch Line</span>
+                    <IChevR size={12} className="text-mut" />
+                  </button>
                 </div>
 
-                {/* 3. Subtitles & Captions */}
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-mut">Subtitles & Captions</span>
-                    <Button
-                      onClick={() => setPanel("captions")}
-                      className="text-[11.5px] text-primary hover:underline font-bold pressable flex items-center gap-0.5"
-                    >
-                      <span>Customize Styles</span>
-                      <IChevR size={12} />
-                    </Button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1.5 bg-s3 p-1 rounded-xl border border-border">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        store.setSubtitleMode("en");
-                        toast(subtitleTrackInfo.hasTrack ? "Captions: On" : "Captions enabled (load .SRT/.VTT in Customize)", "ok");
-                      }}
-                      className={`py-2 rounded-lg text-[13px] font-bold flex items-center justify-center gap-2 transition-all ${
-                        store.subtitleMode === "en"
-                          ? "bg-white dark:bg-neutral-800 text-on shadow-xs border border-black/5 dark:border-white/15"
-                          : "text-mut hover:text-on"
-                      }`}
-                    >
-                      <ICaptions size={15} />
-                      <span>Captions On</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        store.setSubtitleMode("off");
-                        toast("Subtitles: Off", "ok");
-                      }}
-                      className={`py-2 rounded-lg text-[13px] font-bold flex items-center justify-center gap-2 transition-all ${
-                        store.subtitleMode === "off"
-                          ? "bg-white dark:bg-neutral-800 text-on shadow-xs border border-black/5 dark:border-white/15"
-                          : "text-mut hover:text-on"
-                      }`}
-                    >
-                      <span>Off</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* 3b. Voice & Audio Sync (Lip-Sync Correction) */}
-                <div className="flex flex-col gap-1.5">
+                {/* 3. Voice & Audio Sync (Lip-Sync Correction) */}
+                <div className="flex flex-col gap-2 p-3 rounded-2xl bg-s2/90 border border-edge/30 shadow-2xs">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold uppercase tracking-wider text-mut">Voice & Audio Sync</span>
-                    <span className="text-[12px] font-bold text-primary tabular-nums">
+                    <span className={`text-[11.5px] font-bold px-2 py-0.5 rounded-full border ${
+                      audioSyncOffset === 0
+                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                        : "bg-primary/10 text-primary border-primary/25"
+                    }`}>
                       {audioSyncOffset === 0 ? "Synced (0ms)" : `${audioSyncOffset > 0 ? "+" : ""}${audioSyncOffset}ms`}
                     </span>
                   </div>
-                  <div className="grid grid-cols-7 gap-1 bg-s3 p-1 rounded-xl border border-border">
-                    {[-200, -100, -50, 0, 50, 100, 200].map((offset) => (
+
+                  {/* Stepper Bar */}
+                  <div className="flex items-center justify-between bg-s3/80 rounded-xl p-1 border border-edge/20">
+                    <button
+                      type="button"
+                      aria-label="Decrease audio delay by 50ms"
+                      onClick={() => {
+                        const next = Math.max(-500, audioSyncOffset - 50);
+                        setAudioSyncOffset(next);
+                        try { localStorage.setItem("aurastream_audio_sync_offset", String(next)); } catch {}
+                        videoRef.current?.setAudioOffset?.(next);
+                        toast(`Voice offset: ${next > 0 ? "+" : ""}${next}ms`, "ok");
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-s1 hover:bg-s4/40 text-on text-[12px] font-bold pressable flex items-center gap-1 shadow-2xs"
+                    >
+                      <span>-50ms</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      aria-label="Reset audio sync"
+                      onClick={() => {
+                        setAudioSyncOffset(0);
+                        try { localStorage.setItem("aurastream_audio_sync_offset", "0"); } catch {}
+                        videoRef.current?.setAudioOffset?.(0);
+                        toast("Voice synced to video", "ok");
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-center pressable"
+                    >
+                      <span className="text-[12px] font-bold text-on">
+                        {audioSyncOffset === 0 ? "Perfect Sync" : "Tap to Reset (0ms)"}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      aria-label="Increase audio delay by 50ms"
+                      onClick={() => {
+                        const next = Math.min(500, audioSyncOffset + 50);
+                        setAudioSyncOffset(next);
+                        try { localStorage.setItem("aurastream_audio_sync_offset", String(next)); } catch {}
+                        videoRef.current?.setAudioOffset?.(next);
+                        toast(`Voice offset: ${next > 0 ? "+" : ""}${next}ms`, "ok");
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-s1 hover:bg-s4/40 text-on text-[12px] font-bold pressable flex items-center gap-1 shadow-2xs"
+                    >
+                      <span>+50ms</span>
+                    </button>
+                  </div>
+
+                  {/* 3 Quick Presets */}
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {[
+                      { label: "Early (-100ms)", val: -100 },
+                      { label: "Synced (0ms)", val: 0 },
+                      { label: "Delay (+100ms)", val: 100 },
+                    ].map(({ label, val }) => (
                       <button
-                        key={offset}
+                        key={val}
                         type="button"
                         onClick={() => {
-                          setAudioSyncOffset(offset);
-                          try {
-                            localStorage.setItem("aurastream_audio_sync_offset", String(offset));
-                          } catch {}
-                          videoRef.current?.setAudioOffset?.(offset);
-                          toast(offset === 0 ? "Voice synced to video" : `Voice offset: ${offset > 0 ? "+" : ""}${offset}ms`, "ok");
+                          setAudioSyncOffset(val);
+                          try { localStorage.setItem("aurastream_audio_sync_offset", String(val)); } catch {}
+                          videoRef.current?.setAudioOffset?.(val);
+                          toast(val === 0 ? "Voice synced to video" : `Voice offset: ${val > 0 ? "+" : ""}${val}ms`, "ok");
                         }}
-                        className={`py-1.5 rounded-lg text-center text-[11px] font-bold transition-all ${
-                          audioSyncOffset === offset
-                            ? "bg-white dark:bg-neutral-800 text-on shadow-xs border border-black/5 dark:border-white/15"
-                            : "text-mut hover:text-on hover:bg-s4/10"
+                        className={`py-1.5 rounded-lg text-center text-[11px] font-semibold transition-all ${
+                          audioSyncOffset === val
+                            ? "bg-primary text-white shadow-2xs font-bold"
+                            : "bg-s3/60 text-mut hover:text-on hover:bg-s3"
                         }`}
                       >
-                        {offset === 0 ? "0ms" : `${offset > 0 ? "+" : ""}${offset}ms`}
+                        {label}
                       </button>
                     ))}
                   </div>
@@ -2848,12 +2858,12 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 </div>
 
                 {/* 4. Playback Speed */}
-                <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col gap-1.5 p-3 rounded-2xl bg-s2/90 border border-edge/30 shadow-2xs">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold uppercase tracking-wider text-mut">Playback Speed</span>
                     <span className="text-[12px] font-bold text-primary tabular-nums">{rate}x</span>
                   </div>
-                  <div className="grid grid-cols-5 gap-1 bg-s3 p-1 rounded-xl border border-border">
+                  <div className="grid grid-cols-5 gap-1 bg-s3/80 p-1 rounded-xl border border-edge/20">
                     {[0.75, 1, 1.25, 1.5, 2].map((r) => (
                       <button
                         key={r}
@@ -2863,10 +2873,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                           videoRef.current?.rate(r);
                           toast(`Playback Speed: ${r}x`, "info");
                         }}
-                        className={`py-1.5 rounded-lg text-center text-[12.5px] font-bold transition-all ${
+                        className={`py-1.5 rounded-lg text-center text-[12px] font-bold transition-all ${
                           rate === r
-                            ? "bg-white dark:bg-neutral-800 text-on shadow-xs border border-black/5 dark:border-white/15"
-                            : "text-mut hover:text-on hover:bg-s4/10"
+                            ? "bg-primary text-white shadow-2xs font-bold"
+                            : "text-mut hover:text-on"
                         }`}
                       >
                         {r === 1 ? "1.0x" : `${r}x`}
@@ -2876,7 +2886,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 </div>
 
                 {/* 5. Sleep Timer */}
-                <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col gap-1.5 p-3 rounded-2xl bg-s2/90 border border-edge/30 shadow-2xs">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold uppercase tracking-wider text-mut">Sleep Timer</span>
                     {sleepTimer !== "off" && (
@@ -2885,7 +2895,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       </span>
                     )}
                   </div>
-                  <div className="grid grid-cols-5 gap-1 bg-s3 p-1 rounded-xl border border-border">
+                  <div className="grid grid-cols-5 gap-1 bg-s3/80 p-1 rounded-xl border border-edge/20">
                     {[
                       ["off", "Off"],
                       ["15", "15m"],
@@ -2904,10 +2914,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                           setLocalSleepTimer(val as SleepTimerOption);
                           toast(val === "off" ? "Sleep timer disabled" : `Sleep timer set to ${label}`, "ok");
                         }}
-                        className={`py-1.5 rounded-lg text-center text-[12px] font-bold transition-all ${
+                        className={`py-1.5 rounded-lg text-center text-[11.5px] font-bold transition-all ${
                           sleepTimer === val
-                            ? "bg-white dark:bg-neutral-800 text-on shadow-xs border border-black/5 dark:border-white/15"
-                            : "text-mut hover:text-on hover:bg-s4/10"
+                            ? "bg-primary text-white shadow-2xs font-bold"
+                            : "text-mut hover:text-on"
                         }`}
                       >
                         {label}
@@ -2917,12 +2927,12 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 </div>
 
                 {/* 6. Auto-Skip Intro */}
-                <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col gap-1.5 p-3 rounded-2xl bg-s2/90 border border-edge/30 shadow-2xs">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold uppercase tracking-wider text-mut">Auto-Skip Intro</span>
                     <span className="text-[10.5px] text-dim">Bypass intro at start</span>
                   </div>
-                  <div className="grid grid-cols-3 gap-1.5 bg-s3 p-1 rounded-xl border border-border">
+                  <div className="grid grid-cols-3 gap-1 bg-s3/80 p-1 rounded-xl border border-edge/20">
                     {[
                       [0, "Off"],
                       [5, "5s"],
@@ -2940,8 +2950,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                           }}
                           className={`py-1.5 rounded-lg text-center text-[12px] font-bold transition-all ${
                             autoSkipSec === sec
-                              ? "bg-white dark:bg-neutral-800 text-on shadow-xs border border-black/5 dark:border-white/15"
-                              : "text-mut hover:text-on hover:bg-s4/10"
+                              ? "bg-primary text-white shadow-2xs font-bold"
+                              : "text-mut hover:text-on"
                           }`}
                         >
                           {label}
@@ -2952,66 +2962,76 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 </div>
 
                 {/* 7. Vertical Swipe Switch */}
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-mut">Gestures & Navigation</span>
-                  <div
-                    style={{ borderRadius: 14 }}
-                    className="p-3.5 rounded-[14px] border border-border bg-s2 flex items-center justify-between"
-                  >
-                    <div className="pr-3">
-                      <div className="text-[13px] font-bold text-on">Vertical Swipe Switch</div>
-                      <div className="text-[11px] text-mut leading-tight mt-0.5">
-                        Swipe up / down on video to seamlessly jump episodes
-                      </div>
+                <div className="p-3.5 rounded-2xl border border-edge/30 bg-s2/90 flex items-center justify-between shadow-2xs">
+                  <div className="pr-3">
+                    <div className="text-[13px] font-bold text-on">Vertical Swipe Switch</div>
+                    <div className="text-[11px] text-mut leading-tight mt-0.5">
+                      Swipe up / down on video to seamlessly jump episodes
                     </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={swipeEp}
-                      aria-label="Vertical Swipe Switch"
-                      onClick={() => {
-                        setSwipeEp(!swipeEp);
-                        toast(swipeEp ? t("player.swipe_ep_off") : t("player.swipe_ep_on"));
-                      }}
-                      className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                        swipeEp ? "bg-emerald-500" : "bg-s4"
-                      }`}
-                    >
-                      <span
-                        aria-hidden="true"
-                        className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                          swipeEp ? "translate-x-5" : "translate-x-0"
-                        }`}
-                      />
-                    </button>
                   </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={swipeEp}
+                    aria-label="Vertical Swipe Switch"
+                    onClick={() => {
+                      setSwipeEp(!swipeEp);
+                      toast(swipeEp ? t("player.swipe_ep_off") : t("player.swipe_ep_on"));
+                    }}
+                    className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      swipeEp ? "bg-emerald-500" : "bg-s4"
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                        swipeEp ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
                 </div>
 
-                {/* 8. Screen Fit */}
-                <div className="flex flex-col gap-1.5">
+                {/* 8. Display Aspect Ratio */}
+                <div className="flex flex-col gap-1.5 p-3 rounded-2xl bg-s2/90 border border-edge/30 shadow-2xs">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-mut">Display Aspect Ratio</span>
-                  <div className="grid grid-cols-1 gap-2">
-                    <Button
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
                       type="button"
-                      data-card={true}
-                      style={{ borderRadius: 12 }}
                       onClick={() => {
-                        const next = portraitFit === "contain" ? "cover" : "contain";
-                        setPortraitFit(next);
-                        toast(next === "cover" ? "Fill screen mode (cropped)" : "Fit screen mode (original)", "info");
+                        setPortraitFit("contain");
+                        toast("Fit screen mode (original aspect ratio)", "info");
                       }}
-                      className="p-3 rounded-xl border border-border bg-s2 flex flex-col text-left pressable hover:bg-s3"
+                      className={`p-2.5 rounded-xl border flex flex-col text-left transition-all pressable ${
+                        portraitFit === "contain"
+                          ? "border-primary/60 bg-primary/10 text-on ring-1 ring-primary/30"
+                          : "border-edge/30 bg-s1 text-on/80 hover:bg-s3"
+                      }`}
                     >
                       <div className="flex items-center justify-between w-full">
-                        <span className="text-[13px] font-bold text-on">
-                          {portraitFit === "cover" ? "Fill Screen" : "Fit Screen"}
-                        </span>
-                        <ICompress size={15} className="text-primary" />
+                        <span className="text-[12.5px] font-bold text-on">Fit Screen</span>
+                        <ICompress size={14} className="text-primary" />
                       </div>
-                      <span className="text-[10.5px] text-mut mt-0.5 leading-snug">
-                        {portraitFit === "cover" ? "Cropped to fill phone" : "Original aspect ratio"}
-                      </span>
-                    </Button>
+                      <span className="text-[10px] text-mut mt-0.5 leading-snug">Original aspect ratio</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPortraitFit("cover");
+                        toast("Fill screen mode (cropped to phone)", "info");
+                      }}
+                      className={`p-2.5 rounded-xl border flex flex-col text-left transition-all pressable ${
+                        portraitFit === "cover"
+                          ? "border-primary/60 bg-primary/10 text-on ring-1 ring-primary/30"
+                          : "border-edge/30 bg-s1 text-on/80 hover:bg-s3"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="text-[12.5px] font-bold text-on">Fill Screen</span>
+                        <IExpand size={14} className="text-primary" />
+                      </div>
+                      <span className="text-[10px] text-mut mt-0.5 leading-snug">Cropped to fill phone</span>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -3026,38 +3046,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
             top: rotated ? 12 : "calc(max(var(--sat, 0px), 36px) + 8px)",
             right: fs ? (rotated ? "calc(var(--sab, 0px) + 56px)" : 56) : undefined,
           }}>
-          {!fs && !clean && (
-            <Button
-              onClick={() => {
-                if (!subtitleTrackInfo.hasTrack) {
-                  setPanel("captions");
-                  return;
-                }
-                if (store.subtitleMode === "off") {
-                  store.setSubtitleMode("en");
-                  toast("Captions enabled (Tap again to customize)", "info");
-                } else {
-                  setPanel("captions");
-                }
-              }}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setPanel("captions");
-              }}
-              aria-label={t("captions.title")}
-              title={subtitleTrackInfo.hasTrack ? "Closed Captions (Tap to customize)" : "Closed Captions (Tap for AI / .SRT / Live Caption)"}
-              className={`hg-chip w-9 h-9 rounded-full flex items-center justify-center relative pressable elev-1 ${
-                store.subtitleMode === "en" && subtitleTrackInfo.hasTrack
-                  ? "text-white bg-black/60 border border-white/20"
-                  : "text-white/80"
-              }`}
-            >
-              <ICaptions size={17} />
-              {store.subtitleMode === "en" && subtitleTrackInfo.hasTrack && (
-                <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-400 ring-1 ring-black/40" />
-              )}
-            </Button>
-          )}
           {!fs && !clean && <Button onClick={() => setMuted(m => !m)} aria-label={muted ? "Unmute" : "Mute"}
             className="hg-chip w-9 h-9 rounded-full flex items-center justify-center pressable elev-1">
             {muted ? <IVolMute size={17} /> : <IVol size={17} />}

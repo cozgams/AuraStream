@@ -187,11 +187,11 @@ html.theme-light[data-accent="violet"] {
 .ios-page-heading { padding-top:calc(var(--sat,0px) + 24px); padding-bottom:16px; }
 .ios-account-card { border-radius:28px; background:var(--p-s1); padding:22px; box-shadow:0 3px 16px rgb(0 0 0 / .035); }
 .ios-setting-group { border-radius:24px; background:var(--p-s1); box-shadow:none; overflow:hidden; }
-.ios-setting-group>div,.ios-setting-group>button { min-height:76px; padding:16px 18px; }
+.ios-setting-group>div,.ios-setting-group>button { min-height:52px; padding:12px 16px; }
 .ios-setting-group .flex-1 { min-width:0; }
 .ios-setting-group .ios-switch { margin-inline-end:0; }
 .ios-setting-group>:not(:last-child) { border-bottom:.5px solid var(--ios-edge); }
-.ios-setting-icon { display:inline-flex; align-items:center; justify-content:center; flex:none; border-radius:50%; width:36px; height:36px; background:var(--p-pc); color:var(--p-on-pc); }
+.ios-setting-icon { display:inline-flex; align-items:center; justify-content:center; flex:none; border-radius:12px; width:34px; height:34px; background:var(--p-pc); color:var(--p-on-pc); }
 .ios-section-label { font-size:13px; font-weight:500; color:var(--p-mut); margin:28px 0 9px; padding-inline:16px; }
 .ios-overlay { position:fixed; inset:0; z-index:calc(260 + var(--ios-overlay-order,0)); display:flex; padding:24px; align-items:center; justify-content:center; }
 .ios-overlay-backdrop.ios-button { position:absolute; inset:0; width:100%; height:100%; background:var(--ios-scrim); border:0; min-height:0; border-radius:0; box-shadow:none; cursor:default;  }
@@ -318,6 +318,27 @@ body.has-series-detail .hg-tabbar {
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) {
   .ios-dialog,.ios-mobile-nav .hg-glass,.ios-toast-host>div,.win-search-launch { background:var(--ios-glass-solid); }
 }
+/* Narrow screen mobile responsive layout polish */
+@media (max-width: 479px) {
+  .ios-account-card { padding: 16px; border-radius: 26px; }
+  .ios-collection-links { gap: 8px; }
+  .ios-collection-links > .ios-collection-link { gap: 8px; padding: 10px 12px; min-height: 54px; }
+  .ios-collection-links .ios-collection-icon { width: 32px; height: 32px; border-radius: 10px; }
+  .ios-collection-links .ios-collection-title { font-size: 13.5px; line-height: 1.3; }
+  .ios-collection-links .ios-collection-chevron { display: none; }
+  .ios-settings-row { padding: 14px 14px; }
+  .ios-segmented-items > .ios-button { padding: 8px 5px; font-size: 12.5px; white-space: nowrap; }
+}
+@media (max-width: 359px) {
+  .ios-collection-links > .ios-collection-link { gap: 6px; padding: 10px 8px; }
+  .ios-collection-links .ios-collection-icon { width: 30px; height: 30px; }
+  .ios-collection-links .ios-collection-title { font-size: 12px; }
+  .ios-segmented-items > .ios-button { padding: 8px 2px; font-size: 11.5px; }
+  .ios-poster-badge { padding: 0 6.5px; font-size: 11px; }
+  .ios-score-badge { padding: 0 6px; font-size: 11px; }
+  .ios-poster-art.has-score-badge .ios-poster-badge { max-width: calc(100% - 64px); }
+}
+
 @media(forced-colors:active) {
   .ios-button,.ios-input,.ios-dialog,.ios-mobile-nav .hg-glass,.ios-switch-track { border:1px solid ButtonText; }
   .ios-switch[data-state=on] .ios-switch-track,.ios-mobile-nav .hg-drop>.ios-liquid-fill,.ios-segmented-indicator { background:Highlight; }
@@ -425,7 +446,7 @@ body { background:var(--p-canvas); }
   transition:box-shadow .24s ease,border-color .2s ease,background-color .24s ease;
 }
 .ios-setting-group { border-radius:20px; }
-.ios-setting-group>div,.ios-setting-group>button { min-height:78px; }
+.ios-setting-group>div,.ios-setting-group>button { min-height:52px; }
 .ios-setting-group>:not(:last-child) { border-bottom:1px solid var(--ios-edge); }
 
 .ios-button:not([data-card],.ios-icon-button,.ios-switch,.ios-mobile-nav-item,.ios-overlay-backdrop,.win-caption-tool):not([class*="rounded-"]) {
@@ -703,6 +724,27 @@ html[data-platform="android"] .video-surface-overlay .backdrop-blur-xl {
   .ios-switch:not(:disabled):active .ios-switch-thumb { scale:1; }
   .ios-switch[data-platform=android] .ios-switch-track::before { display:none; }
 }
+/* Narrow screen mobile responsive layout polish */
+@media (max-width: 479px) {
+  .ios-account-card { padding: 16px; border-radius: 26px; }
+  .ios-collection-links { gap: 8px; }
+  .ios-collection-links > .ios-collection-link { gap: 8px; padding: 10px 12px; min-height: 54px; }
+  .ios-collection-links .ios-collection-icon { width: 32px; height: 32px; border-radius: 10px; }
+  .ios-collection-links .ios-collection-title { font-size: 13.5px; line-height: 1.3; }
+  .ios-collection-links .ios-collection-chevron { display: none; }
+  .ios-settings-row { padding: 14px 14px; }
+  .ios-segmented-items > .ios-button { padding: 8px 5px; font-size: 12.5px; white-space: nowrap; }
+}
+@media (max-width: 359px) {
+  .ios-collection-links > .ios-collection-link { gap: 6px; padding: 10px 8px; }
+  .ios-collection-links .ios-collection-icon { width: 30px; height: 30px; }
+  .ios-collection-links .ios-collection-title { font-size: 12px; }
+  .ios-segmented-items > .ios-button { padding: 8px 2px; font-size: 11.5px; }
+  .ios-poster-badge { padding: 0 6.5px; font-size: 11px; }
+  .ios-score-badge { padding: 0 6px; font-size: 11px; }
+  .ios-poster-art.has-score-badge .ios-poster-badge { max-width: calc(100% - 64px); }
+}
+
 @media(forced-colors:active) {
   .ios-switch-track,.ios-switch-thumb { background:Canvas; border-color:ButtonText; color:ButtonText; }
   .ios-switch[data-platform=android] .ios-switch-track { background:Canvas; border-color:ButtonText; }

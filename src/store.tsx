@@ -200,10 +200,10 @@ function readLanguagePreference(): Language {
 function readSubtitleModePreference(): SubtitleMode {
   try {
     const saved = readStorage(STORAGE_KEYS.subtitleMode);
-    if (saved === "off") return "off";
-    return "en"; // Default to English subtitles only
+    if (saved === "en") return "en";
+    return "off"; // Default to off
   } catch {
-    return "en";
+    return "off";
   }
 }
 

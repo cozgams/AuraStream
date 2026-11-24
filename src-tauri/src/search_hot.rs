@@ -193,6 +193,90 @@ pub async fn fetch() -> Result<Value, String> {
     Ok(json!({ "items": items }))
 }
 
+const MAX_HOT_TAGS: usize = 50;
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct HotTag {
+    pub name: String,
+    pub slug: String,
+}
+
+fn tag_slug_from_href(href: &str) -> Option<String> {
+    let rest = href.strip_prefix("/tag/")?;
+    let slug = rest.strip_suffix('/').unwrap_or(rest);
+    if slug.is_empty()
+        || slug == "."
+        || slug == ".."
+        || slug
+            .chars()
+            .any(|ch| ch.is_whitespace() || matches!(ch, '/' | '?' | '#' | '\\'))
+    {
+        return None;
+    }
+    Some(slug.to_owned())
+}
+
+pub fn parse_hot_tags(html: &str) -> Result<Vec<HotTag>, String> {
+    let document = Document::from(html);
+    let sections = document.select("section.hg-home-popular-tags");
+    if sections.is_empty() {
+        return Err("Homepage popular tags section not found".into());
+    }
+
+    let mut seen = HashSet::new();
+    let mut items = Vec::new();
+    for section in sections.iter() {
+        for anchor in section.select("a.hg-tagrow__item").iter() {
+            let Some(slug) = anchor
+                .attr("href")
+                .and_then(|href| tag_slug_from_href(&href))
+            else {
+                continue;
+            };
+            let name = normalized_text(anchor);
+            if name.is_empty() || seen.contains(&name) {
+                continue;
+            }
+            seen.insert(name.clone());
+            items.push(HotTag { name, slug });
+            if items.len() == MAX_HOT_TAGS {
+                return Ok(items);
+            }
+        }
+    }
+
+    if items.is_empty() {
+        Err("No popular tags available".into())
+    } else {
+        Ok(items)
+    }
+}
+
+pub async fn fetch_hot_tags() -> Result<Value, String> {
+    let base = crate::net::base();
+    let url = format!("{}/", base.trim_end_matches('/'));
+    let html = tokio::time::timeout(REQUEST_TIMEOUT, async {
+        let referer = format!("{base}/");
+        let mut response = crate::net::get(
+            &url,
+            REQUEST_TIMEOUT,
+            Some("text/html,application/xhtml+xml"),
+            Some(&referer),
+        )
+        .await?;
+        if !response.status().is_success() {
+            return Err(format!("Homepage request failed (HTTP {})", response.status()));
+        }
+        let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+        String::from_utf8(bytes.to_vec()).map_err(|_| "Homepage is not valid UTF-8 HTML".into())
+    })
+    .await
+    .map_err(|_| "Fetching popular tags timed out (12s)".to_string())??;
+
+    let items = parse_hot_tags(&html).map_err(|error| format!("Failed to parse popular tags: {error}"))?;
+    Ok(json!({ "items": items }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{parse_items, video_id_from_href, JS_MAX_SAFE_INTEGER};
@@ -291,5 +375,23 @@ mod tests {
         assert_eq!(items[1].video_id, 15342);
         assert_eq!(items[1].title, "Second Drama");
         assert_eq!(items[1].plays, "85.0w");
+    }
+
+    #[test]
+    fn parses_homepage_popular_tags() {
+        let html = r#"
+            <section class="hg-home-popular-tags">
+              <a class="hg-tagrow__item" href="/tag/romance/">Romance</a>
+              <a class="hg-tagrow__item" href="/tag/ceo/">CEO</a>
+              <a class="hg-tagrow__item" href="/tag/romance/">Romance Duplicate</a>
+              <a class="hg-tagrow__item" href="/other/invalid/">Invalid</a>
+            </section>
+        "#;
+        let tags = parse_hot_tags(html).unwrap();
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags[0].name, "Romance");
+        assert_eq!(tags[0].slug, "romance");
+        assert_eq!(tags[1].name, "CEO");
+        assert_eq!(tags[1].slug, "ceo");
     }
 }

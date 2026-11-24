@@ -28,11 +28,16 @@ export function MediaCard({ title, cover, subtitle, badge, isFinished, progress,
   </Button>;
 }
 
+function completedEpisodeLabel(v: VideoCard): string {
+  const total = Number(v.total_episodes) > 0 ? Number(v.total_episodes) : Number(v.episode_count);
+  return total > 0 ? `All ${total} Eps` : "Completed";
+}
+
 export function WaterfallCard({ v, onOpen, priority = false }: { v: VideoCard; onOpen: () => void; priority?: boolean }) {
   const tagsStr = v.tags?.slice(0, 2).map(formatDramaTag).join(" · ");
   const authorStr = v.author?.name ? formatDramaAuthor(v.author.name) : "AAA";
   return <MediaCard title={v.title} cover={v.cover} onOpen={onOpen} priority={priority} score={v.score}
-    badge={v.is_finished ? "Finished" : `Ep. ${v.episode_count}`}
+    badge={v.is_finished ? completedEpisodeLabel(v) : `Ep. ${v.episode_count}`}
     isFinished={v.is_finished}
     subtitle={tagsStr || authorStr}
     progress={`${fmt(v.hot)} plays`} />;
@@ -50,7 +55,7 @@ export function RowCard({ v, onOpen }: { v: VideoCard; onOpen: () => void }) {
   const tag0 = v.tags?.[0] ? formatDramaTag(v.tags[0]) : "Drama";
   const tagsStr = v.tags?.slice(0, 2).map(formatDramaTag).join(" · ");
   return <div className="ios-row-card"><MediaCard title={v.title} cover={v.cover} score={v.score} onOpen={onOpen}
-    badge={v.is_finished ? "Finished" : `${v.episode_count} Eps`}
+    badge={v.is_finished ? completedEpisodeLabel(v) : `${v.episode_count} Eps`}
     isFinished={v.is_finished}
     subtitle={tagsStr || tag0 || "AuraStream"} />
   </div>;

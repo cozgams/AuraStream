@@ -7,10 +7,10 @@ import { useStore } from "../store";
 import { MediaCard, Masonry, RankRow } from "../components/cards";
 import { Empty, Img } from "../components/ui";
 import { IBack, IChevR, IClose, IFireF, IPlayF, IRefresh, ISearch, ITrophy } from "../icons";
-import { formatDramaTitle } from "../subtitles/dramaTranslator";
+import { formatDramaTag, formatDramaTitle } from "../subtitles/dramaTranslator";
 import { localizeError } from "../i18n";
 
-const HOT_TAGS = ["Urban", "Revenge", "Costume", "System", "Romance", "Campus", "Fantasy", "Workplace", "Drama", "Action", "Mystery", "Sci-Fi"];
+const DEFAULT_HOT_TAGS = ["Urban", "Revenge", "Costume", "System", "Romance", "Campus", "Fantasy", "Workplace", "Drama", "Action", "Mystery", "Sci-Fi"];
 const DISCOVERY_THEMES = ["CEO Romance", "Secret Identity", "Revenge", "Time Travel", "Martial Arts", "Family Drama", "Undercover", "Second Chance"];
 
 export default function Search({ active, wide }: { active: boolean; wide: boolean }) {
@@ -34,6 +34,20 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
   const hotLoadedAt = useRef(0);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const [popularTags, setPopularTags] = useState<string[]>(DEFAULT_HOT_TAGS);
+
+  useEffect(() => {
+    let alive = true;
+    api.hotTags?.()
+      .then((res) => {
+        if (alive && res?.items?.length) {
+          setPopularTags(res.items.map((x) => x.name).filter(Boolean));
+        }
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -314,10 +328,13 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
                 <Button onClick={() => push({ kind: "ranks" })} className="text-[12px] text-primary font-semibold pressable">{t("search.full_rankings")}</Button>
               </div>
               <div className="flex flex-wrap gap-2 mt-3">
-                {HOT_TAGS.map((t) => (
-                  <Button key={t} onClick={() => { setQ(t); submit(t); }}
-                    className="px-3 h-7 rounded-(--r-ctl) bg-s3 text-[13px] text-on/85 pressable">{t}</Button>
-                ))}
+                {popularTags.map((t) => {
+                  const display = formatDramaTag(t);
+                  return (
+                    <Button key={t} onClick={() => { setQ(t); submit(t); }}
+                      className="px-3 h-7 rounded-(--r-ctl) bg-s3 text-[13px] text-on/85 pressable">{display}</Button>
+                  );
+                })}
               </div>
             </Surface>
 

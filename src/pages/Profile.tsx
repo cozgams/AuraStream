@@ -3105,86 +3105,123 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
       <Modal
         open={libraryInfoOpen}
         onClose={() => setLibraryInfoOpen(false)}
-        label="My Local Library"
+        label="Account & Library"
       >
-        <div className="p-4 flex flex-col gap-3 text-center">
-          <div className="relative mx-auto">
-            <div className="w-14 h-14 rounded-full bg-gradient-to-tr from-[#1a73e8] to-[#38bdf8] flex items-center justify-center text-white shadow-md">
-              <IUser size={28} />
+        <div className="p-4 flex flex-col gap-3.5 text-center">
+          {/* Unified Profile Header */}
+          <div className="flex items-center gap-3.5 p-3 rounded-2xl bg-s2/90 border border-edge/30 text-left">
+            <div className="relative shrink-0">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-[#1a73e8] to-[#38bdf8] flex items-center justify-center text-white font-bold text-lg shadow-sm overflow-hidden">
+                {user?.avatar ? (
+                  <img src={user.avatar} alt={user.nickname || "User"} className="w-full h-full object-cover" />
+                ) : user?.nickname ? (
+                  user.nickname.slice(0, 1).toUpperCase()
+                ) : user?.username ? (
+                  user.username.slice(0, 1).toUpperCase()
+                ) : (
+                  <IUser size={24} />
+                )}
+              </div>
+              <span
+                className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-s2 shadow-xs ${
+                  user ? "bg-emerald-500" : "bg-amber-500"
+                }`}
+                title={user ? "Cloud Synced" : "Local Storage"}
+              />
             </div>
-            <span
-              className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-[#22c55e] border-2 border-white dark:border-neutral-900 shadow-xs"
-              title="Local Storage Ready"
-            />
-          </div>
-          <div>
-            <h3 className="text-[17px] font-black text-[#0f172a] dark:text-neutral-100 tracking-tight">
-              My Library
-            </h3>
-            <p className="text-[12px] text-[#64748b] dark:text-neutral-400 mt-1 leading-relaxed">
-              Your history, favorites, playlists, and offline downloads are stored securely and privately on this device.
-            </p>
+            <div className="flex-1 min-w-0">
+              <div className="text-[15.5px] font-bold text-on tracking-tight truncate">
+                {user ? (user.nickname || user.username || user.desc || "AuraStream User") : "Local Guest"}
+              </div>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${user ? "bg-emerald-500" : "bg-amber-500"}`} />
+                <span className="text-[11.5px] font-medium text-mut truncate">
+                  {user?.desc || (user ? "Cloud Synced (Firestore)" : "Local Storage Mode")}
+                </span>
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 mt-1 text-left">
-            <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-neutral-800/80 border border-slate-100 dark:border-white/10">
-              <div className="text-[10px] font-semibold text-[#64748b] dark:text-neutral-400">Watch History</div>
-              <div className="text-[15px] font-black text-[#0f172a] dark:text-neutral-100 mt-0.5">{history.length} items</div>
-            </div>
-            <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-neutral-800/80 border border-slate-100 dark:border-white/10">
-              <div className="text-[10px] font-semibold text-[#64748b] dark:text-neutral-400">Favorites & Saved</div>
-              <div className="text-[15px] font-black text-[#0f172a] dark:text-neutral-100 mt-0.5">{favs.length + (watchLater?.length || 0)} dramas</div>
-            </div>
-            <div className="col-span-2 p-2.5 rounded-xl bg-blue-50/70 dark:bg-blue-500/15 border border-blue-100/80 dark:border-blue-500/25">
-              <div className="text-[10px] font-semibold text-[#1a73e8] dark:text-blue-400">Offline Downloads</div>
-              <div className="text-[14px] font-black text-[#0f172a] dark:text-neutral-100 mt-0.5">
-                {downloads.length} {downloads.length === 1 ? "episode" : "episodes"} ({formatBytes(totalDownloadsBytes)})
+          {/* Symmetrical 3-Column Library Overview Card */}
+          <div className="flex flex-col rounded-2xl bg-s2/90 border border-edge/30 overflow-hidden shadow-xs">
+            <div className="grid grid-cols-3 divide-x divide-edge/20 p-2 text-center">
+              <div className="flex flex-col items-center justify-center py-2 px-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-mut">History</span>
+                <span className="text-[16px] font-black text-on mt-0.5 tabular-nums">{history.length}</span>
+                <span className="text-[9.5px] text-dim">Items</span>
               </div>
+              <div className="flex flex-col items-center justify-center py-2 px-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-mut">Favorites</span>
+                <span className="text-[16px] font-black text-on mt-0.5 tabular-nums">
+                  {favs.length + (watchLater?.length || 0)}
+                </span>
+                <span className="text-[9.5px] text-dim">Dramas</span>
+              </div>
+              <div className="flex flex-col items-center justify-center py-2 px-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-mut">Downloads</span>
+                <span className="text-[16px] font-black text-on mt-0.5 tabular-nums">{downloads.length}</span>
+                <span className="text-[9.5px] text-dim">Episodes</span>
+              </div>
+            </div>
+            <div className="bg-s3/60 px-3 py-1.5 border-t border-edge/20 flex items-center justify-between text-[10.5px] text-mut">
+              <span>Local Storage Footprint</span>
+              <span className="font-mono font-bold text-on">{formatBytes(totalDownloadsBytes)}</span>
             </div>
           </div>
 
           {/* Cloud Sync Status & Action */}
-          <div className="p-3 rounded-2xl bg-slate-50 dark:bg-neutral-800/80 border border-slate-200/80 dark:border-white/10 flex items-center justify-between gap-2 text-left">
+          <div className="p-3 rounded-2xl bg-s2/90 border border-edge/30 flex items-center justify-between gap-2 text-left">
             <div className="min-w-0 flex-1">
-              <div className="text-[12.5px] font-bold text-[#0f172a] dark:text-neutral-100 flex items-center gap-1.5">
-                <span className={`w-2 h-2 rounded-full ${user ? "bg-sky-400" : "bg-emerald-500"}`} />
+              <div className="text-[12.5px] font-bold text-on flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${user ? "bg-emerald-500" : "bg-amber-500"}`} />
                 <span>{user ? "Cloud Sync Active" : "Local Storage Mode"}</span>
               </div>
-              <div className="text-[10.5px] text-[#64748b] dark:text-neutral-400 mt-0.5 truncate">
+              <div className="text-[10.5px] text-mut mt-0.5 truncate">
                 {lastSyncedTime ? `Last synced: ${lastSyncedTime}` : user ? "Connected to Firestore" : "Sign in to sync across devices"}
               </div>
             </div>
-            {user && (
+            {user ? (
               <button
                 type="button"
                 onClick={handleSyncCloud}
                 disabled={syncingCloud}
-                className="px-3 py-1.5 rounded-xl bg-[#1a73e8] text-white text-[11.5px] font-bold flex items-center gap-1.5 pressable disabled:opacity-50 shrink-0"
+                className="px-3 py-1.5 rounded-xl bg-primary text-white text-[11.5px] font-bold flex items-center gap-1.5 pressable disabled:opacity-50 shrink-0 shadow-xs"
               >
                 <IRefresh size={12} className={syncingCloud ? "animate-spin" : ""} />
                 <span>{syncingCloud ? "Syncing..." : "Sync Now"}</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setLibraryInfoOpen(false);
+                  setLoginOpen(true);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-primary text-white text-[11.5px] font-bold pressable shrink-0 shadow-xs"
+              >
+                Sign In
               </button>
             )}
           </div>
 
           {/* Backup & Restore Tools */}
-          <div className="p-3 rounded-2xl bg-slate-50 dark:bg-neutral-800/80 border border-slate-200/80 dark:border-white/10 flex flex-col gap-2 text-left">
-            <div className="text-[11.5px] font-bold uppercase tracking-wider text-[#64748b] dark:text-neutral-400">
+          <div className="p-3 rounded-2xl bg-s2/90 border border-edge/30 flex flex-col gap-2 text-left">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-mut">
               Backup & Transfer
             </div>
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={handleExportBackup}
-                className="py-2 px-3 rounded-xl bg-white dark:bg-neutral-900 border border-slate-200 dark:border-white/10 text-[11.5px] font-bold text-[#0f172a] dark:text-neutral-100 flex items-center justify-center gap-1.5 pressable shadow-xs hover:bg-slate-50"
+                className="py-2.5 px-3 rounded-xl bg-s1 border border-edge/30 text-[12px] font-bold text-on flex items-center justify-center gap-1.5 pressable shadow-2xs hover:bg-s3"
               >
-                <IExport size={13} className="text-[#1a73e8]" />
+                <IExport size={13} className="text-primary" />
                 <span>Export Backup</span>
               </button>
               <button
                 type="button"
                 onClick={() => backupInputRef.current?.click()}
-                className="py-2 px-3 rounded-xl bg-white dark:bg-neutral-900 border border-slate-200 dark:border-white/10 text-[11.5px] font-bold text-[#0f172a] dark:text-neutral-100 flex items-center justify-center gap-1.5 pressable shadow-xs hover:bg-slate-50"
+                className="py-2.5 px-3 rounded-xl bg-s1 border border-edge/30 text-[12px] font-bold text-on flex items-center justify-center gap-1.5 pressable shadow-2xs hover:bg-s3"
               >
                 <IDownload size={13} className="text-emerald-500" />
                 <span>Restore Backup</span>
@@ -3199,42 +3236,29 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
             />
           </div>
 
-          {user ? (
-            <div className="flex flex-col gap-2 mt-1">
-              <div className="text-[12px] text-[#64748b] dark:text-neutral-400">
-                Signed in as <strong className="text-[#0f172a] dark:text-neutral-100">{user.desc || user.nickname || user.username}</strong>
-              </div>
+          {/* Symmetrical Action Buttons */}
+          <div className="flex flex-col gap-2 mt-0.5">
+            {user && (
               <button
                 type="button"
                 onClick={() => {
                   logout();
                   setLibraryInfoOpen(false);
                 }}
-                className="w-full h-10 rounded-xl bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-400 border border-red-200/80 dark:border-red-500/30 text-[13px] font-bold pressable active:scale-95 transition-all"
+                className="w-full h-10 rounded-xl bg-red-500/10 hover:bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/20 text-[12.5px] font-bold pressable active:scale-95 transition-all"
               >
                 Sign Out
               </button>
-            </div>
-          ) : (
+            )}
+
             <button
               type="button"
-              onClick={() => {
-                setLibraryInfoOpen(false);
-                setLoginOpen(true);
-              }}
-              className="w-full h-10 rounded-xl bg-[#1a73e8] text-white text-[13px] font-bold pressable active:scale-95 transition-all mt-1"
+              onClick={() => setLibraryInfoOpen(false)}
+              className="w-full h-11 rounded-xl bg-primary text-white hover:bg-primary/95 text-[13.5px] font-bold pressable active:scale-95 transition-all shadow-xs"
             >
-              Sign In with Email & Firebase
+              Done
             </button>
-          )}
-
-          <button
-            type="button"
-            onClick={() => setLibraryInfoOpen(false)}
-            className="w-full h-10 rounded-xl bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-[#0f172a] dark:text-neutral-100 text-[13px] font-bold pressable active:scale-95 transition-all"
-          >
-            Done
-          </button>
+          </div>
         </div>
       </Modal>
 
