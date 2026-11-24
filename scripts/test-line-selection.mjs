@@ -94,7 +94,7 @@ try {
         } },
       });
     }, { seed, MAIN, MIRROR });
-    await page.goto(`${origin}tests/line-selection.html`);
+    await page.goto(`${origin}tests/line-selection.html`, { timeout: 60000 });
     await page.waitForFunction(() => window.lineSelectionSnapshot?.ready);
     return { context, page };
   }

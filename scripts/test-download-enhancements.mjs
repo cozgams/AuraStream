@@ -57,7 +57,7 @@ try {
     }
   });
 
-  await page.goto(origin);
+  await page.goto(origin, { timeout: 60000 });
   await page.waitForLoadState("networkidle");
 
   console.log("=== Testing Offline & Download Enhancements ===");

@@ -264,11 +264,6 @@ class MainActivity : TauriActivity() {
     activeActivityRef = WeakReference(this)
     isForegroundGlobal = true
     cleanupExportsDir(0L)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-      try {
-        setPictureInPictureParams(PictureInPictureParams.Builder().setAutoEnterEnabled(false).build())
-      } catch (_: Exception) {}
-    }
     createDownloadNotificationChannel()
     requestNotificationPermission()
   }

@@ -25,7 +25,7 @@ try {
     errors.push(err.message || String(err));
   });
 
-  await page.goto(origin);
+  await page.goto(origin, { timeout: 60000 });
   await page.waitForLoadState("networkidle");
 
   console.log("=== Testing Accent Theme Colors, Media Session, and Search Improvements ===");

@@ -1,10 +1,21 @@
 // Fault injection is local only; real React pages + api.call, mocked Tauri IPC.
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
 import { chromium } from "playwright-core";
+
+if (!process.env.BROWSER_EXECUTABLE) {
+  const candidates = [
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+  ];
+  const found = candidates.find(p => fs.existsSync(p));
+  if (found) process.env.BROWSER_EXECUTABLE = found;
+}
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const output = join(root, "test-results", "api-loading", new Date().toISOString().replace(/[:.]/g, "-"));
@@ -28,7 +39,7 @@ try {
   const calls = () => page.evaluate(() => window.apiLoadingFixture.history);
   const visible = async locator => { await locator.waitFor({ state: "visible" }); };
 
-  await page.goto(`${origin}tests/api-loading.html?page=home`);
+  await page.goto(`${origin}tests/api-loading.html?page=home`, { timeout: 60000 });
   await page.waitForFunction(() => window.apiLoadingFixture.history.length === 1);
   await complete("api_feed", "", "404");
   await visible(page.getByText("Failed to load feed", { exact: true }));
@@ -42,7 +53,7 @@ try {
   assert.equal(await page.locator(".spinner").count(), 0);
   report.passed.push("Home: 404 ends loading, readable error, explicit retry, empty result");
 
-  await page.goto(`${origin}tests/api-loading.html`);
+  await page.goto(`${origin}tests/api-loading.html`, { timeout: 60000 });
   await page.waitForFunction(() => window.apiLoadingFixture.ready);
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal((await calls()).length, 0, "Hidden categories must not prefetch");

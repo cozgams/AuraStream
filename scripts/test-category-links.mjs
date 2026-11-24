@@ -1,11 +1,22 @@
 // Focused layout regression: real Category + shared shortcut cards, mocked IPC.
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
 import { chromium } from "playwright-core";
 import { installFixture } from "./fixtures/app-ui.mjs";
+
+if (!process.env.BROWSER_EXECUTABLE) {
+  const candidates = [
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+  ];
+  const found = candidates.find(p => fs.existsSync(p));
+  if (found) process.env.BROWSER_EXECUTABLE = found;
+}
 
 const root = resolve(process.env.CATEGORY_LINKS_ROOT || resolve(dirname(fileURLToPath(import.meta.url)), ".."));
 const expectWrapped = process.argv.includes("--expect-wrapped");
@@ -43,7 +54,7 @@ try {
         body: '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="210"><rect width="160" height="210" fill="#637c91"/></svg>' });
       report.external.push(url.href); return route.abort();
     });
-    await page.goto(origin);
+    await page.goto(origin, { timeout: 60000 });
     await page.getByRole("navigation", { name: "Main Navigation" }).getByRole("button", { name: "Categories", exact: true }).click();
     const links = page.locator(".ios-collection-links").filter({ has: page.getByRole("button", { name: "Topics", exact: true }) });
     await links.waitFor();

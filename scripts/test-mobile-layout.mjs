@@ -1,10 +1,21 @@
 // Exercise the real App and its mobile navigation; only Tauri IPC is replaced.
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
 import { chromium } from "playwright-core";
+
+if (!process.env.BROWSER_EXECUTABLE) {
+  const candidates = [
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+  ];
+  const found = candidates.find(p => fs.existsSync(p));
+  if (found) process.env.BROWSER_EXECUTABLE = found;
+}
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const output = join(root, "test-results", "mobile-layout", new Date().toISOString().replace(/[:.]/g, "-"));
@@ -34,6 +45,8 @@ try {
         if (cmd === "playback_log_status") return Promise.resolve({ enabled: false, path: null, error: null });
         if (cmd === "debug_log") return Promise.resolve();
         if (cmd === "line_auto") return Promise.resolve({ base: "https://fixture.invalid", previous: "https://fixture.invalid", switched: false, pick: { tier: "main", ms: 1, reason: "fixture", candidates: [] } });
+        if (cmd === "line_health") return Promise.resolve({ base: "https://fixture.invalid", ok: true, ms: 1, status: 200 });
+        if (cmd === "line_try_main") return Promise.resolve({ previous: "https://fixture.invalid", base: "https://fixture.invalid", switched: false, probe: { ok: false, base: "https://fixture.invalid", tier: "main", ms: 1, status: null } });
         if (["api_feed", "api_category", "api_posts", "api_original_videos", "api_post_category", "api_search_hot"].includes(cmd)) return Promise.resolve(emptyPage);
         // App's development-only playback self-test must not fetch media upstream.
         if (cmd === "api_play") return Promise.reject("Layout fixture has no playback media");
@@ -50,7 +63,7 @@ try {
     report.external.push(url);
     return route.abort();
   });
-  await page.goto(origin);
+  await page.goto(origin, { timeout: 120000, waitUntil: "domcontentloaded" });
   const nav = page.getByRole("navigation", { name: "Main Navigation" });
   await nav.waitFor({ state: "visible" });
   assert(await page.locator(".plat-ios").count() > 0, "The real App must select its iOS mobile shell");

@@ -297,7 +297,8 @@ Rules:
       }
 
       const data = await res.json();
-      text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      const parts: Array<{ text?: string }> = data.candidates?.[0]?.content?.parts || [];
+      text = parts.map((p) => p.text || "").filter(Boolean).join("\n").trim();
       if (text) break;
     } catch (err) {
       if (signal?.aborted) throw new DOMException("Transcription cancelled", "AbortError");

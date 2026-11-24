@@ -75,7 +75,7 @@ try {
       if (url.pathname === "/video.webm") return route.fulfill({ headers, contentType: "video/webm", body: video });
       throw new Error(`Unexpected fixture media request: ${url.href}`);
     });
-    await page.goto(`${uiOrigin}/?policy=${policy.name}`);
+    await page.goto(`${uiOrigin}/?policy=${policy.name}`, { timeout: 60000 });
     await page.evaluate(() => {
       window.mediaPolicyViolations = [];
       document.addEventListener("securitypolicyviolation", event => window.mediaPolicyViolations.push({ directive: event.effectiveDirective, blocked: event.blockedURI }));

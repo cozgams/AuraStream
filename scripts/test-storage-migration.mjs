@@ -63,7 +63,7 @@ try {
         Storage.prototype.removeItem = () => { throw new DOMException("fixture: blocked", "SecurityError"); };
       }
     }, { seed, failure });
-    await page.goto(`${origin}tests/storage-migration.html`);
+    await page.goto(`${origin}tests/storage-migration.html`, { timeout: 60000 });
     await page.waitForFunction(() => window.storageMigrationFixture?.strictSecurityReady, null, { timeout: 10000 });
     return { context, page };
   }

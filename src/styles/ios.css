@@ -26,7 +26,7 @@
 html.theme-light {
   color-scheme:light;
   --p-canvas:#e8e6e0; --p-bg:#eeece7; --p-s1:#f8f7f3; --p-s2:#f4f2ed;
-  --p-s3:#e7e5df; --p-s4:#d2d0c9; --p-on:#25241f; --p-mut:#625f58; --p-dim:#706d65;
+  --p-s3:#e7e5df; --p-s4:#d2d0c9; --p-on:#181714; --p-mut:#4e4b44; --p-dim:#625f58;
   --p-primary:#0065d5; --p-on-primary:#fff; --p-pc:#e0edff; --p-on-pc:#0052af;
   --p-sec:#e3edfb; --p-on-sec:#0054ad; --p-like:#bd2851; --p-star:#886200;
   --p-success:#247542; --p-danger:#c52b35; --p-on-danger:#fff;
@@ -497,8 +497,9 @@ html[data-accent] .ios-mobile-nav:not([data-over-video=true]) .hg-drop>.ios-liqu
   background: var(--p-primary) !important;
   box-shadow: 0 4px 14px var(--p-glow) !important;
 }
-html:not(.theme-light)[data-accent] .ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item[aria-current=page] {
-  color: var(--p-on-primary) !important;
+.ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item[aria-current=page],
+html[data-accent] .ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item[aria-current=page] {
+  color: var(--p-on-primary, #ffffff) !important;
 }
 
 .ios-dialog { border-radius:32px; background:var(--glass-bg); border-color:var(--glass-edge); box-shadow:var(--ios-shadow); backdrop-filter:blur(28px) saturate(150%); -webkit-backdrop-filter:blur(28px) saturate(150%); }

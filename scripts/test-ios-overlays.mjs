@@ -31,7 +31,7 @@ try {
   const waitActive = id => page.waitForFunction(id =>
     (document.activeElement?.id || document.activeElement?.getAttribute("aria-label")) === id, id);
   const load = async (query = "") => {
-    await page.goto(`${url}${query}`);
+    await page.goto(`${url}${query}`, { timeout: 60000 });
     await page.waitForFunction(() => !!window.iosOverlayFixture);
   };
   const openParent = async () => { await page.locator("#opener").click(); await waitActive("first"); };

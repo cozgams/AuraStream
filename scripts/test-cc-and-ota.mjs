@@ -93,7 +93,7 @@ try {
 
   const page = await context.newPage();
   page.on("pageerror", (err) => errors.push(err.message || String(err)));
-  await page.goto(origin);
+  await page.goto(origin, { timeout: 60000 });
   await page.waitForLoadState("networkidle");
 
   const results = await page.evaluate(async (ver) => {

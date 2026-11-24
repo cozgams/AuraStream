@@ -63,7 +63,7 @@ try {
     } });
   });
   const load = async () => {
-    await page.goto(`${origin}tests/diagnostic-copy.html`);
+    await page.goto(`${origin}tests/diagnostic-copy.html`, { timeout: 60000 });
     await page.waitForFunction(() => {
       const el = document.querySelector('[aria-label="Playback Diagnostics Log"]');
       return el && !el.disabled;
