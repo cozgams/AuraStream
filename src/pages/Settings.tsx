@@ -13,7 +13,7 @@ import { IBack, IBoltF, IBroom, ICaptionsF, ICheck, IChevR, IDownload, IHeart, I
 import UpdateModal from "../components/UpdateModal";
 import { isAutoUpdateCheckEnabled, setAutoUpdateCheckEnabled, isAndroidNativeOtaSupported } from "../otaUpdater";
 import { getAndroidPermissionsStatus, type AndroidPermissionsStatus } from "../offline/exportService";
-import { getSubtitleStyleConfig, setSubtitleStyleConfig } from "../subtitles/aiSubtitleService";
+import { clearSubtitleCache, getSubtitleStyleConfig, setSubtitleStyleConfig } from "../subtitles/aiSubtitleService";
 import type { SubtitleStyleConfig } from "../subtitles/types";
 import {
   getDownloadQualityPreference,
@@ -967,6 +967,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 setClearing(true);
                 try {
                   await api.clearCache();
+                  clearSubtitleCache();
                 } catch {
                   /* ignore */
                 }

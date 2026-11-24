@@ -269,7 +269,7 @@ export default function SubtitleSheet({
       label: hasRealTrack ? "English CC" : "English Only",
       desc: hasRealTrack
         ? `Displaying ${trackInfo?.cueCount || 0} active lines · Auto-translated to English`
-        : "Overlay on · Foreign dialogue auto-translates to English",
+        : "No subtitle track active · Tap Generate Subtitles Now",
       icon: <ILangEn size={22} className="text-amber-500" />,
     },
     {
@@ -467,6 +467,41 @@ export default function SubtitleSheet({
                 </Button>
               )}
             </div>
+
+            {!hasRealTrack && (
+              <div className="p-3 rounded-xl bg-primary/10 border border-primary/25 flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <ISparkles size={15} className="text-primary shrink-0" />
+                    <span className="text-[12.5px] font-bold text-on">Generate English AI Subtitles</span>
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary">Gemini Ready</span>
+                </div>
+                <p className="text-[11px] text-mut leading-snug">
+                  Transcribes drama audio and generates synchronized English subtitles directly for this episode.
+                </p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <Button
+                    type="button"
+                    disabled={transcribing}
+                    onClick={() => void handleAiTranscribe()}
+                    className="flex-1 h-9 rounded-xl bg-primary text-on-primary text-[12px] font-bold flex items-center justify-center gap-1.5 pressable disabled:opacity-60 shadow-xs"
+                  >
+                    <ISparkles size={13} />
+                    <span>{transcribing ? (transcribeStatus || "Transcribing...") : "Generate Subtitles Now"}</span>
+                  </Button>
+                  {transcribing && (
+                    <Button
+                      type="button"
+                      onClick={() => abortCtrlRef.current?.abort()}
+                      className="px-3 h-9 rounded-xl bg-red-500/15 text-red-600 dark:text-red-400 text-[11.5px] font-bold pressable"
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {pasteExpanded && (
               <div className="pt-2 border-t border-border/60 flex flex-col gap-2">
@@ -701,7 +736,12 @@ export default function SubtitleSheet({
                   type="button"
                   data-card={true}
                   style={{ borderRadius: 14 }}
-                  onClick={() => onModeChange(item.id)}
+                  onClick={() => {
+                    onModeChange(item.id);
+                    if (item.id === "en" && !hasRealTrack) {
+                      toast("No subtitle track active yet. Tap 'Generate Subtitles Now' above", "info");
+                    }
+                  }}
                   className={`flex flex-col items-start p-3 rounded-[14px] border text-left pressable transition-all relative ${
                     active
                       ? "bg-amber-500/10 border-amber-500/40 text-on shadow-xs ring-1 ring-amber-500/30"

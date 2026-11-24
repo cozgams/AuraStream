@@ -27,6 +27,8 @@ const STORAGE_KEYS = {
   PREFIX: "aurastream_sub_",
 };
 
+export const BUILTIN_GEMINI_KEY = "";
+
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyleConfig = {
   color: "white",
   edgeStyle: "drop_shadow",
@@ -74,21 +76,22 @@ export function setSubtitleStyleConfig(config: Partial<SubtitleStyleConfig>): vo
 export function getAICaptionConfig(): AICaptionConfig {
   try {
     const rawProvider = localStorage.getItem(STORAGE_KEYS.PROVIDER);
+    const storedGemini = localStorage.getItem(STORAGE_KEYS.GEMINI_KEY);
+    const geminiKey = storedGemini !== null && storedGemini !== undefined ? storedGemini : BUILTIN_GEMINI_KEY;
     const provider: AICaptionConfig["provider"] =
       rawProvider === "gemini" ||
       rawProvider === "groq" ||
       rawProvider === "whisper" ||
       rawProvider === "custom"
         ? rawProvider
-        : "none";
-    const geminiKey = localStorage.getItem(STORAGE_KEYS.GEMINI_KEY) || "";
+        : (geminiKey ? "gemini" : "none");
     const groqKey = localStorage.getItem(STORAGE_KEYS.GROQ_KEY) || "";
     const whisperKey = localStorage.getItem(STORAGE_KEYS.WHISPER_KEY) || "";
     const customUrl = localStorage.getItem(STORAGE_KEYS.CUSTOM_URL) || "";
     const customModel = localStorage.getItem(STORAGE_KEYS.CUSTOM_MODEL) || "";
     return { provider, geminiKey, groqKey, whisperKey, customUrl, customModel };
   } catch {
-    return { provider: "none" };
+    return { provider: "gemini", geminiKey: BUILTIN_GEMINI_KEY };
   }
 }
 
@@ -213,10 +216,15 @@ export async function transcribeWithGemini(
   apiKey?: string,
   signal?: AbortSignal
 ): Promise<SubtitleCue[]> {
-  const key = apiKey || getAICaptionConfig().geminiKey;
+  const key = (apiKey || getAICaptionConfig().geminiKey || BUILTIN_GEMINI_KEY).trim();
   if (!key) throw new Error("Gemini API Key is required for speech recognition");
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(key)}`;
+  const candidateModels = [
+    "gemini-3.5-flash",
+    "gemini-3.5-transcribe",
+    "gemini-3.8-flash",
+    "gemini-3.1-flash-lite",
+  ];
 
   const prompt = `You are an elite short drama subtitle transcriber and professional translator.
 Transcribe the speech in this audio track and generate timed English subtitle cues.
@@ -257,21 +265,41 @@ Rules:
     },
   };
 
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal,
-  });
+  let lastError: Error | null = null;
+  let text = "";
 
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Gemini Audio API error (${res.status}): ${errText}`);
+  for (const model of candidateModels) {
+    if (signal?.aborted) throw new DOMException("Transcription cancelled", "AbortError");
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal,
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        if (res.status === 404 || res.status === 503 || res.status === 429) {
+          lastError = new Error(`Gemini model ${model} unavailable (${res.status}): ${errText}`);
+          continue;
+        }
+        throw new Error(`Gemini Audio API error (${res.status}): ${errText}`);
+      }
+
+      const data = await res.json();
+      text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      if (text) break;
+    } catch (err) {
+      if ((err as Error)?.name === "AbortError" || signal?.aborted) throw err;
+      lastError = err as Error;
+    }
   }
 
-  const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error("No transcription received from Gemini");
+  if (!text) {
+    throw lastError || new Error("No transcription received from Gemini");
+  }
 
   let cleaned = text.trim();
   if (cleaned.startsWith("```")) {
