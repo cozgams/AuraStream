@@ -33,6 +33,18 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
   const hotBusy = useRef(false);
   const hotLoadedAt = useRef(0);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const custom = e as CustomEvent<{ tab: string }>;
+      if (custom.detail?.tab === "search") {
+        scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    };
+    window.addEventListener("hg:scroll-to-top", handler);
+    return () => window.removeEventListener("hg:scroll-to-top", handler);
+  }, []);
 
   useEffect(() => {
     const onReset = () => {
@@ -184,7 +196,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
         </div>
       </div>
 
-      <div className="flex-1 scroll-y px-4 pb-52">
+      <div ref={scrollRef} className="flex-1 scroll-y px-4 pb-52">
         {!querying ? (
           <>
             <Surface role="region" aria-label={t("search.hot")} className="mt-1 rounded-(--r-md) bg-s2 p-3.5 a-rise">

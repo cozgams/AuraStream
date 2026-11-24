@@ -32,6 +32,18 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
   const lineEpochRef = useRef(lineEpoch);
   lineEpochRef.current = lineEpoch;
   const retryKeys = useRef(new Set<string>());
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const custom = e as CustomEvent<{ tab: string }>;
+      if (custom.detail?.tab === "category") {
+        scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    };
+    window.addEventListener("hg:scroll-to-top", handler);
+    return () => window.removeEventListener("hg:scroll-to-top", handler);
+  }, []);
 
   useEffect(() => {
     mounted.current = true;
@@ -96,7 +108,7 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
         <p className="text-[13px] text-mut mt-1">{t("cat.subtitle")}</p>
       </div>
 
-      <div className={`ios-page-body flex-1 scroll-y pt-3 pb-52 ${wide ? "max-w-[1200px] mx-auto" : ""}`}>
+      <div ref={scrollRef} className={`ios-page-body flex-1 scroll-y pt-3 pb-52 ${wide ? "max-w-[1200px] mx-auto" : ""}`}>
         {/* Rankings: full-width featured card */}
         <div className="px-4 mb-2.5">
           <Button

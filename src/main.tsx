@@ -12,6 +12,7 @@ import { installLayoutDiagnostics } from "./layoutDiagnostics";
 installPlaybackPageEvents();
 void initPlaybackLog();
 try {
+  document.documentElement.dataset.platform = platform;
   document.documentElement.classList.remove("theme-amoled");
   localStorage.removeItem("aurastream_amoled_mode_v1");
 } catch {}

@@ -1,6 +1,6 @@
 import { Button, Surface } from "../components/ios/controls";
 import { Loader } from "../components/ios/effects";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fmt } from "../api";
 import type { TopicCard, TagGroup, VideoCard } from "../types";
 import { useStore } from "../store";
@@ -254,16 +254,34 @@ export function TagsPage({ onBack, wide }: { onBack: () => void; wide: boolean }
 }
 
 /* ================= Tag Videos Page ================= */
+const TAG_SORTS = [
+  { id: "default", label: "Default" },
+  { id: "rating", label: "Top Rated" },
+  { id: "episodes", label: "Episodes" },
+] as const;
+
 export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string; onBack: () => void; wide: boolean }) {
   const { push, toast } = useStore();
   const [searching, setSearching] = useState(false);
   const [items, setItems] = useState<VideoCard[]>([]);
+  const [tagSort, setTagSort] = useState<"default" | "rating" | "episodes">("default");
   const [page, setPage] = useState(0);
   const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const busy = useRef(false);
   const sentinel = useRef<HTMLDivElement>(null);
+
+  const displayedItems = useMemo(() => {
+    if (tagSort === "default") return items;
+    const copy = [...items];
+    if (tagSort === "rating") {
+      copy.sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
+    } else if (tagSort === "episodes") {
+      copy.sort((a, b) => (b.episode_count || 0) - (a.episode_count || 0));
+    }
+    return copy;
+  }, [items, tagSort]);
 
   const loadMore = useCallback(async () => {
     if (busy.current || page >= pages) return;
@@ -309,6 +327,27 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
           <span className="text-[12px] text-mut">{items.length} titles</span>
           <Button onClick={() => setSearching(true)} aria-label="Search dramas" className="ml-auto w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><ISearch size={19} /></Button>
         </div>
+        {items.length > 1 && (
+          <div className="px-4 pb-2.5 flex items-center gap-2">
+            <span className="text-[12px] font-semibold text-mut">Sort:</span>
+            <div className="inline-flex rounded-full bg-s2 p-0.5 text-[12px]">
+              {TAG_SORTS.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setTagSort(s.id)}
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all pressable ${
+                    tagSort === s.id
+                      ? "bg-primary text-on-primary shadow-xs"
+                      : "text-mut hover:text-on"
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 scroll-y px-4 pt-3 pb-[calc(var(--sab,48px)+24px)]">
@@ -316,8 +355,8 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
         ) : err && !items.length ? (
           <Empty icon={<TagIcon size={26} />} title="Failed to load" sub={err} action="Retry" onAction={loadMore} />
-        ) : items.length ? (
-          <Masonry videos={items} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: items.map((x) => x.id), index: Math.max(0, items.findIndex((x) => x.id === v.id)), title: name })} />
+        ) : displayedItems.length ? (
+          <Masonry videos={displayedItems} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: displayedItems.map((x) => x.id), index: Math.max(0, displayedItems.findIndex((x) => x.id === v.id)), title: name })} />
         ) : (
           <Empty icon={<TagIcon size={26} />} title="No dramas found in this tag" />
         )}

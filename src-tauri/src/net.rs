@@ -1318,10 +1318,9 @@ pub async fn edge(
     static NEXT_EDGE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let request = NEXT_EDGE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let line_host = url::Url::parse(&cur)
-        .unwrap()
-        .host_str()
-        .unwrap()
-        .to_string();
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_string()))
+        .unwrap_or_else(|| "huangguoai.com".to_string());
     let operation = edge_operation(path);
     let mut attempt = 0;
     let guest_get = method.eq_ignore_ascii_case("GET") && body.is_none() && token.is_none();

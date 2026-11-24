@@ -33,6 +33,13 @@ function TabBar() {
     { key: "profile", label: t("nav.profile"), Icon: IUser, Active: IUserF },
   ] as const;
   const index = items.findIndex(item => item.key === tab);
+  const handleTabClick = (key: Tab) => {
+    if (tab === key) {
+      window.dispatchEvent(new CustomEvent("hg:scroll-to-top", { detail: { tab: key } }));
+    } else {
+      setTab(key);
+    }
+  };
   return <nav className="hg-tabbar ios-mobile-nav" aria-label="Main Navigation" data-over-video={tab === "home"}
     style={{ paddingBottom: platform === "android" ? "max(var(--sab, 0px), 48px)" : "calc(var(--sab, 16px) * .55)" }}>
       <div className="hg-glass">
@@ -40,7 +47,7 @@ function TabBar() {
       <div className="ios-mobile-nav-items">
         {items.map(({ key, label, Icon, Active }) => {
           const Glyph = tab === key ? Active : Icon;
-          return <Button key={key} className="ios-mobile-nav-item" onClick={() => setTab(key)}
+          return <Button key={key} className="ios-mobile-nav-item" onClick={() => handleTabClick(key)}
             aria-label={label}
             aria-current={tab === key ? "page" : undefined}>
             <Glyph size={22} /><span>{label}</span>

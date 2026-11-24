@@ -156,6 +156,19 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
 
   const [cards, setCards] = useState<Detail[]>([]);
   const [favSort, setFavSort] = useState<"recent" | "finished" | "episodes">("recent");
+  const [favStatusFilter, setFavStatusFilter] = useState<"all" | "ongoing" | "finished">("all");
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const custom = e as CustomEvent<{ tab: string }>;
+      if (custom.detail?.tab === "profile") {
+        scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    };
+    window.addEventListener("hg:scroll-to-top", handler);
+    return () => window.removeEventListener("hg:scroll-to-top", handler);
+  }, []);
   const [downloads, setDownloads] = useState<OfflineEpisode[]>(() => getOfflineEpisodes());
   const [storageStats, setStorageStats] = useState<DeviceStorageStats | null>(null);
   const [batchProgress, setBatchProgress] = useState<BatchProgressState>(getBatchProgress);
@@ -716,16 +729,31 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
 
   const progressOf = (id: number) => (view === "history" ? history.find((h) => h.id === id) : undefined);
 
+  const statusCounts = useMemo(() => {
+    let ongoing = 0;
+    let finished = 0;
+    for (const c of cards) {
+      if (c.is_finished) finished++;
+      else ongoing++;
+    }
+    return { all: cards.length, ongoing, finished };
+  }, [cards]);
+
   const displayedCards = useMemo(() => {
-    if ((view !== "favs" && view !== "watchlater") || favSort === "recent") return cards;
-    const copy = [...cards];
+    let filtered = cards;
+    if (view === "favs" || view === "watchlater") {
+      if (favStatusFilter === "ongoing") filtered = cards.filter((c) => !c.is_finished);
+      else if (favStatusFilter === "finished") filtered = cards.filter((c) => c.is_finished);
+    }
+    if ((view !== "favs" && view !== "watchlater") || favSort === "recent") return filtered;
+    const copy = [...filtered];
     if (favSort === "finished") {
       copy.sort((a, b) => (b.is_finished ? 1 : 0) - (a.is_finished ? 1 : 0));
     } else if (favSort === "episodes") {
       copy.sort((a, b) => (b.episode_count || 0) - (a.episode_count || 0));
     }
     return copy;
-  }, [cards, view, favSort]);
+  }, [cards, view, favSort, favStatusFilter]);
 
   // Fetch full cards when in a dedicated subview (with offline fallback to detailCache / history / downloads)
   useEffect(() => {
@@ -1024,6 +1052,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
           Main Body Content
           ========================================================================= */}
       <div
+        ref={scrollRef}
         className="ios-page-body flex-1 scroll-y overflow-x-hidden px-4 pt-0"
         style={{ paddingBottom: "calc(var(--sab, 48px) + 140px)" }}
       >
@@ -2636,27 +2665,52 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
               ===================================================================== */
           <div className="flex flex-col gap-2.5 a-rise">
             {(view === "favs" || view === "watchlater") && cards.length > 1 && (
-              <div className="flex items-center gap-2 px-1 mb-1">
-                <span className="text-[12px] font-semibold text-[#64748b] dark:text-neutral-400">Sort:</span>
-                <div className="inline-flex rounded-full bg-slate-200/60 dark:bg-white/10 p-0.5 text-[12px]">
-                  {([
-                    { id: "recent", label: "Recent" },
-                    { id: "finished", label: "Finished First" },
-                    { id: "episodes", label: "Episodes" },
-                  ] as const).map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => setFavSort(s.id)}
-                      className={`px-3 py-1 rounded-full text-[11.5px] font-semibold transition-all pressable ${
-                        favSort === s.id
-                          ? "bg-primary text-on-primary shadow-xs"
-                          : "text-[#64748b] dark:text-neutral-400 hover:text-[#0f172a] dark:hover:text-white"
-                      }`}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
+              <div className="flex flex-wrap items-center justify-between gap-2 px-1 mb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[12px] font-semibold text-[#64748b] dark:text-neutral-400">Status:</span>
+                  <div className="inline-flex rounded-full bg-slate-200/60 dark:bg-white/10 p-0.5 text-[12px]">
+                    {([
+                      { id: "all", label: `All (${statusCounts.all})` },
+                      { id: "ongoing", label: `In-Progress (${statusCounts.ongoing})` },
+                      { id: "finished", label: `Finished (${statusCounts.finished})` },
+                    ] as const).map((st) => (
+                      <button
+                        key={st.id}
+                        type="button"
+                        onClick={() => setFavStatusFilter(st.id)}
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all pressable ${
+                          favStatusFilter === st.id
+                            ? "bg-primary text-on-primary shadow-xs"
+                            : "text-[#64748b] dark:text-neutral-400 hover:text-[#0f172a] dark:hover:text-white"
+                        }`}
+                      >
+                        {st.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[12px] font-semibold text-[#64748b] dark:text-neutral-400">Sort:</span>
+                  <div className="inline-flex rounded-full bg-slate-200/60 dark:bg-white/10 p-0.5 text-[12px]">
+                    {([
+                      { id: "recent", label: "Recent" },
+                      { id: "finished", label: "Finished First" },
+                      { id: "episodes", label: "Episodes" },
+                    ] as const).map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => setFavSort(s.id)}
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all pressable ${
+                          favSort === s.id
+                            ? "bg-primary text-on-primary shadow-xs"
+                            : "text-[#64748b] dark:text-neutral-400 hover:text-[#0f172a] dark:hover:text-white"
+                        }`}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
