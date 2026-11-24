@@ -1,13 +1,16 @@
+import { Button } from "../components/ios/controls";
 import { Loader } from "../components/ios/effects";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Feed from "../components/Feed";
-import { api } from "../api";
+import LinePicker from "../components/LinePicker";
+import { api, logLine } from "../api";
 import type { VideoCard } from "../types";
 import { useStore } from "../store";
 import { ISearch } from "../icons";
 import { Empty } from "../components/ui";
 import { localizeError } from "../i18n";
 import { ensureOfflineSyncReady, getOfflineEpisodes } from "../offline/downloadService";
+import { autoLineEnabled, triggerImmediateFailover } from "../autoLine";
 
 /* Fisher-Yates shuffle: randomize initial feed items for fresh discovery */
 function shuffle<T>(arr: T[]): T[] {
@@ -23,11 +26,13 @@ export default function Home({ active, bottomInset }: { active: boolean; bottomI
   const { toast, lineEpoch } = useStore();
   const [items, setItems] = useState<VideoCard[]>([]);
   const [offlineFallbackMode, setOfflineFallbackMode] = useState(false);
+  const [linePickerOpen, setLinePickerOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
   const loadingRef = useRef(false);
+  const failoverAttempted = useRef(false);
   /* Pagination backoff: 5s cooldown on error before retry */
   const retryAt = useRef(0);
   const failStreak = useRef(0);
@@ -107,6 +112,16 @@ export default function Home({ active, bottomInset }: { active: boolean; bottomI
         // Fallback to offline downloaded dramas if first page fails and offline dramas exist
         if (p === 1 && !itemsRef.current.length) {
           if (await tryLoadOfflineHome()) return;
+          if (autoLineEnabled() && !failoverAttempted.current && /HTTP (500|502|503|504)|network/i.test(message)) {
+            failoverAttempted.current = true;
+            logLine("[feed] upstream line returned 50x/network error, triggering auto failover");
+            try {
+              await triggerImmediateFailover("feed-error");
+              retryAfterLineChange = true;
+            } catch {
+              /* Ignore failover errors and display error message */
+            }
+          }
         }
         setError(message);
         if (p > 1) retryAt.current = Date.now() + 5000;
@@ -159,7 +174,16 @@ export default function Home({ active, bottomInset }: { active: boolean; bottomI
           onNearEnd={() => { if (!loading && !done && Date.now() >= retryAt.current) load(page + 1); }} />
       ) : !loading && error ? (
         <div className="absolute inset-0 flex items-center justify-center bg-bg">
-          <Empty icon={<ISearch size={26} />} title="Failed to load feed" sub={error} action="Retry" onAction={() => void load(1)} />
+          <div className="ios-empty flex flex-col items-center justify-center py-8 pb-24 sm:py-14 sm:pb-14 px-6 text-center a-rise">
+            <div className="w-14 h-14 rounded-(--r-md) tonal flex items-center justify-center mb-3.5"><ISearch size={26} /></div>
+            <div className="text-[15px] sm:text-[16px] font-semibold text-on/90">Failed to load feed</div>
+            {error && <div className="text-xs text-mut mt-1 leading-relaxed max-w-xs">{error}</div>}
+            <div className="flex items-center gap-3 mt-4">
+              <Button onClick={() => void load(1)} className="px-5 h-9 rounded-(--r-ctl) bg-primary text-on-primary text-[13px] font-bold pressable">Retry</Button>
+              <Button onClick={() => setLinePickerOpen(true)} className="px-4 h-9 rounded-(--r-ctl) bg-s3 text-on text-[13px] font-medium pressable">Switch Line</Button>
+            </div>
+          </div>
+          <LinePicker open={linePickerOpen} onClose={() => setLinePickerOpen(false)} />
         </div>
       ) : !loading && done ? (
         <div className="absolute inset-0 flex items-center justify-center bg-bg"><Empty icon={<ISearch size={26} />} title="No dramas available" /></div>

@@ -158,7 +158,7 @@ async function check(reason: string): Promise<void> {
     downStreak += 1;
     logLine(`[line] health(${reason}) down=${downStreak} base=${hostOf(health.base)} ms=${health.ms}`);
     tracePlayback("line.health", { reason, line: hostOf(health.base), down: downStreak, ms: health.ms, status: health.status });
-    if (reason !== "api-fail" && downStreak < 2) {
+    if (reason !== "api-fail" && reason !== "server-error" && downStreak < 2) {
       schedule(RECHECK_MS);
       return;
     }
@@ -197,8 +197,13 @@ function attach() {
     if (!autoLineEnabled()) return;
     if (!result.cmd.startsWith("api_")) return;
     if (result.ok) { failStreak = 0; return; }
-    const isServerFail = Boolean(result.msg && /HTTP (404|500|502|503|504)\b/i.test(result.msg));
-    if ((!result.networkish && !isServerFail) || ++failStreak < 2) return;
+    const isServerFail = Boolean(result.msg && /HTTP (500|502|503|504)\b/i.test(result.msg));
+    if (isServerFail) {
+      failStreak = 0;
+      void check("server-error");
+      return;
+    }
+    if (!result.networkish || ++failStreak < 2) return;
     failStreak = 0;
     void check("api-fail");
   });
@@ -226,4 +231,10 @@ export function initAutoLine(): void {
   if (!autoLineEnabled()) return;
   attach();
   void pickLine("boot");
+}
+
+export async function triggerImmediateFailover(reason = "manual"): Promise<void> {
+  downStreak = 0;
+  step = 0;
+  await pickLine(reason, true);
 }

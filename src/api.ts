@@ -136,7 +136,7 @@ async function callNetwork<T>(cmd: string, args?: Record<string, unknown>): Prom
     const status = /^HTTP (\d{3})\b/.exec(msg)?.[1];
     const networkish = !status && NET_FAIL.test(msg);
     const isTransientServer = Boolean(status && ["500", "502", "503", "504", "429"].includes(status));
-    const retryable = (networkish || isTransientServer) && READ_ONLY.has(cmd);
+    const retryable = networkish && READ_ONLY.has(cmd);
     // Log full error details to disk
     logLine(`[api] ${cmd} → ${msg}`);
     tracePlayback("api.fail", { cmd, err: msg, status: status ?? null, networkish, isTransientServer });

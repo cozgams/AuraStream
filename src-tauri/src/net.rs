@@ -1075,6 +1075,25 @@ async fn probe_proxy_origin(origin: &str, config: &crate::proxy::Config, strict:
             continue;
         }
         if status != 200 {
+            // If /api/edge/request returned 503 or 404, probe direct GET /api/videos?page=1&size=1
+            if status == 503 || status == 404 {
+                if let Ok(direct_target) = network_policy::parse_target_with_mode(&format!("{origin}/api/videos?page=1&size=1"), strict) {
+                    let direct_route = ProxyRoute::for_config(config, &direct_target);
+                    let direct_addrs = if strict && !direct_route.active { network_policy::resolve_target(&direct_target, strict).await.unwrap_or_default() } else { Vec::new() };
+                    if let Ok(direct_client) = build_client(direct_target.host_str().unwrap_or(""), &direct_addrs, &direct_route) {
+                        if let Ok(direct_resp) = direct_client.get(direct_target).header("Accept", "application/json").header("Referer", format!("{origin}/")).send().await {
+                            let d_status = direct_resp.status().as_u16();
+                            if d_status == 200 {
+                                if let Ok(d_body) = direct_resp.bytes().await {
+                                    if healthy_proxy_response(d_status, &d_body) {
+                                        return Ok(json!({"ok": true, "status": d_status, "via": direct_route.label()}));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             return Ok(json!({"ok": false, "status": status, "via": route.label(), "error": ""}));
         }
         let mut response = response;
@@ -1311,7 +1330,7 @@ pub async fn edge(
         "content_type": ctype,
     });
 
-    let url = format!("{cur}/api/edge/request");
+    let direct_url = format!("{cur}{path}");
     let referer = format!("{cur}/");
     let token = token.map(|s| s.to_string());
 
@@ -1325,14 +1344,17 @@ pub async fn edge(
     let mut attempt = 0;
     let guest_get = method.eq_ignore_ascii_case("GET") && body.is_none() && token.is_none();
     let can_retry = method.eq_ignore_ascii_case("GET") && body.is_none();
+    let body_ref = body.clone();
     let value = with_retry(can_retry, || {
         attempt += 1;
         let attempt = attempt;
         let envelope = envelope.clone();
         let token = token.clone();
-        let url = url.clone();
+        let direct_url = direct_url.clone();
+        let cur = cur.clone();
         let referer = referer.clone();
         let line_host = line_host.clone();
+        let body = body_ref.clone();
         async move {
             let started = Instant::now();
             crate::playback_log::record("api.begin", json!({"request": request, "attempt": attempt, "operation": operation, "method": method, "line_host": line_host}));
@@ -1342,15 +1364,38 @@ pub async fn edge(
             let mut response_kind = "unknown";
             let mut gateway = "other";
             let result = async {
-                let mut next = network_policy::parse_target(&url)?;
+                let mut next = network_policy::parse_target(&direct_url)?;
                 for hop in 0..=5 {
                     let (target, client) = client_for(next.as_str()).await?;
                     target_host = target.host_str().unwrap_or("").to_string();
-                    let mut req = client
-                        .post(target.clone())
+                    let method_upper = method.to_ascii_uppercase();
+                    let mut req = match method_upper.as_str() {
+                        "POST" => {
+                            let mut r = client.post(target.clone());
+                            if let Some(b) = &body {
+                                r = r.header("Content-Type", "application/json").json(b);
+                            }
+                            r
+                        }
+                        "PUT" => {
+                            let mut r = client.put(target.clone());
+                            if let Some(b) = &body {
+                                r = r.header("Content-Type", "application/json").json(b);
+                            }
+                            r
+                        }
+                        "DELETE" => {
+                            let mut r = client.delete(target.clone());
+                            if let Some(b) = &body {
+                                r = r.header("Content-Type", "application/json").json(b);
+                            }
+                            r
+                        }
+                        _ => client.get(target.clone()),
+                    };
+                    req = req
                         .header("Accept", "application/json")
-                        .header("Referer", &referer)
-                        .json(&envelope);
+                        .header("Referer", &referer);
                     if let Some(t) = token.as_deref() {
                         if !t.is_empty() {
                             req = req.header("Authorization", format!("Bearer {t}"));
@@ -1376,6 +1421,37 @@ pub async fn edge(
                         next = edge_redirect_target(&target, status.as_u16(), location, guest_get)?;
                         continue;
                     }
+
+                    // Fallback to legacy /api/edge/request envelope only if direct path returned 404 or 405
+                    if (status.as_u16() == 404 || status.as_u16() == 405) && !path.starts_with("/api/edge/") {
+                        if let Ok(fallback_target) = network_policy::parse_target(&format!("{cur}/api/edge/request")) {
+                            if let Ok((fb_target, fb_client)) = client_for(fallback_target.as_str()).await {
+                                let mut fb_req = fb_client
+                                    .post(fb_target)
+                                    .header("Accept", "application/json")
+                                    .header("Referer", &referer)
+                                    .json(&envelope);
+                                if let Some(t) = token.as_deref() {
+                                    if !t.is_empty() {
+                                        fb_req = fb_req.header("Authorization", format!("Bearer {t}"));
+                                    }
+                                }
+                                if let Ok(fb_resp) = fb_req.send().await {
+                                    let fb_status = fb_resp.status();
+                                    if fb_status.is_success() {
+                                        if let Ok(fb_text) = fb_resp.text().await {
+                                            if let Ok(fb_val) = serde_json::from_str::<Value>(&fb_text) {
+                                                if fb_val.get("status").and_then(|v| v.as_i64()) == Some(1) {
+                                                    return Ok(fb_val);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     let text = resp.text().await.map_err(|e| err_text(&e))?;
                     if status.as_u16() == 401 || status.as_u16() == 403 {
                         return Err("401".to_string());
@@ -1412,15 +1488,19 @@ pub async fn edge(
         return Ok(Value::Null);
     }
 
-    if value.get("status").and_then(|v| v.as_i64()) == Some(1) {
-        Ok(value.get("data").cloned().unwrap_or(Value::Null))
+    if let Some(status) = value.get("status").and_then(|v| v.as_i64()) {
+        if status == 1 {
+            Ok(value.get("data").cloned().unwrap_or(Value::Null))
+        } else {
+            Err(value
+                .get("msg")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("API returned failure")
+                .to_string())
+        }
     } else {
-        Err(value
-            .get("msg")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .unwrap_or("API returned failure")
-            .to_string())
+        Ok(value)
     }
 }
 
