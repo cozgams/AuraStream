@@ -220,11 +220,11 @@ export async function transcribeWithGemini(
   if (!key) throw new Error("Gemini API Key is required for speech recognition");
 
   const candidateModels = [
-    "gemini-3.5-flash",
-    "gemini-3.5-transcribe",
-    "gemini-2.5-flash",
-    "gemini-flash-latest",
+    "gemini-3.5-flash-lite",
+    "gemini-flash-lite-latest",
     "gemini-3.1-flash-lite",
+    "gemini-3.8-flash",
+    "gemini-3.5-flash",
   ];
 
   const prompt = `You are an elite short drama subtitle transcriber and professional translator.
@@ -272,29 +272,39 @@ Rules:
   for (const model of candidateModels) {
     if (signal?.aborted) throw new DOMException("Transcription cancelled", "AbortError");
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+    const modelCtrl = new AbortController();
+    const modelTimer = setTimeout(() => {
+      modelCtrl.abort(new DOMException(`Candidate model ${model} timed out after 15s`, "TimeoutError"));
+    }, 15000);
+    const onParentAbort = () => modelCtrl.abort(signal?.reason);
+    signal?.addEventListener("abort", onParentAbort, { once: true });
+
     try {
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-        signal,
+        signal: modelCtrl.signal,
       });
 
       if (!res.ok) {
         const errText = await res.text();
-        if (res.status === 404 || res.status === 503 || res.status === 429) {
-          lastError = new Error(`Gemini model ${model} unavailable (${res.status}): ${errText}`);
-          continue;
+        if (res.status === 401 || res.status === 403) {
+          throw new Error(`Invalid Gemini API Key (${res.status}): Please check your API key in Settings.`);
         }
-        throw new Error(`Gemini Audio API error (${res.status}): ${errText}`);
+        lastError = new Error(`Gemini model ${model} failed (${res.status}): ${errText}`);
+        continue;
       }
 
       const data = await res.json();
       text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
       if (text) break;
     } catch (err) {
-      if ((err as Error)?.name === "AbortError" || signal?.aborted) throw err;
+      if (signal?.aborted) throw new DOMException("Transcription cancelled", "AbortError");
       lastError = err as Error;
+    } finally {
+      clearTimeout(modelTimer);
+      signal?.removeEventListener("abort", onParentAbort);
     }
   }
 
@@ -538,7 +548,7 @@ async function collectEpisodeMediaForAI(
   streamUrl: string,
   opts?: { preferWav?: boolean; signal?: AbortSignal; onStatus?: (msg: string) => void }
 ): Promise<{ blob: Blob; mimeType: string; fileName: string }> {
-  const MAX_AUDIO_BYTES = 18 * 1024 * 1024;
+  const MAX_AUDIO_BYTES = 12 * 1024 * 1024;
   const MAX_WAV_UPLOAD_BYTES = 24 * 1024 * 1024;
   const MAX_SEGMENTS = 120;
   const CONCURRENCY = 3;

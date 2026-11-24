@@ -175,25 +175,47 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     }
   }, [paused, waiting, isDesktop, active, wake]);
 
-  /* Keep Android Screen Awake while actively playing video */
+  /* Keep Android Screen Awake while actively playing video with auto-reacquire on resume */
   useEffect(() => {
     const isPlaying = active && !paused && !waiting && !err;
     let sentinel: any = null;
     let disposed = false;
-    try {
-      (window as any).AuraNativeExport?.setKeepScreenOn?.(isPlaying);
-      if (isPlaying && "wakeLock" in navigator) {
+
+    const requestLock = () => {
+      if (isPlaying && !disposed && document.visibilityState === "visible" && "wakeLock" in navigator) {
         (navigator as any).wakeLock.request("screen").then((s: any) => {
-          if (disposed) {
+          if (disposed || !isPlaying) {
             s.release().catch(() => {});
           } else {
             sentinel = s;
+            s.addEventListener?.("release", () => {
+              if (!disposed && isPlaying && document.visibilityState === "visible") {
+                requestLock();
+              }
+            });
           }
         }).catch(() => {});
       }
+    };
+
+    try {
+      (window as any).AuraNativeExport?.setKeepScreenOn?.(isPlaying);
+      requestLock();
     } catch { /* ignore */ }
+
+    const onVisChange = () => {
+      if (document.visibilityState === "visible") {
+        requestLock();
+      } else {
+        sentinel?.release().catch(() => {});
+        sentinel = null;
+      }
+    };
+    document.addEventListener("visibilitychange", onVisChange);
+
     return () => {
       disposed = true;
+      document.removeEventListener("visibilitychange", onVisChange);
       sentinel?.release().catch(() => {});
       try {
         (window as any).AuraNativeExport?.setKeepScreenOn?.(false);
