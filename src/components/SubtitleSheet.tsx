@@ -567,7 +567,7 @@ export default function SubtitleSheet({
                   {effectiveAiProvider === "groq"
                     ? "Free Whisper large-v3 translation key at console.groq.com"
                     : effectiveAiProvider === "gemini"
-                    ? "Gemini 2.5 Flash audio translation key at aistudio.google.com"
+                    ? "Gemini 3.5 Flash audio translation (Built-in active key or custom key from aistudio.google.com)"
                     : effectiveAiProvider === "whisper"
                     ? "OpenAI Whisper API key at platform.openai.com"
                     : "Custom OpenAI-compatible /audio/translations or /transcriptions URL"}
@@ -636,7 +636,7 @@ export default function SubtitleSheet({
                         ? "Paste Groq API key (gsk_...)"
                         : effectiveAiProvider === "whisper"
                         ? "Paste OpenAI API key (sk-...)"
-                        : "Paste Google Gemini API key (AIza...)"
+                        : "Google Gemini API key (Pre-configured · Paste to override)"
                     }
                     className="h-9 px-3 rounded-xl bg-bg border border-border text-[12px] text-on placeholder:text-mut outline-none focus:border-primary"
                   />

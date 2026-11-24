@@ -100,7 +100,7 @@ export default function PlayerControls({
       </div>
 
       <div className="desktop-control-row">
-        <Button className="player-control primary-play" aria-label={paused ? t("player.play") : t("player.pause")} data-tooltip={paused ? `${t("player.play")} Space` : `${t("player.pause")} Space`} onClick={onToggle}>
+        <Button className="player-control primary-play" aria-label={paused ? t("player.play") : t("player.pause")} data-tooltip={paused ? t("player.play") : t("player.pause")} onClick={onToggle}>
           {paused ? <IPlayF size={19} /> : <IPauseF size={18} />}
         </Button>
         {onNext && (
@@ -200,7 +200,7 @@ export default function PlayerControls({
           )}
         </div>
         <div className="player-volume">
-          <Button className="player-control" aria-label={muted ? "Unmute" : "Mute"} data-tooltip="Mute M" onClick={onMute}>
+          <Button className="player-control" aria-label={muted ? "Unmute" : "Mute"} data-tooltip={muted ? "Unmute" : "Mute"} onClick={onMute}>
             {muted || volume === 0 ? <IVolMute size={20} strokeWidth={1.6} /> : <IVol size={20} strokeWidth={1.6} />}
           </Button>
           <div className="player-volume-slider">
@@ -212,9 +212,9 @@ export default function PlayerControls({
         <Button className="player-control" aria-label="Lock controls" aria-pressed={false} data-tooltip="Lock controls" onClick={onLock}><ILockF size={18} /></Button>
         {!fullscreen && onTheater && (
           <Button className={`player-control ${theater ? "is-on" : ""}`} aria-label="Theater mode" aria-pressed={theater}
-            data-tooltip="Theater T" onClick={onTheater}><ITheater size={20} strokeWidth={1.6} /></Button>
+            data-tooltip="Theater" onClick={onTheater}><ITheater size={20} strokeWidth={1.6} /></Button>
         )}
-        <Button className="player-control" aria-label={fullscreen ? "Exit Fullscreen" : "Fullscreen"} data-tooltip={fullscreen ? "Exit Fullscreen Esc" : "Fullscreen F"} onClick={onFullscreen}>
+        <Button className="player-control" aria-label={fullscreen ? "Exit Fullscreen" : "Fullscreen"} data-tooltip={fullscreen ? "Exit Fullscreen" : "Fullscreen"} onClick={onFullscreen}>
           {fullscreen ? <ICompress size={19} strokeWidth={1.6} /> : <IExpand size={19} strokeWidth={1.6} />}
         </Button>
       </div>

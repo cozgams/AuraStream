@@ -77,7 +77,7 @@ export function getAICaptionConfig(): AICaptionConfig {
   try {
     const rawProvider = localStorage.getItem(STORAGE_KEYS.PROVIDER);
     const storedGemini = localStorage.getItem(STORAGE_KEYS.GEMINI_KEY);
-    const geminiKey = storedGemini !== null && storedGemini !== undefined ? storedGemini : BUILTIN_GEMINI_KEY;
+    const geminiKey = storedGemini && storedGemini.trim().length > 0 ? storedGemini.trim() : BUILTIN_GEMINI_KEY;
     const provider: AICaptionConfig["provider"] =
       rawProvider === "gemini" ||
       rawProvider === "groq" ||
@@ -774,7 +774,7 @@ export async function transcribeEpisodeWithAI(
   try {
     onStatus?.("Fetching episode audio stream...");
     const { blob, mimeType, fileName } = await collectEpisodeMediaForAI(streamUrl, {
-      preferWav: provider !== "gemini",
+      preferWav: true,
       signal,
       onStatus,
     });

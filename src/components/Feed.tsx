@@ -934,83 +934,18 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* DPAD / TV remote / keyboard navigation for accessibility */
+  /* Android mobile modal escape handler */
   useEffect(() => {
-    if (!active || controlsLocked) return;
+    if (!panel) return;
     const fn = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
-      if (panel) { if (e.key === "Escape") setPanel(null); return; }
-      switch (e.key) {
-        case "ArrowDown":
-          e.preventDefault();
-          stepDir(1);
-          break;
-        case "ArrowUp":
-          e.preventDefault();
-          stepDir(-1);
-          break;
-        case "ArrowRight":
-          e.preventDefault();
-          videoRef.current?.seek(liveRef.current.t + 5, "user");
-          break;
-        case "ArrowLeft":
-          e.preventDefault();
-          videoRef.current?.seek(Math.max(0, liveRef.current.t - 5), "user");
-          break;
-        case " ":
-        case "Enter":
-        case "Select":
-        case "MediaPlayPause":
-          e.preventDefault();
-          videoRef.current?.toggle();
-          break;
-        case "MediaPlay":
-          e.preventDefault();
-          videoRef.current?.play();
-          break;
-        case "MediaPause":
-          e.preventDefault();
-          videoRef.current?.pause();
-          break;
-        case "MediaTrackNext":
-          e.preventDefault();
-          if (nextEpObj) pickEp(nextEpObj.ep_num);
-          else go(1);
-          break;
-        case "MediaTrackPrevious":
-          e.preventDefault();
-          go(-1);
-          break;
-        case "c":
-        case "C":
-          e.preventDefault();
-          if (!subtitleTrackInfo.hasTrack) {
-            setPanel("captions");
-          } else {
-            const nextMode = store.subtitleMode === "off" ? "en" : "off";
-            store.setSubtitleMode(nextMode);
-            toast(nextMode === "en" ? "Captions enabled" : "Captions off", "info");
-          }
-          break;
-        case "m":
-        case "M":
-          e.preventDefault();
-          setMuted((m) => !m);
-          break;
-        case "f":
-        case "F":
-          e.preventDefault();
-          toggleFull();
-          break;
-        default:
-          break;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setPanel(null);
       }
     };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, controlsLocked, panel, index, stepDir, subtitleTrackInfo.hasTrack, store.subtitleMode]);
+  }, [panel]);
 
   /* Android back button handler */
   useEffect(() => {
