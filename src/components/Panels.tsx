@@ -2,7 +2,7 @@ import { Button, Form, Image, Input } from "./ios/controls";
 import { Loader } from "./ios/effects";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fmt, cover as imageCover } from "../api";
-import { handleArticleClick, sanitizeHtml } from "../html";
+import { handleArticleClick, parseInternalVideoId, sanitizeHtml } from "../html";
 import type { Comment, CommentPage, Episode } from "../types";
 import { useStore } from "../store";
 import { copyText } from "../clipboard";
@@ -408,9 +408,14 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
 export function ArticlePanel({ title, html, cover, hot, onClose }: {
   title: string; html: string; cover?: string; hot?: number; onClose: () => void;
 }) {
-  const { toast, strictSecurity } = useStore();
+  const { toast, strictSecurity, push } = useStore();
   const safeHtml = useMemo(() => sanitizeHtml(html), [html, strictSecurity]);
   const openSafeLink = (url: string) => {
+    const videoId = parseInternalVideoId(url);
+    if (videoId !== null) {
+      push({ kind: "feed", videoIds: [videoId], index: 0, title: title || "Drama Detail" });
+      return;
+    }
     api.openUrl(url).catch(() => {
       copyText(url).then(() => toast("Link copied", "ok")).catch(() => toast("Failed to copy", "info"));
     });

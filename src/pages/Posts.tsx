@@ -9,7 +9,7 @@ import { copyText } from "../clipboard";
 import { Empty, Img } from "../components/ui";
 import Player from "../components/Player";
 import { IBack, IFireF, IPlayF, ISearch } from "../icons";
-import { handleArticleClick, sanitizeHtml } from "../html";
+import { handleArticleClick, parseInternalVideoId, sanitizeHtml } from "../html";
 import { InplaceSearch } from "../components/InplaceSearch";
 import { formatDramaTag, formatDramaTitle } from "../subtitles/dramaTranslator";
 import { localizeError } from "../i18n";
@@ -96,7 +96,7 @@ const HIDDEN_POST_TAG = "\u9ec4\u679c";
 
 /* ================= Community Post Detail ================= */
 export function PostDetail({ id, onBack, active = true }: { id: number; onBack: () => void; active?: boolean }) {
-  const { toast, strictSecurity, muted, setMuted } = useStore();
+  const { toast, strictSecurity, muted, setMuted, push } = useStore();
   const [post, setPost] = useState<(Post & { content?: string; video_url?: string }) | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [play, setPlay] = useState(false);
@@ -107,6 +107,11 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
   const src = segs[seg] || "";
   const safeHtml = useMemo(() => sanitizeHtml(content), [content, strictSecurity]);
   const openSafeLink = (url: string) => {
+    const videoId = parseInternalVideoId(url);
+    if (videoId !== null) {
+      push({ kind: "feed", videoIds: [videoId], index: 0, title: post?.title || "Community Buzz" });
+      return;
+    }
     api.openUrl(url).catch(() => {
       copyText(url).then(() => toast("Link copied", "ok")).catch(() => toast("Failed to copy", "info"));
     });

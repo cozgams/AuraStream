@@ -257,7 +257,7 @@ pub async fn fetch_hot_tags() -> Result<Value, String> {
     let url = format!("{}/", base.trim_end_matches('/'));
     let html = tokio::time::timeout(REQUEST_TIMEOUT, async {
         let referer = format!("{base}/");
-        let mut response = crate::net::get(
+        let response = crate::net::get(
             &url,
             REQUEST_TIMEOUT,
             Some("text/html,application/xhtml+xml"),

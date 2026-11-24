@@ -91,6 +91,7 @@ function LayerBox({
   inert,
   ariaHidden,
   className,
+  enterClass,
   style,
   children,
 }: {
@@ -98,6 +99,7 @@ function LayerBox({
   inert: boolean;
   ariaHidden: boolean;
   className: string;
+  enterClass?: string;
   style?: React.CSSProperties;
   children: React.ReactNode;
 }) {
@@ -105,6 +107,17 @@ function LayerBox({
   const scrollOffsetsRef = useRef<Map<HTMLElement, number>>(new Map());
   const hiddenRef = useRef(hidden);
   hiddenRef.current = hidden;
+  const [entered, setEntered] = useState(() => !enterClass || hidden);
+
+  useEffect(() => {
+    if (hidden) setEntered(true);
+  }, [hidden]);
+
+  useEffect(() => {
+    if (hidden || entered || !enterClass) return undefined;
+    const timer = window.setTimeout(() => setEntered(true), 480);
+    return () => window.clearTimeout(timer);
+  }, [hidden, entered, enterClass]);
 
   useEffect(() => {
     const root = ref.current;
@@ -135,10 +148,23 @@ function LayerBox({
     }
   }, [hidden]);
 
-  const boxClass = hidden ? `${className} hidden pointer-events-none` : className;
+  const entering = !hidden && !entered && !!enterClass;
+  const boxStyle: React.CSSProperties | undefined = entering
+    ? { ...style, boxShadow: "-18px 0 40px rgba(0,0,0,.5)" }
+    : style;
+  const boxClass = hidden
+    ? `${className} hidden pointer-events-none`
+    : `${className}${entering ? ` ${enterClass}` : ""}`;
 
   return (
-    <div ref={ref} inert={inert} aria-hidden={ariaHidden} className={boxClass} style={style}>
+    <div
+      ref={ref}
+      inert={inert}
+      aria-hidden={ariaHidden}
+      className={boxClass}
+      style={boxStyle}
+      onAnimationEnd={entering ? (e) => { if (e.target === ref.current) setEntered(true); } : undefined}
+    >
       {children}
     </div>
   );
@@ -197,8 +223,9 @@ function AppBody() {
             hidden={i !== stack.length - 1}
             inert={i !== stack.length - 1 || loginOpen}
             ariaHidden={i !== stack.length - 1 || loginOpen}
-            className="absolute inset-0 z-30 bg-bg a-page-in"
-            style={{ zIndex: 30 + i, boxShadow: "-18px 0 40px rgba(0,0,0,.5)" }}>
+            className="absolute inset-0 z-30 bg-bg isolate"
+            enterClass={platform === "android" && p.kind === "feed" ? undefined : "a-page-in"}
+            style={{ zIndex: 30 + i }}>
             <StackPage page={p} onBack={pop} wide={wide} top={i === stack.length - 1} bottomInset={stackInset} />
           </LayerBox>
         ))}

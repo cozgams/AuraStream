@@ -3,7 +3,7 @@ import { Loader } from "./ios/effects";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { api, APP_VERSION, cover, fmt, fmtTime, isMobile, logLine, mediaUrl } from "../api";
+import { api, APP_VERSION, cover, fmt, fmtTime, isMobile, logLine, mediaUrl, platform } from "../api";
 import type { Detail, Episode, Post, VideoCard } from "../types";
 import { useStore } from "../store";
 import { Avatar, Img, Sheet } from "./ui";
@@ -17,12 +17,9 @@ import { setBackHandler } from "../back";
 import { copyText } from "../clipboard";
 import { tracePlayback } from "../playbackDiagnostics";
 import { createPlaybackClock } from "../playbackClock";
-import SubtitleOverlay from "./SubtitleOverlay";
-import SubtitleSheet from "./SubtitleSheet";
 import ExportSheet from "./ExportSheet";
 import BatchDownloadSheet from "./BatchDownloadSheet";
 import DownloadChoiceSheet from "./DownloadChoiceSheet";
-import type { SubtitleMode, SubtitleTrackStatus } from "../subtitles/types";
 import { formatDramaAuthor, formatDramaDesc, formatDramaTag, formatDramaTitle } from "../subtitles/dramaTranslator";
 import {
   ensureOfflineSyncReady,
@@ -110,7 +107,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [vsize, setVsize] = useState({ w: 0, h: 0 });
   const bufferedRef = useRef(0);
   const sessionKeyRef = useRef(`feed_${Math.random().toString(36).slice(2)}`);
-  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
   const [paused, setPaused] = useState(false);
   const [controlsLocked, setControlsLocked] = useState(false);
   const [rate, setRate] = useState(1);
@@ -369,15 +365,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [downloadChoiceOpen, setDownloadChoiceOpen] = useState<boolean>(false);
   const [sleepTimer, setLocalSleepTimer] = useState<SleepTimerOption>(getSleepTimerOption);
   const [dismissNextEp, setDismissNextEp] = useState<number | null>(null);
-  const [subtitleTrackInfo, setSubtitleTrackInfo] = useState<SubtitleTrackStatus>({
-    hasTrack: false,
-    source: "none",
-    cueCount: 0,
-  });
-
-  useEffect(() => {
-    setSubtitleTrackInfo({ hasTrack: false, source: "none", cueCount: 0 });
-  }, [curId, curEp]);
 
   useEffect(() => {
     setIsDownloaded(isEpisodeDownloaded(curId, curEp));
@@ -934,10 +921,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     setVsize({ w: 0, h: 0 });
     setPortraitFit("contain");
   }, [playKey]);
-
-  useEffect(() => {
-    setVideoEl(videoRef.current?.el() ?? null);
-  }, [playKey, active]);
 
   /* Volume and mute state synchronization */
   useEffect(() => { videoRef.current?.mute(muted); }, [muted]);
@@ -1547,8 +1530,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       onPointerDown={() => { if (!isDesktop && fs) wake(); }}
       onKeyDownCapture={() => { if (isDesktop || fs) wake(); }}>
       <div className="absolute inset-0" inert={controlsLocked}>
-      {/* Ambient glow background */}
-      {active && !isDesktop && posterUrl && (
+      {/* Ambient glow background (skip heavy GPU blur over Android WebView video) */}
+      {active && !isDesktop && platform !== "android" && posterUrl && (
         <div className="absolute inset-0 scale-110 blur-3xl opacity-25 pointer-events-none">
           <Image src={posterUrl} alt="" className="w-full h-full object-cover" />
         </div>
@@ -1630,7 +1613,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         onTime={(t) => {
                           if (t > 0.1 && !videoStarted) setVideoStarted(true);
                           const v = videoRef.current?.el();
-                          if (v && v !== videoEl) setVideoEl(v);
                           if (v && v.buffered.length > 0) {
                             bufferedRef.current = v.buffered.end(v.buffered.length - 1);
                           }
@@ -1639,8 +1621,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         onDuration={onDurationTick}
                         onSize={(w, h) => setVsize((prev) => (prev.w === w && prev.h === h ? prev : { w, h }))}
                         onPlaying={() => {
-                          const v = videoRef.current?.el();
-                          if (v && v !== videoEl) setVideoEl(v);
                           setPaused(false); setWaiting(false); setErr(""); setVideoStarted(true);
                         }}
                         onPause={() => setPaused(true)}
@@ -1705,21 +1685,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         }} />
                     </div>
                   </div>
-                  <SubtitleOverlay
-                    videoId={curId}
-                    episode={curEp}
-                    title={meta.title}
-                    streamUrl={playUrl}
-                    mode={store.subtitleMode}
-                    size={store.subtitleSize}
-                    playbackClock={playbackClock}
-                    isDesktop={isDesktop}
-                    clean={clean}
-                    fs={fs}
-                    bottomOffset={bottomInset}
-                    videoEl={videoEl ?? videoRef.current?.el()}
-                    onTrackStatus={setSubtitleTrackInfo}
-                  />
 
                   {/* Double-tap Seek & Tap Play/Pause Ripple HUD */}
                   {seekRipple && (
@@ -2557,26 +2522,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               </div>
             </div>
           </Sheet>
-
-          {/* Subtitle settings sheet */}
-          <SubtitleSheet
-            open={panel === "captions"}
-            onClose={() => setPanel(null)}
-            mode={store.subtitleMode}
-            onModeChange={(m) => {
-              store.setSubtitleMode(m);
-              toast(t("captions.mode_changed", {
-                mode: m === "off" ? t("captions.off") : t("captions.en")
-              }), "ok");
-            }}
-            size={store.subtitleSize}
-            onSizeChange={store.setSubtitleSize}
-            videoId={curId}
-            episode={curEp}
-            title={formatDramaTitle(meta?.title)}
-            streamUrl={playUrl}
-            trackInfo={subtitleTrackInfo}
-          />
 
           {/* More playback options sheet - Warm Classic Light iOS Theme */}
           <Sheet open={panel === "more"} onClose={() => setPanel(null)} label="Playback Options" className="max-h-[85dvh]">

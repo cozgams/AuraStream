@@ -3,6 +3,39 @@ import DOMPurify from "dompurify";
 
 /** Upstream site origin for relative path completion */
 const SITE = "https://huangguoai.com";
+const DEFAULT_SITE_ORIGIN = new URL(SITE).origin;
+let activeSiteOrigin = DEFAULT_SITE_ORIGIN;
+
+/** Sync current active mirror origin so internal video links open natively in-app */
+export function setSiteOrigin(base: string): void {
+  try {
+    const u = new URL(base.trim());
+    if (u.protocol === "http:" || u.protocol === "https:") {
+      activeSiteOrigin = u.origin;
+      return;
+    }
+  } catch { /* ignore invalid base */ }
+  activeSiteOrigin = DEFAULT_SITE_ORIGIN;
+}
+
+/** Parse same-origin internal video links (`/video/{id}/`) for native in-app navigation */
+export function parseInternalVideoId(rawUrl: string): number | null {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed, activeSiteOrigin);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  if (parsed.origin !== DEFAULT_SITE_ORIGIN && parsed.origin !== activeSiteOrigin) return null;
+  const match = /^\/video\/(\d+)\/?$/.exec(parsed.pathname);
+  if (!match) return null;
+  const id = Number(match[1]);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 // Default strict before boot; updated from Rust app_boot / security_set.
 let strictSecurity = true;
 

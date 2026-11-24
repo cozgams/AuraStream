@@ -1495,7 +1495,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                 </div>
                 <div>
                   <div className="text-[14.5px] font-bold text-[#0f172a] dark:text-neutral-100">Settings</div>
-                  <div className="text-[11px] text-[#64748b] dark:text-neutral-400">Playback, quality, subtitles & display</div>
+                  <div className="text-[11px] text-[#64748b] dark:text-neutral-400">Playback, quality, network & display</div>
                 </div>
               </div>
               <IChevR size={14} className="text-slate-400" strokeWidth={2.5} />

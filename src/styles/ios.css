@@ -708,6 +708,14 @@ html.theme-transitioning .ios-account-card { backdrop-filter:none; -webkit-backd
   .ios-setting-group,.ios-account-card,.ios-rank-row,.ios-surface { background:var(--ios-glass-solid); }
 }
 /* Android WebView Skia/Viz compositor optimization: avoid excessive backdrop-filter rasterization over hardware video surfaces */
+.plat-android .player-root .backdrop-blur-xl,
+.plat-android .player-root .backdrop-blur-md,
+.plat-android .player-root .backdrop-blur-sm,
+.plat-android .ios-feed-item .backdrop-blur-xl,
+.plat-android .ios-feed-item .backdrop-blur-md,
+.plat-android .ios-feed-item .backdrop-blur-sm,
+.plat-android .video-surface-overlay .backdrop-blur-md,
+.plat-android .video-surface-overlay .backdrop-blur-xl,
 html[data-platform="android"] .ios-feed-item .backdrop-blur-xl,
 html[data-platform="android"] .ios-feed-item .backdrop-blur-md,
 html[data-platform="android"] .ios-feed-item .backdrop-blur-sm,
@@ -715,6 +723,9 @@ html[data-platform="android"] .video-surface-overlay .backdrop-blur-md,
 html[data-platform="android"] .video-surface-overlay .backdrop-blur-xl {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+}
+.plat-android .player-root .hg-chip {
+  background: rgba(12, 15, 22, 0.72);
 }
 @media(prefers-reduced-motion:reduce) {
   .ios-mobile-nav .hg-drop>.ios-liquid-fill::after,.ios-mobile-nav .ios-mobile-nav-item[aria-current=page] { animation:none!important; }

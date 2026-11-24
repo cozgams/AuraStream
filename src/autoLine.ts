@@ -174,7 +174,20 @@ async function check(reason: string): Promise<void> {
 }
 
 let netObserverCleanup: (() => void) | null = null;
-const onOnline = () => { step = 0; void pickLine("online"); };
+let pendingOnlinePick = false;
+const onOnline = () => {
+  if (!autoLineEnabled()) return;
+  failStreak = 0;
+  downStreak = 0;
+  step = 0;
+  lastPickAt = null;
+  if (document.visibilityState === "visible") {
+    pendingOnlinePick = false;
+    void pickLine("online", true);
+  } else {
+    pendingOnlinePick = true;
+  }
+};
 const onOffline = () => schedule(30_000);
 const onProxyChanged = () => {
   // Backend invalidates outstanding selections on save. Keep the selected
@@ -187,7 +200,13 @@ const onProxyChanged = () => {
 };
 const onVisibilityChange = () => {
   if (document.visibilityState === "hidden") stopTimer();
-  else { downStreak = 0; step = 0; void check("visible"); }
+  else if (pendingOnlinePick) {
+    pendingOnlinePick = false;
+    downStreak = 0;
+    failStreak = 0;
+    step = 0;
+    void pickLine("online-resume", true);
+  } else { downStreak = 0; step = 0; void check("visible"); }
 };
 
 function attach() {

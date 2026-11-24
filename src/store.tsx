@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, platform as envPlatform } from "./api";
-import { isStrictSecurity, setStrictSecurity as setHtmlStrictSecurity } from "./html";
+import { isStrictSecurity, setSiteOrigin, setStrictSecurity as setHtmlStrictSecurity } from "./html";
 import type { User } from "./types";
 import { readStorage, removeStorage, writeStorage, STORAGE_KEYS } from "./storage";
 import { getTranslation, type Language, type TranslationKey } from "./i18n";
@@ -479,6 +479,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const current = ++request;
       void api.boot().then((r) => {
         if (!active || current !== request) return;
+        setSiteOrigin(r.base || "");
         setUserState((prev) => {
           if (r.user && (r.user as User).id) {
             removeStorage(STORAGE_KEYS.localUser);
