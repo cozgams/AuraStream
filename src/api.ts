@@ -135,14 +135,16 @@ async function callNetwork<T>(cmd: string, args?: Record<string, unknown>): Prom
         : "Request failed, please check your network connection";
     const status = /^HTTP (\d{3})\b/.exec(msg)?.[1];
     const networkish = !status && NET_FAIL.test(msg);
+    const isTransientServer = Boolean(status && ["500", "502", "503", "504", "429"].includes(status));
+    const retryable = (networkish || isTransientServer) && READ_ONLY.has(cmd);
     // Log full error details to disk
     logLine(`[api] ${cmd} → ${msg}`);
-    tracePlayback("api.fail", { cmd, err: msg, status: status ?? null, networkish });
-    notifyNet({ ok: false, cmd, msg, networkish });
-    // Retry read-only request once on transient network failure
-    if (networkish && READ_ONLY.has(cmd)) {
-      logLine(`[api] ${cmd} link unstable, retrying in 1.2s`);
-      tracePlayback("api.retry", { cmd, err: msg });
+    tracePlayback("api.fail", { cmd, err: msg, status: status ?? null, networkish, isTransientServer });
+    notifyNet({ ok: false, cmd, msg, networkish: networkish || isTransientServer });
+    // Retry read-only request once on transient network failure or upstream 50x/429
+    if (retryable) {
+      logLine(`[api] ${cmd} link unstable (${status ? `HTTP ${status}` : "network"}), retrying in 1.2s`);
+      tracePlayback("api.retry", { cmd, err: msg, status: status ?? null });
       await new Promise((r) => setTimeout(r, 1200));
       try {
         const r = await once();

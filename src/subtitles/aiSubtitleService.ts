@@ -222,7 +222,8 @@ export async function transcribeWithGemini(
   const candidateModels = [
     "gemini-3.5-flash",
     "gemini-3.5-transcribe",
-    "gemini-3.8-flash",
+    "gemini-2.5-flash",
+    "gemini-flash-latest",
     "gemini-3.1-flash-lite",
   ];
 
