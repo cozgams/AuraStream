@@ -27,7 +27,9 @@ const STORAGE_KEYS = {
   PREFIX: "aurastream_sub_",
 };
 
-export const BUILTIN_GEMINI_KEY = "";
+export const BUILTIN_GEMINI_KEY = (
+  (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_GEMINI_API_KEY || ""
+).trim();
 
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyleConfig = {
   color: "white",

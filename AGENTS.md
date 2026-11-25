@@ -34,3 +34,9 @@ Whenever ANY UI improvements, new features, bug fixes, or design adjustments are
 ## 3. Platform Scoping
 - Android APK releases are the primary distribution format.
 - Test and verify locally on Android container (`127.0.0.1:5555`).
+
+## 4. Mandatory Public Repo & Secret Hygiene Rule
+- `cozgams/AuraStream` is a PUBLIC repository. Never commit, hardcode, print, or expose any secrets anywhere in source code, scripts, workflows, docs, tests, or git history.
+- Forbidden in the repository and git history: GitHub tokens (`ghp_`, `github_pat_`), API keys (`AIza`, `AQ.`, `sk-`, `gsk_`), Android signing keystores (`*.keystore`, `*.jks`, `*.p12`, `*.pem`), keystore/signing passwords (`--ks-pass pass:...`), `.env` files, private certificates, or personal credentials.
+- Keep signing keystores exclusively outside the repository (e.g. `/data/home/Project/A/.signing/release.keystore` with `0600` permissions) and inject signing credentials only via environment variables (`AURASTREAM_KEYSTORE`, `AURASTREAM_KEYSTORE_PASS`, `AURASTREAM_KEY_ALIAS`) or GitHub Actions Secrets (`${{ secrets.* }}`).
+- Before ANY commit, tag push, or release, scan tracked files and git history to verify zero leaked tokens, keys, or signing passwords exist.

@@ -20,11 +20,12 @@ downloads/
 Thumbs.db
 *.log
 
-# 签名与密钥（务必不要提交）
+# Signing keys and secrets (never commit)
 *.keystore
 *.jks
 *.p12
 *.pem
+.signing/
 .env
 .env.*
 
