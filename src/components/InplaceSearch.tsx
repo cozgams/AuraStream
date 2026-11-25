@@ -4,8 +4,8 @@ import { useRef, useState } from "react";
 import { api, fmt } from "../api";
 import type { Post, VideoCard } from "../types";
 import { MediaCard, Masonry } from "./cards";
-import { Empty, Img } from "./ui";
-import { IBack, IClose, IFireF, ISearch } from "../icons";
+import { Empty } from "./ui";
+import { IBack, IClose, ISearch } from "../icons";
 import { localizeError } from "../i18n";
 
 export function InplaceSearch({ kind, postLabel = "Community", scope, onOpenVideo, onOpenPost, onClose, wide }: {

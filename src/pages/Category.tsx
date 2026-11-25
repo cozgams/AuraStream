@@ -1,4 +1,4 @@
-import { Button, Surface } from "../components/ios/controls";
+import { Button } from "../components/ios/controls";
 import { Loader } from "../components/ios/effects";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmt } from "../api";
@@ -7,7 +7,7 @@ import { useStore } from "../store";
 import { MediaCard, Masonry, RowCard } from "../components/cards";
 import { CollectionLink, CollectionLinks } from "../components/CollectionLink";
 import { InplaceSearch } from "../components/InplaceSearch";
-import { Empty, Img } from "../components/ui";
+import { Empty } from "../components/ui";
 import { IBack, IChevR, IGlobe, IGrid, ISearch, ITrophy } from "../icons";
 import { localizeError } from "../i18n";
 

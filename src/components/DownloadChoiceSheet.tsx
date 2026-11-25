@@ -9,7 +9,7 @@
  * 5. Device storage meter with high-speed turbo engine status.
  */
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Sheet } from "./ui";
 import { Button } from "./ios/controls";
 import { Loader } from "./ios/effects";

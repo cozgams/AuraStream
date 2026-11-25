@@ -3,7 +3,7 @@ import { Loader } from "./ios/effects";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { api, APP_VERSION, cover, fmt, fmtTime, isMobile, logLine, mediaUrl, platform } from "../api";
+import { api, cover, fmt, fmtTime, isMobile, logLine, platform } from "../api";
 import type { Detail, Episode, Post, VideoCard } from "../types";
 import { useStore } from "../store";
 import { Avatar, Img, Sheet } from "./ui";
@@ -20,7 +20,7 @@ import { createPlaybackClock } from "../playbackClock";
 import ExportSheet from "./ExportSheet";
 import BatchDownloadSheet from "./BatchDownloadSheet";
 import DownloadChoiceSheet from "./DownloadChoiceSheet";
-import { formatDramaAuthor, formatDramaDesc, formatDramaTag, formatDramaTitle } from "../subtitles/dramaTranslator";
+import { formatDramaAuthor, formatDramaDesc, formatDramaTitle } from "../subtitles/dramaTranslator";
 import {
   ensureOfflineSyncReady,
   isEpisodeDownloaded,
@@ -52,8 +52,8 @@ import {
 import { processEpisodeExport } from "../offline/exportService";
 import { useMediaSession } from "../useMediaSession";
 import {
-  IBack, IBoltF, ICheck, IChevR, IChevronDown, IChevronUp, IClock, IClose, ICommentF, ICompress, IDownload, IEye, IExpand, IExport, IFileText,
-  IFastForwardF, ILink, IList, ILockF, IMore, IPauseF, IPlayF, IRewindF, ISearch, IStar, IStarF, ISun, IVertSwap, IVol, IVolMute,
+  IBack, IBoltF, ICheck, IChevR, IChevronDown, IChevronUp, IClock, IClose, ICommentF, ICompress, IDownload, IEye, IExpand, IFileText,
+  IFastForwardF, ILink, IList, ILockF, IMore, IPauseF, IPlayF, IRewindF, IStar, IStarF, ISun, IVertSwap, IVol, IVolMute,
 } from "../icons";
 
 type Props = {
@@ -72,10 +72,6 @@ type Props = {
   startTime?: number;
 };
 
-const RATES = [1, 1.25, 1.5, 2];
-
-const stripHtml = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
-
 const setNativeOrientation = (landscape: boolean) => {
   if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
     invoke("set_orientation", { landscape }).catch(() => {});
@@ -84,7 +80,7 @@ const setNativeOrientation = (landscape: boolean) => {
 
 export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind = "video", active, bottomInset, offlineOnly = false, onBack, onNearEnd, startEp, startTime }: Props) {
   const store = useStore();
-  const { isLiked, isFav, toggleLikeLocal, toggleFavLocal, toggleFollowLocal, muted, setMuted, volume, setVolume, toast, addHistory, history, user, setLoginOpen, swipeEp, setSwipeEp, preferHevc, setPreferHevc, t } = store;
+  const { isLiked, isFav, toggleFavLocal, toggleFollowLocal, muted, setMuted, volume, setVolume, toast, addHistory, history, user, swipeEp, setSwipeEp, preferHevc, setPreferHevc, t } = store;
   const isDesktop = !isMobile;
 
   const boxRef = useRef<HTMLDivElement>(null);
@@ -97,7 +93,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [playUrls, setPlayUrls] = useState<Record<string, string>>({});
   const [hevcUrls, setHevcUrls] = useState<Record<string, string>>({});
   const [proxyRetry, setProxyRetry] = useState(0);
-  const [cards, setCards] = useState<Record<number, VideoCard>>({});
+  const [cards] = useState<Record<number, VideoCard>>({});
   const [posts, setPosts] = useState<Record<number, Post>>({});
   const [related, setRelated] = useState<VideoCard[]>([]);
 
@@ -595,8 +591,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   /* Fullscreen landscape orientation rotation */
   const rotated = !isDesktop && fs && vsize.w > vsize.h && vsize.h > 0 && !vpLandscape;
   const landscapeVideo = vsize.w > 0 && vsize.h > 0 && vsize.w > vsize.h;
-  /* Quick control pill transition */
-  const capsuleOn = !fs && !clean && !isDesktop && (landscapeVideo || zoom.s > 1.05);
   const isLandscapeCurrent = useCallback(() => {
     if (vsize.w > 0 && vsize.h > 0) return vsize.w > vsize.h;
     const v = videoRef.current?.el();
@@ -1457,8 +1451,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     } catch {}
   }, []);
 
-  const requireLogin = () => { if (!user) { setLoginOpen(true); return false; } return true; };
-
   const onFav = () => {
     if (!curId) return;
     const on = toggleFavLocal(curId);
@@ -1478,8 +1470,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       }
     }
   };
-
-  const onLike = onFav;
 
   const onFollow = () => {
     const uid = meta.authorId > 0 ? meta.authorId : undefined;

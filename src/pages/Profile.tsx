@@ -1,10 +1,10 @@
-import { Button, Surface } from "../components/ios/controls";
+import { Button } from "../components/ios/controls";
 import { Loader } from "../components/ios/effects";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, APP_VERSION, cover as getCoverUrl, errorMessage, fmtTime, isMobile, platform, type UpdateInfo } from "../api";
+import { api, APP_VERSION, errorMessage, fmtTime, type UpdateInfo } from "../api";
 import type { Detail } from "../types";
 import { useStore } from "../store";
-import { Avatar, Empty, Modal, Toggle } from "../components/ui";
+import { Empty, Modal, Toggle } from "../components/ui";
 import { MediaCard } from "../components/cards";
 import ExportSheet from "../components/ExportSheet";
 import UpdateModal from "../components/UpdateModal";
@@ -12,7 +12,6 @@ import { getAvailableUpdateInfo, getOtaRuntimeState, setAvailableUpdateInfo, sub
 import { registerOverlayBack } from "../back";
 import {
   IBack,
-  IBoltF,
   ICheck,
   IChevR,
   IChevronDown,
@@ -21,10 +20,8 @@ import {
   IClose,
   IDownload,
   IExport,
-  IGrid,
   IHist,
   ILayers,
-  ILogout,
   IMore,
   IPauseF,
   IPlayF,
@@ -35,7 +32,6 @@ import {
   IStarF,
   ITrash,
   IUser,
-  IUserF,
 } from "../icons";
 import { getCurrentAuthUid, loadUserDataFromCloud, saveUserDataToCloud, type CloudUserData } from "../firebase";
 import { readStorage, writeStorage, STORAGE_KEYS } from "../storage";
@@ -58,9 +54,6 @@ import {
   formatSpeed,
   formatDownloadError,
   syncOfflineEpisodesFromIndexedDB,
-  subscribeBatchProgress,
-  cancelBatchDownload,
-  getBatchProgress,
   isWifiOnlyDownloadEnabled,
   setWifiOnlyDownloadEnabled,
   isSmartDownloadEnabled,
@@ -68,7 +61,6 @@ import {
   type OfflineEpisode,
   type ActiveDownloadProgress,
   type DeviceStorageStats,
-  type BatchProgressState,
 } from "../offline/downloadService";
 import { getAndroidPermissionsStatus, type AndroidPermissionsStatus } from "../offline/exportService";
 import BatchDownloadSheet from "../components/BatchDownloadSheet";
@@ -129,7 +121,6 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
   const {
     theme,
     user,
-    setUser,
     setLoginOpen,
     logout,
     history,
@@ -172,7 +163,6 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
   }, []);
   const [downloads, setDownloads] = useState<OfflineEpisode[]>(() => getOfflineEpisodes());
   const [storageStats, setStorageStats] = useState<DeviceStorageStats | null>(null);
-  const [batchProgress, setBatchProgress] = useState<BatchProgressState>(getBatchProgress);
   const [activeDownloads, setActiveDownloads] = useState<ActiveDownloadProgress[]>([]);
   const [activeSummary, setActiveSummary] = useState(getActiveDownloadsSummary);
   const [loading, setLoading] = useState(false);
@@ -722,14 +712,9 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
       setActiveSummary(getActiveDownloadsSummary());
     });
 
-    const unsubBatch = subscribeBatchProgress((state) => {
-      setBatchProgress({ ...state });
-    });
-
     window.addEventListener("aurastream:downloads-changed", updateStorage);
     return () => {
       unsubProgress();
-      unsubBatch();
       window.removeEventListener("aurastream:downloads-changed", updateStorage);
     };
   }, []);

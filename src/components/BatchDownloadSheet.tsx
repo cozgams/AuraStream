@@ -5,7 +5,7 @@
  * total MB estimation, cellular data guard, and sequential queue execution.
  */
 
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sheet } from "./ui";
 import { Button } from "./ios/controls";
 import { Loader } from "./ios/effects";

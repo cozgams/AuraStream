@@ -716,8 +716,7 @@ export interface ExportResult {
 
 function parseNativeExportResult(
   result: string,
-  fileName: string,
-  action: ExportAction
+  fileName: string
 ): { ok: true; savedPath: string } | { ok: false; error: string } {
   if (result.startsWith("ERROR:")) {
     return { ok: false, error: result.replace("ERROR:", "") };
@@ -775,7 +774,7 @@ export async function processEpisodeExport(
     const result = window.AuraNativeExport.exportLocalFile(preparedPath, fileName, cleanTitle, action);
     onProgress?.(100);
 
-    const parsed = parseNativeExportResult(result, fileName, action);
+    const parsed = parseNativeExportResult(result, fileName);
     if (!parsed.ok) {
       return { success: false, fileName, action, error: parsed.error };
     }
@@ -858,7 +857,7 @@ export async function processEpisodeExport(
     const result = bridge.finishExport(fileName, title, action);
     onProgress?.(100);
 
-    const parsed = parseNativeExportResult(result, fileName, action);
+    const parsed = parseNativeExportResult(result, fileName);
     if (!parsed.ok) {
       return { success: false, fileName, action, error: parsed.error };
     }

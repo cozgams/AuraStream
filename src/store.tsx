@@ -6,7 +6,6 @@ import { readStorage, removeStorage, writeStorage, STORAGE_KEYS } from "./storag
 import { getTranslation, type Language, type TranslationKey } from "./i18n";
 import type { SubtitleMode, SubtitleSize } from "./subtitles/types";
 import {
-  auth,
   fetchCloudUserData,
   getCurrentAuthUid,
   saveUserDataToCloud,

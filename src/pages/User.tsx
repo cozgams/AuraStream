@@ -103,7 +103,7 @@ export function FollowingPage({ onBack, wide }: { onBack: () => void; wide: bool
 
 /* ================= Creator Profile Page ================= */
 export function UserPage({ id, name, onBack, wide }: { id: number; name?: string; onBack: () => void; wide: boolean }) {
-  const { push, toast, follows, toggleFollowLocal, user, setLoginOpen } = useStore();
+  const { push, toast, follows, toggleFollowLocal, user } = useStore();
   const [searching, setSearching] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<{ followers?: number; video_count?: number; post_count?: number; like_count?: number }>({});

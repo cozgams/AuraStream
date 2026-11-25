@@ -5,7 +5,7 @@ import { api, fmt, isMobile } from "../api";
 import type { HotSearchVideo, Post, RankItem, VideoCard } from "../types";
 import { useStore } from "../store";
 import { MediaCard, Masonry, RankRow } from "../components/cards";
-import { Empty, Img } from "../components/ui";
+import { Empty } from "../components/ui";
 import { IBack, IChevR, IClose, IFireF, IPlayF, IRefresh, ISearch, ITrophy } from "../icons";
 import { formatDramaTag, formatDramaTitle } from "../subtitles/dramaTranslator";
 import { localizeError } from "../i18n";
@@ -14,7 +14,7 @@ const DEFAULT_HOT_TAGS = ["Urban", "Revenge", "Costume", "System", "Romance", "C
 const DISCOVERY_THEMES = ["CEO Romance", "Secret Identity", "Revenge", "Time Travel", "Martial Arts", "Family Drama", "Undercover", "Second Chance"];
 
 export default function Search({ active, wide }: { active: boolean; wide: boolean }) {
-  const { push, searchHist, addSearch, removeSearch, clearSearchHist, toast, t, lineEpoch } = useStore();
+  const { push, searchHist, addSearch, removeSearch, clearSearchHist, t, lineEpoch } = useStore();
   const [q, setQ] = useState("");
   const [submitted, setSubmitted] = useState("");
   const [tab, setTab] = useState<"video" | "post">("video");

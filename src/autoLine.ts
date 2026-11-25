@@ -173,7 +173,6 @@ async function check(reason: string): Promise<void> {
   }
 }
 
-let netObserverCleanup: (() => void) | null = null;
 let pendingOnlinePick = false;
 const onOnline = () => {
   if (!autoLineEnabled()) return;
@@ -240,7 +239,7 @@ export function detachAutoLine(): void {
   window.removeEventListener("offline", onOffline);
   window.removeEventListener("hg:proxy-changed", onProxyChanged);
   document.removeEventListener("visibilitychange", onVisibilityChange);
-  setNetObserver(() => {});
+  setNetObserver(null);
   attached = false;
 }
 

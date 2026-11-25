@@ -7,7 +7,7 @@ import type { Comment, CommentPage, Episode } from "../types";
 import { useStore } from "../store";
 import { copyText } from "../clipboard";
 import { Avatar, Empty } from "./ui";
-import { ICheck, IClose, ICommentF, IDownload, ISendF, IStar, IStarF, ITrash, IVertSwap } from "../icons";
+import { IClose, ICommentF, IDownload, ISendF, IStar, IStarF, ITrash, IVertSwap } from "../icons";
 import { formatCommentText, formatDramaAuthor, formatDramaTitle } from "../subtitles/dramaTranslator";
 import { commentText, formatRelativeTime } from "../commentText";
 import { isEpisodeDownloaded } from "../offline/downloadService";

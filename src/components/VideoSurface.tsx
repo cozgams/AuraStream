@@ -160,9 +160,10 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
       } else if (v) {
         try {
           const cur = v.currentTime;
+          const expectedSrc = v.currentSrc;
           if (cur > 0) {
             v.addEventListener("loadedmetadata", () => {
-              if (!v.isConnected) return;
+              if (!v.isConnected || v.currentSrc !== expectedSrc) return;
               try { v.currentTime = cur; } catch { /* ignore */ }
             }, { once: true });
           }
@@ -443,9 +444,10 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
           }
         } else {
           try {
+            const expectedSrc = video.currentSrc;
             if (curTime > 0) {
               video.addEventListener("loadedmetadata", () => {
-                if (!video.isConnected) return;
+                if (!video.isConnected || video.currentSrc !== expectedSrc) return;
                 try { video.currentTime = curTime; } catch { /* ignore */ }
               }, { once: true });
             }

@@ -22,7 +22,7 @@ import { DesktopRail, DesktopTitleBar } from "./components/DesktopChrome";
 import ResizeHandles from "./components/ResizeHandles";
 import ContinueWatchingBar from "./components/ContinueWatchingBar";
 import { tracePlayback } from "./playbackDiagnostics";
-import { IGrid, IGridF, IHome, IHomeF, ISearch, IUser, IUserF, Logo } from "./icons";
+import { IGrid, IGridF, IHome, IHomeF, ISearch, IUser, IUserF } from "./icons";
 
 function TabBar() {
   const { tab, setTab, platform, t } = useStore();
@@ -171,10 +171,10 @@ function LayerBox({
 }
 
 function AppBody() {
-  const { platform, tab, setTab, stack, pop, loginOpen, setLoginOpen, fs, clean } = useStore();
+  const { platform, tab, stack, pop, loginOpen, setLoginOpen, fs, clean } = useStore();
   const mainRef = useRef<HTMLDivElement>(null);
   const [wide, setWide] = useState(!isMobile);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed] = useState(false);
 
   useLayoutEffect(() => {
     const el = mainRef.current;
