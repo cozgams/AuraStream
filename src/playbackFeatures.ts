@@ -46,6 +46,9 @@ export function setSleepTimer(option: SleepTimerOption, onTrigger?: () => void):
   }
 
   if (option === "off" || option === "episode_end") {
+    if (option === "off") {
+      sleepTimerCallback = null;
+    }
     sleepTimerEndTime = null;
     notifySleepTimer();
     return;

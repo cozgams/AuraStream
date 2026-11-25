@@ -1001,12 +1001,13 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 try {
                   await api.clearCache();
                   clearSubtitleCache();
-                } catch {
-                  /* ignore */
+                  setClearOpen(false);
+                  toast(t("settings.cache_cleared"), "ok");
+                } catch (e) {
+                  toast((e as Error)?.message || "Failed to clear cache", "info");
+                } finally {
+                  setClearing(false);
                 }
-                setClearing(false);
-                setClearOpen(false);
-                toast(t("settings.cache_cleared"), "ok");
               }}
               className="flex-1 h-9 rounded-xl bg-primary text-[13.5px] font-semibold text-on-primary pressable disabled:opacity-60"
             >

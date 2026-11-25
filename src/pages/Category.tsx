@@ -371,6 +371,12 @@ export function ChannelPage({ cate, name, onBack, wide }: { cate: string; name: 
           <Empty icon={<IGrid size={26} />} title="No titles available" sub="Check back shortly or explore another category." action="Refresh" onAction={() => void loadMore(true)} />
         )}
         <div ref={sentinel} className="h-10" />
+        {err && items.length > 0 && !loading && (
+          <div className="flex items-center justify-center gap-3 py-3 text-[12px] text-mut">
+            <span>{err}</span>
+            <Button onClick={() => void loadMore()} className="px-3 py-1 rounded-full bg-s3 text-on font-semibold pressable">Retry</Button>
+          </div>
+        )}
         {loading && <div className="flex justify-center py-3"><Loader className="w-6 h-6 spinner" /></div>}
         {!loading && page >= pages && items.length > 0 && (
           <div className="text-center text-[12px] text-dim py-3">— You've reached the end —</div>

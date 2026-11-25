@@ -117,7 +117,8 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
     setAudioOffset: (offsetMs: number) => {
       const v = videoRef.current;
       if (!v) return;
-      if (offsetMs === 0) {
+      const clampedMs = Math.max(0, Math.min(500, offsetMs));
+      if (clampedMs === 0) {
         if (delayNodeRef.current && audioCtxRef.current) {
           try {
             delayNodeRef.current.delayTime.setValueAtTime(0, audioCtxRef.current.currentTime);
@@ -143,7 +144,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
           sourceNodeRef.current.connect(delayNodeRef.current);
           delayNodeRef.current.connect(ctx.destination);
         }
-        const delaySec = Math.max(0, offsetMs / 1000);
+        const delaySec = clampedMs / 1000;
         delayNodeRef.current.delayTime.setValueAtTime(delaySec, ctx.currentTime);
       } catch {
         // Ignored if cross-origin or unsupported

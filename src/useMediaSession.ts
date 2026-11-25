@@ -72,10 +72,17 @@ export function useMediaSession({
     };
   }, [active, title, artist, album, coverUrl]);
 
+  const wasActiveRef = useRef(false);
   useEffect(() => {
     if (typeof window === "undefined" || !("mediaSession" in navigator)) return;
     try {
-      navigator.mediaSession.playbackState = active ? (paused ? "paused" : "playing") : "none";
+      if (active) {
+        wasActiveRef.current = true;
+        navigator.mediaSession.playbackState = paused ? "paused" : "playing";
+      } else if (wasActiveRef.current) {
+        wasActiveRef.current = false;
+        navigator.mediaSession.playbackState = "none";
+      }
     } catch {
       // ignore
     }
@@ -83,8 +90,10 @@ export function useMediaSession({
 
   useEffect(() => {
     return () => {
+      if (!wasActiveRef.current) return;
       if (typeof window === "undefined" || !("mediaSession" in navigator)) return;
       try {
+        wasActiveRef.current = false;
         navigator.mediaSession.playbackState = "none";
       } catch {
         // ignore
@@ -118,7 +127,8 @@ export function useMediaSession({
       session.setActionHandler("seekforward", (details) => {
         const offset = details.seekOffset || 10;
         const cur = handlersRef.current.time || 0;
-        handlersRef.current.onSeek?.(cur + offset);
+        const maxDur = Number.isFinite(duration) && duration > 0 ? duration : Number.POSITIVE_INFINITY;
+        handlersRef.current.onSeek?.(Math.min(maxDur, cur + offset));
       });
       session.setActionHandler("previoustrack", () => {
         handlersRef.current.onPreviousTrack?.();

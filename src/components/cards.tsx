@@ -16,7 +16,7 @@ export function MediaCard({ title, cover, subtitle, badge, isFinished, progress,
 }) {
   const displayTitle = formatDramaTitle(title);
   return <Button onClick={onOpen} className="ios-poster" aria-label={displayTitle}>
-    <span className={`ios-poster-art ${badge ? "has-poster-badge" : ""}`}>
+    <span className={`ios-poster-art ${badge ? "has-poster-badge" : ""} ${typeof score === "number" ? "has-score-badge" : ""}`}>
       <Img src={cover} alt="" eager={priority} />
       {badge && <span className={`ios-poster-badge ${isFinished ? "is-finished" : ""}`}>{badge}</span>}
       {typeof score === "number" && <ScoreBadge score={score} />}

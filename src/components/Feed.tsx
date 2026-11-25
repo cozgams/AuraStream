@@ -1212,10 +1212,22 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         }
       } else {
         lastTapRef.current = { t: now, x: g.x, y: g.y };
-        flushSync(() => {
-          setClean((c) => !c);
-          if (!isDesktop && fs) setIdle((i) => !i);
-        });
+        if (!isDesktop && fs) {
+          const nextIdle = !idle;
+          flushSync(() => {
+            setIdle(nextIdle);
+            setClean((c) => !c);
+          });
+          if (nextIdle) {
+            window.clearTimeout(idleTimer.current);
+          } else {
+            wake();
+          }
+        } else {
+          flushSync(() => {
+            setClean((c) => !c);
+          });
+        }
       }
     }
   };
@@ -1497,10 +1509,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     <div
       className={`hg-player-ui ${rotated ? "fs-landscape" : (!isDesktop && fs ? "fs-immersive" : "absolute inset-0")} overflow-hidden bg-black player-root ${controlsLocked ? "is-locked" : ""} ${isDesktop ? "player-surface" : ""} ${theater ? "is-theater" : ""} ${isDesktop && idle ? "is-idle" : ""}`}
       data-clean={clean}
-      onPointerMove={() => { if (isDesktop || fs) wake(); }}
-      onPointerDown={() => { if (!isDesktop && fs) wake(); }}
+      onPointerMove={() => { if (isDesktop || (fs && !idle)) wake(); }}
+      onPointerDown={() => { if (!isDesktop && fs && !idle) wake(); }}
       onKeyDownCapture={() => { if (isDesktop || fs) wake(); }}>
-      <div className="absolute inset-0" inert={controlsLocked}>
+      <div className="absolute inset-0" inert={controlsLocked || undefined}>
       {/* Ambient glow background (skip heavy GPU blur over Android WebView video) */}
       {active && !isDesktop && platform !== "android" && posterUrl && (
         <div className="absolute inset-0 scale-110 blur-3xl opacity-25 pointer-events-none">
@@ -2297,7 +2309,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
             else if (rate !== 1 && !holdSpeed) setRate(1);
           }}
           className={`absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 px-3.5 h-8 rounded-full backdrop-blur-md whitespace-nowrap max-w-[calc(100vw-32px)] text-[12px] font-bold elev-2 pressable ${speedLock ? "bg-primary text-on-primary" : "hg-chip hg-gold"}`}
-          style={{ top: rotated ? 56 : "calc(max(var(--sat, 0px), 36px) + 54px)" }}>
+          style={{ top: rotated ? 56 : (!isDesktop && zoom.s > 1.05 ? "calc(max(var(--sat, 0px), 36px) + 92px)" : "calc(max(var(--sat, 0px), 36px) + 54px)") }}>
           <IBoltF size={13} />
           {effRate}x {speedLock ? "Locked · Tap to unlock" : holdSpeed ? (effRate < 1 ? "Slow-mo · Release to restore" : `${effRate}x · Release to restore`) : "Speed"}
         </Button>
@@ -2615,7 +2627,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                           <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">HEVC</span>
                         </div>
                         {preferHevc && (
-                          <div className="w-4 h-4 rounded-full bg-primary flex items-center justify-center text-white shadow-2xs">
+                          <div className="w-4 h-4 rounded-full bg-primary flex items-center justify-center text-on-primary shadow-2xs">
                             <ICheck size={11} strokeWidth={3} />
                           </div>
                         )}
@@ -2642,7 +2654,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                           <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-s3 text-mut">Saver</span>
                         </div>
                         {!preferHevc && (
-                          <div className="w-4 h-4 rounded-full bg-primary flex items-center justify-center text-white shadow-2xs">
+                          <div className="w-4 h-4 rounded-full bg-primary flex items-center justify-center text-on-primary shadow-2xs">
                             <ICheck size={11} strokeWidth={3} />
                           </div>
                         )}
@@ -2656,10 +2668,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 <div className="p-3 rounded-2xl bg-s2/90 border border-edge/30 flex items-center justify-between shadow-2xs">
                   <div className="flex flex-col">
                     <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className={`w-2 h-2 rounded-full ${(typeof navigator !== "undefined" && navigator.onLine === false) ? "bg-amber-500" : "bg-emerald-500 animate-pulse"}`} />
                       <span className="text-[13px] font-bold text-on">Streaming Source</span>
                       <span className="text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                        4 Lines Active
+                        {(typeof navigator !== "undefined" && navigator.onLine === false) ? "Offline Ready" : "Multi-Line Ready"}
                       </span>
                     </div>
                     <span className="text-[10.5px] text-mut mt-0.5">
@@ -2682,13 +2694,13 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 {/* 3. Voice & Audio Sync (Lip-Sync Correction) */}
                 <div className="flex flex-col gap-2 p-3 rounded-2xl bg-s2/90 border border-edge/30 shadow-2xs">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-mut">Voice & Audio Sync</span>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-mut">Voice & Audio Delay</span>
                     <span className={`text-[11.5px] font-bold px-2 py-0.5 rounded-full border ${
                       audioSyncOffset === 0
                         ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
                         : "bg-primary/10 text-primary border-primary/25"
                     }`}>
-                      {audioSyncOffset === 0 ? "Synced (0ms)" : `${audioSyncOffset > 0 ? "+" : ""}${audioSyncOffset}ms`}
+                      {audioSyncOffset === 0 ? "Synced (0ms)" : `+${Math.max(0, audioSyncOffset)}ms`}
                     </span>
                   </div>
 
@@ -2698,11 +2710,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       type="button"
                       aria-label="Decrease audio delay by 50ms"
                       onClick={() => {
-                        const next = Math.max(-500, audioSyncOffset - 50);
+                        const next = Math.max(0, audioSyncOffset - 50);
                         setAudioSyncOffset(next);
                         try { localStorage.setItem("aurastream_audio_sync_offset", String(next)); } catch {}
                         videoRef.current?.setAudioOffset?.(next);
-                        toast(`Voice offset: ${next > 0 ? "+" : ""}${next}ms`, "ok");
+                        toast(next === 0 ? "Voice synced to video" : `Audio delay: +${next}ms`, "ok");
                       }}
                       className="px-3 py-1.5 rounded-lg bg-s1 hover:bg-s4/40 text-on text-[12px] font-bold pressable flex items-center gap-1 shadow-2xs"
                     >
@@ -2729,11 +2741,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       type="button"
                       aria-label="Increase audio delay by 50ms"
                       onClick={() => {
-                        const next = Math.min(500, audioSyncOffset + 50);
+                        const next = Math.min(500, Math.max(0, audioSyncOffset) + 50);
                         setAudioSyncOffset(next);
                         try { localStorage.setItem("aurastream_audio_sync_offset", String(next)); } catch {}
                         videoRef.current?.setAudioOffset?.(next);
-                        toast(`Voice offset: ${next > 0 ? "+" : ""}${next}ms`, "ok");
+                        toast(`Audio delay: +${next}ms`, "ok");
                       }}
                       className="px-3 py-1.5 rounded-lg bg-s1 hover:bg-s4/40 text-on text-[12px] font-bold pressable flex items-center gap-1 shadow-2xs"
                     >
@@ -2744,9 +2756,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                   {/* 3 Quick Presets */}
                   <div className="grid grid-cols-3 gap-1.5">
                     {[
-                      { label: "Early (-100ms)", val: -100 },
                       { label: "Synced (0ms)", val: 0 },
                       { label: "Delay (+100ms)", val: 100 },
+                      { label: "Delay (+250ms)", val: 250 },
                     ].map(({ label, val }) => (
                       <button
                         key={val}
@@ -2755,11 +2767,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                           setAudioSyncOffset(val);
                           try { localStorage.setItem("aurastream_audio_sync_offset", String(val)); } catch {}
                           videoRef.current?.setAudioOffset?.(val);
-                          toast(val === 0 ? "Voice synced to video" : `Voice offset: ${val > 0 ? "+" : ""}${val}ms`, "ok");
+                          toast(val === 0 ? "Voice synced to video" : `Audio delay: +${val}ms`, "ok");
                         }}
                         className={`py-1.5 rounded-lg text-center text-[11px] font-semibold transition-all ${
-                          audioSyncOffset === val
-                            ? "bg-primary text-white shadow-2xs font-bold"
+                          Math.max(0, audioSyncOffset) === val
+                            ? "bg-primary text-on-primary shadow-2xs font-bold"
                             : "bg-s3/60 text-mut hover:text-on hover:bg-s3"
                         }`}
                       >
@@ -2768,7 +2780,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     ))}
                   </div>
                   <span className="text-[10px] text-mut px-0.5">
-                    Fine-tune dialogue timing if lips and voice are slightly mismatched
+                    Delay audio slightly if dialogue plays ahead of lip movement
                   </span>
                 </div>
 
@@ -2790,7 +2802,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         }}
                         className={`py-1.5 rounded-lg text-center text-[12px] font-bold transition-all ${
                           rate === r
-                            ? "bg-primary text-white shadow-2xs font-bold"
+                            ? "bg-primary text-on-primary shadow-2xs font-bold"
                             : "text-mut hover:text-on"
                         }`}
                       >
@@ -2831,7 +2843,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         }}
                         className={`py-1.5 rounded-lg text-center text-[11.5px] font-bold transition-all ${
                           sleepTimer === val
-                            ? "bg-primary text-white shadow-2xs font-bold"
+                            ? "bg-primary text-on-primary shadow-2xs font-bold"
                             : "text-mut hover:text-on"
                         }`}
                       >
@@ -2865,7 +2877,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                           }}
                           className={`py-1.5 rounded-lg text-center text-[12px] font-bold transition-all ${
                             autoSkipSec === sec
-                              ? "bg-primary text-white shadow-2xs font-bold"
+                              ? "bg-primary text-on-primary shadow-2xs font-bold"
                               : "text-mut hover:text-on"
                           }`}
                         >
@@ -2999,7 +3011,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         currentEpisode={curEp}
         totalEpisodes={resolvedTotalEpisodes}
         title={formatDramaTitle(meta?.title) || formatDramaTitle(detail?.title) || formatDramaTitle(title) || `Series #${curId}`}
-        coverUrl={meta.cover || ""}
+        coverUrl={posterUrl || meta.cover || ""}
         isDownloaded={isDownloaded}
         isDownloading={Boolean(isDownloadingCurrent)}
         downloadProgress={currentDownload?.progress || 0}

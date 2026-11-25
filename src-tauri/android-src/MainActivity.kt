@@ -1,7 +1,5 @@
 package com.aurastream.app
 
-import android.app.PictureInPictureParams
-import android.app.PendingIntent
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -16,13 +14,11 @@ import android.os.Environment
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.PowerManager
-import android.os.StatFs
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.MediaStore
 import android.provider.Settings
 import android.util.Base64
-import android.util.Rational
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -453,7 +449,7 @@ class MainActivity : TauriActivity() {
           }
           activity.currentWebView?.onResume()
           activity.currentWebView?.resumeTimers()
-        } else if (prev > 0 || AuraDownloadService.isRunning || MainActivity.serviceStartRequested) {
+        } else if ((prev > 0 || AuraDownloadService.isRunning || MainActivity.serviceStartRequested) && !AuraDownloadService.hasActiveDiskDownloads(activity)) {
           AuraDownloadService.clearDownloads()
           activity.stopDownloadService()
           activity.releaseWakeLock()
@@ -665,6 +661,15 @@ class MainActivity : TauriActivity() {
       }
     }
 
+    private fun sanitizeExportFileName(raw: String, fallbackPrefix: String, fallbackExt: String): String {
+      val base = File(raw).name
+      val sanitized = base.replace("[^a-zA-Z0-9._-]".toRegex(), "_").trim('_', '.')
+      if (sanitized.isEmpty() || sanitized == "." || sanitized == ".." || sanitized.contains("..")) {
+        return "${fallbackPrefix}_${System.currentTimeMillis()}.$fallbackExt"
+      }
+      return sanitized
+    }
+
     @JavascriptInterface
     fun beginExport(fileName: String): Boolean {
       return synchronized(activity.exportLock) {
@@ -677,13 +682,15 @@ class MainActivity : TauriActivity() {
 
           activity.cleanupExportsDir(30 * 60 * 1000L)
 
-          val exportsDir = File(activity.cacheDir, "exports")
+          val exportsDir = File(activity.cacheDir, "exports").canonicalFile
           if (!exportsDir.exists()) {
             exportsDir.mkdirs()
           }
-          val sanitized = fileName.replace("[^a-zA-Z0-9._-]".toRegex(), "_").trim('_')
-          val safeFileName = if (sanitized.isEmpty()) "export_${System.currentTimeMillis()}.mp4" else sanitized
-          val file = File(exportsDir, safeFileName)
+          val safeFileName = sanitizeExportFileName(fileName, "export", "mp4")
+          val file = File(exportsDir, safeFileName).canonicalFile
+          if (!file.path.startsWith(exportsDir.path + File.separator)) {
+            return@synchronized false
+          }
           if (file.exists()) {
             file.delete()
           }
@@ -907,11 +914,13 @@ class MainActivity : TauriActivity() {
     fun exportSubtitleText(fileName: String, content: String, action: String): String {
       return try {
         activity.cleanupExportsDir(30 * 60 * 1000L)
-        val exportsDir = File(activity.cacheDir, "exports")
+        val exportsDir = File(activity.cacheDir, "exports").canonicalFile
         if (!exportsDir.exists()) exportsDir.mkdirs()
-        val sanitized = fileName.replace("[^a-zA-Z0-9._-]".toRegex(), "_").trim('_')
-        val safeFileName = if (sanitized.isEmpty()) "subtitle_${System.currentTimeMillis()}.srt" else sanitized
-        val file = File(exportsDir, safeFileName)
+        val safeFileName = sanitizeExportFileName(fileName, "subtitle", "srt")
+        val file = File(exportsDir, safeFileName).canonicalFile
+        if (!file.path.startsWith(exportsDir.path + File.separator)) {
+          return "ERROR:Invalid subtitle filename"
+        }
         file.writeText(content, Charsets.UTF_8)
 
         val subDir = if (action == "save_downloads") "Download/AuraStream" else "Movies/AuraStream"
@@ -969,8 +978,13 @@ class MainActivity : TauriActivity() {
           MediaScannerConnection.scanFile(activity, arrayOf(dest.absolutePath), arrayOf(mimeType)) { _, uri ->
             if (uri != null) activity.lastExportedUri = uri
           }
-          return Uri.fromFile(dest)
+          return try {
+            FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", dest)
+          } catch (_: Exception) {
+            Uri.fromFile(dest)
+          }
         } else {
+          contentValues.put(MediaStore.MediaColumns.DATA, File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "AuraStream/$displayName").apply { parentFile?.mkdirs() }.absolutePath)
           MediaStore.Video.Media.EXTERNAL_CONTENT_URI
         }
       }
@@ -1161,7 +1175,57 @@ class MainActivity : TauriActivity() {
       if (currentVer > 0L && apkVer < currentVer) {
         return "Update package version ($apkVer) is older than installed ($currentVer)"
       }
+      val installedCerts = signingCertDigestsCompat(null)
+      val archiveCerts = signingCertDigestsCompat(file.absolutePath)
+      if (installedCerts.isNotEmpty() && archiveCerts.isNotEmpty() && installedCerts.intersect(archiveCerts).isEmpty()) {
+        return "Update package signing certificate does not match installed app"
+      }
       return null
+    }
+
+    private fun signingCertDigestsCompat(archivePath: String?): Set<String> {
+      return try {
+        val pm = activity.packageManager
+        val pkgInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+          val flags = PackageManager.GET_SIGNING_CERTIFICATES.toLong()
+          if (archivePath == null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+              pm.getPackageInfo(activity.packageName, PackageManager.PackageInfoFlags.of(flags))
+            } else {
+              @Suppress("DEPRECATION")
+              pm.getPackageInfo(activity.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+            }
+          } else {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+              pm.getPackageArchiveInfo(archivePath, PackageManager.PackageInfoFlags.of(flags))
+            } else {
+              @Suppress("DEPRECATION")
+              pm.getPackageArchiveInfo(archivePath, PackageManager.GET_SIGNING_CERTIFICATES)
+            }
+          }
+        } else {
+          @Suppress("DEPRECATION")
+          if (archivePath == null) {
+            pm.getPackageInfo(activity.packageName, PackageManager.GET_SIGNATURES)
+          } else {
+            pm.getPackageArchiveInfo(archivePath, PackageManager.GET_SIGNATURES)
+          }
+        } ?: return emptySet()
+
+        val rawSigs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+          pkgInfo.signingInfo?.apkContentsSigners ?: pkgInfo.signingInfo?.signingCertificateHistory
+        } else {
+          @Suppress("DEPRECATION")
+          pkgInfo.signatures
+        } ?: return emptySet()
+
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        rawSigs.map { sig ->
+          md.digest(sig.toByteArray()).joinToString("") { b -> "%02x".format(b) }
+        }.toSet()
+      } catch (_: Exception) {
+        emptySet()
+      }
     }
 
     @JavascriptInterface
@@ -1209,8 +1273,7 @@ class MainActivity : TauriActivity() {
 
     @JavascriptInterface
     fun getDeviceAbi(): String {
-      val abis = Build.SUPPORTED_ABIS ?: emptyArray()
-      for (abi in abis) {
+      for (abi in Build.SUPPORTED_ABIS) {
         when (abi.lowercase()) {
           "arm64-v8a" -> return "arm64"
           "x86_64" -> return "x86_64"
@@ -1569,14 +1632,10 @@ class MainActivity : TauriActivity() {
       }
 
       val storageGranted = try {
-        when {
-          Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> true
-          Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
-            activity.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
-          }
-          else -> {
-            activity.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
-          }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+          true
+        } else {
+          activity.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
         }
       } catch (_: Exception) {
         true

@@ -423,6 +423,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     writeStorage(STORAGE_KEYS.accent, next);
   }, []);
 
+  useEffect(() => {
+    const syncMigrated = () => {
+      const nextAccent = readAccentPreference();
+      applyAccent(nextAccent);
+      setAccentState(nextAccent);
+      setLanguageState(readLanguagePreference());
+      setSubtitleModeState(readSubtitleModePreference());
+      setSubtitleSizeState(readSubtitleSizePreference());
+    };
+    window.addEventListener("aurastream:storage-migrated", syncMigrated);
+    return () => window.removeEventListener("aurastream:storage-migrated", syncMigrated);
+  }, []);
+
   const setTheme = useCallback((next: ThemePreference) => {
     const resolved = resolveTheme(next);
     if (resolved !== themeRef.current) beginThemeTransition();
@@ -440,13 +453,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     const uid = getCurrentAuthUid();
-    if (!uid || user?.user_type !== "firebase" || cloudHydratedUid !== uid) {
+    const isFirebase = user?.user_type === "firebase" || hasActiveFirebaseSession();
+    if (!uid || !isFirebase || cloudHydratedUid !== uid) {
       return;
     }
     syncTimeoutRef.current = setTimeout(() => {
       try {
         const activeUid = getCurrentAuthUid();
-        if (activeUid && user?.user_type === "firebase" && cloudHydratedUid === activeUid) {
+        const activeFb = userRef.current?.user_type === "firebase" || hasActiveFirebaseSession();
+        if (activeUid && activeFb && cloudHydratedUid === activeUid) {
           void saveUserDataToCloud(activeUid, {
             favorites: p.favs,
             likes: p.likes,
@@ -481,6 +496,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setSiteOrigin(r.base || "");
         setUserState((prev) => {
           if (r.user && (r.user as User).id) {
+            if (prev?.user_type === "firebase") {
+              return prev;
+            }
             removeStorage(STORAGE_KEYS.localUser);
             return r.user as User;
           }
@@ -709,37 +727,45 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const toggleLikeLocal = useCallback((id: number) => {
     const on = !pRef.current.likes.includes(id);
-    setP((s) => {
+    const apply = (s: Persist): Persist => {
       const likes = on ? (s.likes.includes(id) ? s.likes : [id, ...s.likes]) : s.likes.filter((x) => x !== id);
       const favs = on ? (s.favs.includes(id) ? s.favs : [id, ...s.favs]) : s.favs.filter((x) => x !== id);
       return { ...s, likes, favs };
-    });
+    };
+    pRef.current = apply(pRef.current);
+    setP(apply);
     return on;
   }, []);
   const toggleFavLocal = useCallback((id: number) => {
     const on = !pRef.current.favs.includes(id);
-    setP((s) => {
+    const apply = (s: Persist): Persist => {
       const favs = on ? (s.favs.includes(id) ? s.favs : [id, ...s.favs]) : s.favs.filter((x) => x !== id);
       const likes = on ? (s.likes.includes(id) ? s.likes : [id, ...s.likes]) : s.likes.filter((x) => x !== id);
       return { ...s, likes, favs };
-    });
+    };
+    pRef.current = apply(pRef.current);
+    setP(apply);
     return on;
   }, []);
   const clearFavs = useCallback(() => setP((s) => ({ ...s, favs: [], likes: [] })), []);
   const toggleWatchLaterLocal = useCallback((id: number) => {
     const on = !(pRef.current.watchLater || []).includes(id);
-    setP((s) => {
+    const apply = (s: Persist): Persist => {
       const list = s.watchLater || [];
       return { ...s, watchLater: on ? (list.includes(id) ? list : [id, ...list]) : list.filter((x) => x !== id) };
-    });
+    };
+    pRef.current = apply(pRef.current);
+    setP(apply);
     return on;
   }, []);
   const clearWatchLater = useCallback(() => setP((s) => ({ ...s, watchLater: [] })), []);
   const toggleFollowLocal = useCallback((uid: number) => {
     const on = !pRef.current.follows.includes(uid);
-    setP((s) => {
+    const apply = (s: Persist): Persist => {
       return { ...s, follows: on ? (s.follows.includes(uid) ? s.follows : [uid, ...s.follows]) : s.follows.filter((x) => x !== uid) };
-    });
+    };
+    pRef.current = apply(pRef.current);
+    setP(apply);
     return on;
   }, []);
   const addHistory = useCallback(

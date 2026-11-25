@@ -30,7 +30,7 @@ echo "=== Aligning and Signing APKs (16KB alignment) ==="
 for abi in arm64 arm x86_64; do
   in_apk="$APK_BASE/${abi}/release/app-${abi}-release-unsigned.apk"
   out_apk="$OUT_DIR/AuraStream_${VERSION}_${abi}.apk"
-  zipalign -f -p 16 "$in_apk" "$out_apk"
+  zipalign -P 16 -f 4 "$in_apk" "$out_apk"
   printf '%s\n' "$KS_PASS" | apksigner sign --ks "$KEYSTORE" --ks-key-alias "$KEY_ALIAS" --ks-pass stdin "$out_apk"
   rm -f "${out_apk}.idsig"
   apksigner verify "$out_apk"

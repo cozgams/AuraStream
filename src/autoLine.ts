@@ -23,6 +23,8 @@ let step = 0;
 let downStreak = 0;
 let failStreak = 0;
 let lastPickAt: number | null = null;
+let lifecycleEpoch = 0;
+let pendingManualPick = false;
 let cancellation: Promise<void> = Promise.resolve();
 
 export let lastPick: { base: string; tier: string; ms: number } | null = null;
@@ -34,14 +36,15 @@ function stopTimer() {
 
 function schedule(delay: number) {
   stopTimer();
-  if (!autoLineEnabled()) return;
+  if (!started || !attached || !autoLineEnabled()) return;
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+  const scheduledEpoch = lifecycleEpoch;
   timer = window.setTimeout(() => {
+    if (scheduledEpoch !== lifecycleEpoch || !started || !attached || !autoLineEnabled()) return;
     if (navigator.onLine === false) {
       schedule(30_000);
     } else if (document.visibilityState === "visible") {
       void check("timer");
-    } else {
-      schedule(HEALTH_STEPS[0]);
     }
   }, delay);
 }
@@ -50,6 +53,8 @@ export const setAutoLine = (on: boolean): Promise<void> => {
   enabledOverride = on;
   try { localStorage.setItem(STORAGE_KEYS.autoLine, on ? "on" : "off"); } catch { /* storage can be unavailable */ }
   if (!on) {
+    lifecycleEpoch += 1;
+    pendingManualPick = false;
     stopTimer();
     const pending = cancellation.then(() => api.lineCancel());
     cancellation = pending.catch((error) => {
@@ -59,25 +64,32 @@ export const setAutoLine = (on: boolean): Promise<void> => {
     return pending;
   }
   if (started && !attached) attach();
-  if (started) void pickLine("manual", true);
+  if (started) {
+    if (picking) {
+      pendingManualPick = true;
+    } else {
+      void pickLine("manual", true);
+    }
+  }
   window.dispatchEvent(new Event("hg:auto-line-changed"));
   return Promise.resolve();
 };
 
 export async function pickLine(reason: string, force = false): Promise<void> {
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    if (started) schedule(30_000);
+    if (started && attached) schedule(30_000);
     return;
   }
   if (!autoLineEnabled() || picking || (!force && document.visibilityState !== "visible")) return;
   if (!force && lastPickAt !== null && Date.now() - lastPickAt < PICK_COOLDOWN_MS) return;
   picking = true;
+  const myEpoch = lifecycleEpoch;
   let down = false;
   try {
     await cancellation;
-    if (!autoLineEnabled()) return;
+    if (!autoLineEnabled() || myEpoch !== lifecycleEpoch) return;
     const result = await api.lineAuto();
-    if (result.cancelled || !autoLineEnabled()) return;
+    if (result.cancelled || !autoLineEnabled() || myEpoch !== lifecycleEpoch) return;
     lastPickAt = Date.now();
     downStreak = 0;
     failStreak = 0;
@@ -108,7 +120,13 @@ export async function pickLine(reason: string, force = false): Promise<void> {
     tracePlayback("line.fail", { where: "auto", reason, err: (error as Error).message });
   } finally {
     picking = false;
-    if (started) schedule(down ? DOWN_RETRY_MS : HEALTH_STEPS[0]);
+    const runManual = pendingManualPick && autoLineEnabled() && started && attached;
+    pendingManualPick = false;
+    if (runManual) {
+      void pickLine("manual", true);
+    } else if (myEpoch === lifecycleEpoch && started && attached) {
+      schedule(down ? DOWN_RETRY_MS : HEALTH_STEPS[0]);
+    }
   }
 }
 
@@ -116,11 +134,12 @@ async function tryMain(reason: string): Promise<void> {
   if (typeof navigator !== "undefined" && navigator.onLine === false) return;
   if (!autoLineEnabled() || picking) return;
   picking = true;
+  const myEpoch = lifecycleEpoch;
   try {
     await cancellation;
-    if (!autoLineEnabled()) return;
+    if (!autoLineEnabled() || myEpoch !== lifecycleEpoch) return;
     const result = await api.lineTryMain();
-    if (result.cancelled || !autoLineEnabled()) return;
+    if (result.cancelled || !autoLineEnabled() || myEpoch !== lifecycleEpoch) return;
     logLine(`[line] main(${reason}) ok=${result.probe.ok} ms=${result.probe.ms} switched=${result.switched}`);
     if (result.switched) {
       window.dispatchEvent(new CustomEvent("hg:line", {
@@ -137,22 +156,24 @@ async function tryMain(reason: string): Promise<void> {
 
 async function check(reason: string): Promise<void> {
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    if (started) schedule(30_000);
+    if (started && attached) schedule(30_000);
     return;
   }
-  if (!autoLineEnabled() || checking) return;
+  if (!started || !attached || !autoLineEnabled() || checking) return;
   if (picking) {
     schedule(HEALTH_STEPS[step]);
     return;
   }
   checking = true;
+  const myEpoch = lifecycleEpoch;
   try {
     const health = await api.lineHealth();
+    if (myEpoch !== lifecycleEpoch || !started || !attached || !autoLineEnabled()) return;
     if (health.ok) {
       downStreak = 0;
       step = Math.min(step + 1, HEALTH_STEPS.length - 1);
       if (hostOf(health.base) !== "huangguoai.com") await tryMain(reason);
-      schedule(HEALTH_STEPS[step]);
+      if (myEpoch === lifecycleEpoch && started && attached) schedule(HEALTH_STEPS[step]);
       return;
     }
     downStreak += 1;
@@ -167,7 +188,7 @@ async function check(reason: string): Promise<void> {
     await pickLine(reason, true);
   } catch (error) {
     logLine(`[line] health(${reason}) failed: ${(error as Error).message}`);
-    schedule(HEALTH_STEPS[step]);
+    if (myEpoch === lifecycleEpoch && started && attached) schedule(HEALTH_STEPS[step]);
   } finally {
     checking = false;
   }
@@ -175,7 +196,7 @@ async function check(reason: string): Promise<void> {
 
 let pendingOnlinePick = false;
 const onOnline = () => {
-  if (!autoLineEnabled()) return;
+  if (!autoLineEnabled() || !started || !attached) return;
   failStreak = 0;
   downStreak = 0;
   step = 0;
@@ -198,8 +219,10 @@ const onProxyChanged = () => {
   schedule(RECHECK_MS);
 };
 const onVisibilityChange = () => {
-  if (document.visibilityState === "hidden") stopTimer();
-  else if (pendingOnlinePick) {
+  if (document.visibilityState === "hidden") {
+    lifecycleEpoch += 1;
+    stopTimer();
+  } else if (pendingOnlinePick) {
     pendingOnlinePick = false;
     downStreak = 0;
     failStreak = 0;
@@ -212,7 +235,7 @@ function attach() {
   if (attached) return;
   attached = true;
   setNetObserver((result) => {
-    if (!autoLineEnabled()) return;
+    if (!autoLineEnabled() || !started || !attached) return;
     if (!result.cmd.startsWith("api_")) return;
     if (result.ok) { failStreak = 0; return; }
     const isServerFail = Boolean(result.msg && /HTTP (500|502|503|504)\b/i.test(result.msg));
@@ -233,6 +256,9 @@ function attach() {
 }
 
 export function detachAutoLine(): void {
+  lifecycleEpoch += 1;
+  pendingManualPick = false;
+  started = false;
   if (!attached) return;
   stopTimer();
   window.removeEventListener("online", onOnline);

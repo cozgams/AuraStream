@@ -597,6 +597,7 @@ export async function fetchCloudUserData(userId: string): Promise<{ ok: boolean;
     // ignore
   }
 
+  let remoteError = false;
   if (!isUsingPlaceholderFirebaseConfig()) {
     if (!db) initFirebase();
     if (db) {
@@ -608,12 +609,13 @@ export async function fetchCloudUserData(userId: string): Promise<{ ok: boolean;
           return { ok: true, data: remoteData };
         }
       } catch (err) {
+        remoteError = true;
         console.warn("Failed to load user data from Firestore, using local account backup:", err);
       }
     }
   }
 
-  return { ok: true, data: localData };
+  return { ok: !remoteError, data: localData };
 }
 
 export async function loadUserDataFromCloud(userId: string): Promise<CloudUserData | null> {

@@ -143,7 +143,8 @@ export function parseAss(content: string): SubtitleCue[] {
     }
     const joinedEn = normalizeCueText(enLines.join("\n"));
     const joinedZh = normalizeCueText(zhLines.join("\n"));
-    const displayCue = joinedEn || joinedZh;
+    const hasRealEnglish = /[A-Za-z]/.test(joinedEn);
+    const displayCue = (hasRealEnglish ? joinedEn : "") || joinedZh || joinedEn;
     if (!displayCue) continue;
 
     cues.push({
@@ -174,14 +175,20 @@ export function parseVtt(content: string): SubtitleCue[] {
   let i = 0;
   while (i < rawLines.length) {
     const line = rawLines[i].trim();
+    const upper = line.toUpperCase();
+    if (!line || upper.startsWith("WEBVTT")) {
+      i++;
+      continue;
+    }
     if (
-      !line ||
-      line.toUpperCase().startsWith("WEBVTT") ||
-      line.toUpperCase().startsWith("NOTE") ||
-      line.toUpperCase().startsWith("STYLE") ||
-      line.toUpperCase().startsWith("REGION")
+      upper.startsWith("NOTE") ||
+      upper.startsWith("STYLE") ||
+      upper.startsWith("REGION")
     ) {
       i++;
+      while (i < rawLines.length && rawLines[i].trim() !== "") {
+        i++;
+      }
       continue;
     }
 
@@ -258,7 +265,8 @@ export function parseVtt(content: string): SubtitleCue[] {
 
     const joinedEn = normalizeCueText(enLines.join("\n"));
     const joinedZh = normalizeCueText(zhLines.join("\n"));
-    const displayCue = joinedEn || joinedZh;
+    const hasRealEnglish = /[A-Za-z]/.test(joinedEn);
+    const displayCue = (hasRealEnglish ? joinedEn : "") || joinedZh || joinedEn;
     if (!displayCue) continue;
 
     cues.push({

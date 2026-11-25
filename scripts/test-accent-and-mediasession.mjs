@@ -162,6 +162,7 @@ try {
   // Verify 'Romance' is deleted and 'Action' + 'Mystery' remain
   const remainingTags = await page.$$eval('button[aria-label^="Remove "]', els => els.map(e => e.getAttribute("aria-label")));
   assert.deepEqual(remainingTags, ["Remove Action", "Remove Mystery"], "Romance should be removed while Action and Mystery remain");
+  assert.deepEqual(errors, [], `Expected zero page errors, got: ${errors.join("; ")}`);
 
   console.log("✓ Search Improvements & Single Tag Deletion (individual remove): PASSED");
   console.log("\nALL ACCENT & MEDIASESSION TESTS PASSED SUCCESSFULLY!");

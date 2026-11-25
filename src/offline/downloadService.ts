@@ -1242,8 +1242,8 @@ export async function getOfflinePlaybackUrl(
           const attrs = parseHlsTagAttrs(trimmed);
           const origUri = attrs.URI;
           const mappedKeyUrl = (origUri && keyUrlMap.get(origUri)) || fallbackKeyUrl;
-          if (mappedKeyUrl && /URI="[^"]+"/.test(line)) {
-            newLines.push(line.replace(/URI="[^"]+"/, `URI="${mappedKeyUrl}"`));
+          if (mappedKeyUrl && /URI=(?:"[^"]+"|'[^']+'|[^,\s]+)/.test(line)) {
+            newLines.push(line.replace(/URI=(?:"[^"]+"|'[^']+'|[^,\s]+)/, `URI="${mappedKeyUrl}"`));
           } else {
             newLines.push(line);
           }
@@ -1258,7 +1258,7 @@ export async function getOfflinePlaybackUrl(
             pruneStaleOfflineMetadata(id);
             return null;
           }
-          newLines.push(line.replace(/URI="[^"]+"/, `URI="${mappedInitUrl}"`));
+          newLines.push(line.replace(/URI=(?:"[^"]+"|'[^']+'|[^,\s]+)/, `URI="${mappedInitUrl}"`));
           continue;
         }
         if (trimmed && !trimmed.startsWith("#")) {
@@ -1603,9 +1603,19 @@ export function getActiveDownloads(): ActiveDownloadProgress[] {
   return Array.from(activeProgress.values());
 }
 
-function resolveProxyMediaUrl(rawUrl: string): string {
+function resolveProxyMediaUrl(rawUrl: string, basePlaylistUrl?: string): string {
   if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://") || rawUrl.startsWith("hg://")) {
     return rawUrl;
+  }
+  if (basePlaylistUrl) {
+    try {
+      const resolved = new URL(rawUrl, basePlaylistUrl).toString();
+      if (resolved.startsWith("http://") || resolved.startsWith("https://")) {
+        return resolved;
+      }
+    } catch {
+      // fall through
+    }
   }
   return rawUrl.startsWith("/") ? `${LOCAL}${rawUrl}` : `${LOCAL}/${rawUrl}`;
 }
@@ -1869,7 +1879,8 @@ export async function startEpisodeDownload(
   const controller = new AbortController();
   activeAbortControllers.set(id, controller);
 
-  const runPromise = (async () => {
+  let runPromise: Promise<void> | null = null;
+  runPromise = (async () => {
     const isStillOwner = () => activeRunTokens.get(id) === runToken;
     const isCurrentRun = () => isStillOwner() && !controller.signal.aborted;
 
@@ -2450,7 +2461,7 @@ export async function startEpisodeDownload(
     notifyNativeDownloadCancel(videoId, episode);
     throw err;
   } finally {
-    if (isStillOwner()) {
+    if (activeDownloadPromises.get(id) === runPromise) {
       activeDownloadPromises.delete(id);
     }
   }
@@ -2467,10 +2478,11 @@ async function deleteFromDb(dbName: string, id: string): Promise<void> {
   return new Promise((resolve) => {
     try {
       const tx = db.transaction(STORE_NAME, "readwrite");
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); resolve(); };
+      tx.onabort = () => { db.close(); resolve(); };
       const store = tx.objectStore(STORE_NAME);
-      const delReq = store.delete(id);
-      delReq.onsuccess = () => { db.close(); resolve(); };
-      delReq.onerror = () => { db.close(); resolve(); };
+      store.delete(id);
     } catch {
       db.close();
       resolve();
@@ -2485,10 +2497,11 @@ async function clearDb(dbName: string): Promise<void> {
   return new Promise((resolve) => {
     try {
       const tx = db.transaction(STORE_NAME, "readwrite");
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); resolve(); };
+      tx.onabort = () => { db.close(); resolve(); };
       const store = tx.objectStore(STORE_NAME);
-      const clearReq = store.clear();
-      clearReq.onsuccess = () => { db.close(); resolve(); };
-      clearReq.onerror = () => { db.close(); resolve(); };
+      store.clear();
     } catch {
       db.close();
       resolve();
@@ -2921,6 +2934,9 @@ export async function executeBatchDownload(
         const id = `${next.videoId}_${next.episode}`;
         if (isEpisodeDownloaded(next.videoId, next.episode)) {
           activeProgress.delete(id);
+          success++;
+          batchState.completed = success;
+          notifyBatchProgress();
           notifyProgress(true);
           continue;
         }

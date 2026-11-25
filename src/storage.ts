@@ -80,7 +80,10 @@ export function flushNativeStateSync(): void {
   if (typeof bridge?.saveAppState !== "function") return;
   nativeDirty = false;
   try {
-    bridge.saveAppState(JSON.stringify(nativeCache));
+    const ok = bridge.saveAppState(JSON.stringify(nativeCache));
+    if (ok === false) {
+      nativeDirty = true;
+    }
   } catch {
     nativeDirty = true;
   }

@@ -41,6 +41,7 @@ const preloadedMap = new Map<string, PreloadedEpisode>();
 const activePreloadPromises = new Map<string, Promise<boolean>>();
 const listeners = new Set<() => void>();
 let currentActiveKey: string | null = null;
+let cacheEpoch = 0;
 
 function notify() {
   for (const listener of listeners) {
@@ -151,6 +152,7 @@ export function runAutoCleaner(): { evictedKeys: string[]; freedBytes: number } 
 }
 
 export function clearAllTempCache(): { count: number; freedBytes: number } {
+  cacheEpoch += 1;
   const count = preloadedMap.size;
   let freedBytes = 0;
   for (const item of preloadedMap.values()) {
@@ -205,11 +207,12 @@ export async function preloadEpisode(
     return activePreloadPromises.get(key)!;
   }
 
+  const epochAtStart = cacheEpoch;
   const promise = (async () => {
     try {
       // 1. Fetch play info for the episode
       const playInfo = await api.play(videoId, episode);
-      if (!playInfo) return false;
+      if (!playInfo || epochAtStart !== cacheEpoch) return false;
 
       const rawStream = (options?.preferHevc && (playInfo.streams?.hevc || playInfo.video_url_hevc))
         || playInfo.streams?.main
@@ -220,17 +223,24 @@ export async function preloadEpisode(
       // 2. Fetch rewritten m3u8 playlist through local proxy
       const plUrl = playlist(rawStream);
       const res = await fetch(plUrl);
-      if (!res.ok) return false;
+      if (!res.ok || epochAtStart !== cacheEpoch) return false;
       const m3u8Text = await res.text();
+      if (epochAtStart !== cacheEpoch) return false;
+
+      const resolveLocalOrAbs = (u: string) => {
+        if (u.startsWith("http://") || u.startsWith("https://") || u.startsWith("hg://")) return u;
+        return u.startsWith("/") ? `${LOCAL}${u}` : `${LOCAL}/${u}`;
+      };
 
       // 3. Extract encryption keys and segment URLs
       const lines = m3u8Text.split("\n");
       const keyLines = lines.filter((l) => l.startsWith("#EXT-X-KEY"));
       for (const kl of keyLines) {
+        if (epochAtStart !== cacheEpoch) return false;
         const m = kl.match(/URI="([^"]+)"/);
         if (m && m[1]) {
           try {
-            await fetch(m[1]); // Warm up key in Rust's KEY_CACHE
+            await fetch(resolveLocalOrAbs(m[1])); // Warm up key in Rust's KEY_CACHE
           } catch {
             // ignore
           }
@@ -250,11 +260,9 @@ export async function preloadEpisode(
       // Turbo parallel pre-fetch across Wi-Fi for instant 0ms startup
       await Promise.all(
         toFetch.map(async (segUrl) => {
+          if (epochAtStart !== cacheEpoch) return;
           try {
-            let fullSegUrl = segUrl;
-            if (!segUrl.startsWith("http://") && !segUrl.startsWith("https://") && !segUrl.startsWith("hg://")) {
-              fullSegUrl = segUrl.startsWith("/") ? `${LOCAL}${segUrl}` : `${LOCAL}/${segUrl}`;
-            }
+            const fullSegUrl = resolveLocalOrAbs(segUrl);
             const segRes = await fetch(fullSegUrl);
             if (segRes.ok) {
               const buf = await segRes.arrayBuffer().catch(() => null);
@@ -270,6 +278,8 @@ export async function preloadEpisode(
           }
         })
       );
+
+      if (epochAtStart !== cacheEpoch) return false;
 
       // 5. Register in preloaded cache map
       const entry: PreloadedEpisode = {

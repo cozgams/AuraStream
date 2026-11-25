@@ -6,5 +6,5 @@
     </linearGradient>
   </defs>
   <rect width="1024" height="1024" fill="url(#aura-bg)"/>
-  <image href="/data/home/.gemini/antigravity-cli/brain/f3dd6a2f-052a-4132-80ac-b16d5e967f6d/aurastream_user_unmasked.png" x="0" y="0" width="1024" height="1024"/>
+  <image href="source-artwork.png" x="0" y="0" width="1024" height="1024"/>
 </svg>

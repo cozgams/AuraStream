@@ -40,13 +40,20 @@ export function installLayoutDiagnostics() {
       tracePlayback("app.layout", { reason, ...data });
     } finally { probe.remove(); }
   };
+  let raf = 0;
+  let startupRaf = 0;
+  let t300: ReturnType<typeof setTimeout> | undefined;
+  let t1200: ReturnType<typeof setTimeout> | undefined;
   const schedule = (reason: string) => {
     clearTimeout(timer);
-    timer = setTimeout(() => requestAnimationFrame(() => sample(reason)), 80);
+    cancelAnimationFrame(raf);
+    timer = setTimeout(() => {
+      raf = requestAnimationFrame(() => sample(reason));
+    }, 80);
   };
-  requestAnimationFrame(() => sample("startup"));
-  setTimeout(() => schedule("startup.300ms"), 300);
-  setTimeout(() => schedule("startup.1200ms"), 1200);
+  startupRaf = requestAnimationFrame(() => sample("startup"));
+  t300 = setTimeout(() => schedule("startup.300ms"), 300);
+  t1200 = setTimeout(() => schedule("startup.1200ms"), 1200);
   const onResize = () => schedule("resize");
   const onVvResize = () => schedule("visualViewport.resize");
   const onOrientation = () => schedule("orientationchange");
@@ -63,6 +70,10 @@ export function installLayoutDiagnostics() {
 
   return () => {
     clearTimeout(timer);
+    clearTimeout(t300);
+    clearTimeout(t1200);
+    cancelAnimationFrame(raf);
+    cancelAnimationFrame(startupRaf);
     window.removeEventListener("resize", onResize);
     window.visualViewport?.removeEventListener("resize", onVvResize);
     window.removeEventListener("orientationchange", onOrientation);

@@ -569,7 +569,11 @@ async fn coordinator_loop() {
                 let still_running = st
                     .queue
                     .iter()
-                    .any(|q| q.id == aid && q.run_token == expected_tok && q.status == "downloading");
+                    .any(|q| {
+                        q.id == aid
+                            && q.run_token == expected_tok
+                            && (q.status == "downloading" || q.status == "completed")
+                    });
                 if !still_running {
                     if let Some((_, handle)) = active_tasks.remove(&aid) {
                         handle.abort();
@@ -1207,7 +1211,7 @@ async fn run_episode_download(mut item: QueueDownloadItem, cancel: Arc<AtomicBoo
             // Retain completed entry briefly for UI 100% transition, then clear from active queue
             tokio::time::sleep(Duration::from_millis(1200)).await;
             let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
-            st.queue.retain(|q| !(q.id == id && q.status == "completed"));
+            st.queue.retain(|q| !(q.id == id && q.run_token == token && q.status == "completed"));
             persist_all_locked(&st);
             emit_frontend_snapshot(&st);
         }
@@ -2118,14 +2122,19 @@ pub async fn native_offline_prepare_export(id: String, file_name: String) -> Res
     if !is_safe_segment(&id) {
         return Err("Invalid episode ID".into());
     }
-    let safe_name: String = file_name
+    let base_name = std::path::Path::new(&file_name)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    let safe_name: String = base_name
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '_' })
         .collect();
-    let safe_name = if safe_name.trim_matches('_').is_empty() {
+    let trimmed = safe_name.trim_matches(|c| c == '_' || c == '.');
+    let safe_name = if trimmed.is_empty() || trimmed == "." || trimmed == ".." || trimmed.contains("..") {
         format!("{id}.mp4")
     } else {
-        safe_name
+        trimmed.to_string()
     };
 
     let (ep_dir, is_hls) = {

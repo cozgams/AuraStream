@@ -35,6 +35,8 @@ const DEFAULT_RUNTIME_STATE: OtaRuntimeState = {
 
 let otaRuntimeState: OtaRuntimeState = { ...DEFAULT_RUNTIME_STATE };
 const runtimeListeners = new Set<(state: OtaRuntimeState) => void>();
+let otaDownloadSeq = 0;
+let activeOtaDownloadSeq = 0;
 
 function emitOtaRuntimeState(): void {
   const snapshot = { ...otaRuntimeState };
@@ -155,7 +157,7 @@ function assetMatchesAbi(assetName: string, abi: "arm64" | "arm" | "x86_64"): bo
   if (!lower.endsWith(".apk")) return false;
   if (abi === "arm64") return lower.includes("arm64") || lower.includes("aarch64");
   if (abi === "x86_64") return lower.includes("x86_64");
-  return lower.includes("_arm.") || (!lower.includes("arm64") && !lower.includes("x86"));
+  return lower.includes("_arm.") || lower.includes("armeabi") || lower.includes("armv7");
 }
 
 /**
@@ -236,6 +238,7 @@ export function getCachedOtaApk(fileName: string, expectedSize = 0): { ready: bo
 export function startOtaUpdateDownload(url: string, fileName: string, expectedSize = 0): boolean {
   const cached = getCachedOtaApk(fileName, expectedSize);
   if (cached.ready && cached.filePath) {
+    activeOtaDownloadSeq = ++otaDownloadSeq;
     otaRuntimeState = {
       stage: canInstallOtaPackages() ? "ready" : "need_permission",
       fileName,
@@ -252,6 +255,7 @@ export function startOtaUpdateDownload(url: string, fileName: string, expectedSi
 
   const bridge = getNativeBridge();
   if (!bridge || typeof bridge.startOtaDownload !== "function") return false;
+  activeOtaDownloadSeq = ++otaDownloadSeq;
   otaRuntimeState = {
     stage: "downloading",
     fileName,
@@ -277,6 +281,8 @@ export function startOtaUpdateDownload(url: string, fileName: string, expectedSi
 
 export function cancelOtaUpdateDownload(): boolean {
   const bridge = getNativeBridge();
+  activeOtaDownloadSeq = 0;
+  otaDownloadSeq += 1;
   otaRuntimeState = { ...DEFAULT_RUNTIME_STATE };
   emitOtaRuntimeState();
   if (!bridge || typeof bridge.cancelOtaDownload !== "function") return false;
@@ -297,6 +303,9 @@ if (typeof window !== "undefined") {
   window.addEventListener("aurastream:ota-progress", (ev: Event) => {
     const detail = (ev as CustomEvent<OtaProgressEvent>).detail;
     if (!detail) return;
+    if (activeOtaDownloadSeq === 0 || otaRuntimeState.stage === "idle") {
+      return;
+    }
     if (detail.status === "downloading") {
       otaRuntimeState = {
         ...otaRuntimeState,
@@ -341,6 +350,18 @@ if (typeof window !== "undefined") {
       };
       emitOtaRuntimeState();
     }
+  });
+
+  const recheckInstallPermission = () => {
+    if (otaRuntimeState.stage === "need_permission" && canInstallOtaPackages()) {
+      otaRuntimeState = { ...otaRuntimeState, stage: "ready", error: "" };
+      emitOtaRuntimeState();
+    }
+  };
+  window.addEventListener("focus", recheckInstallPermission);
+  window.addEventListener("aurastream:app-resumed", recheckInstallPermission);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") recheckInstallPermission();
   });
 }
 

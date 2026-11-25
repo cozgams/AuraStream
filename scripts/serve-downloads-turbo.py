@@ -59,7 +59,11 @@ class TurboDownloadHandler(SimpleHTTPRequestHandler):
                     if e_str:
                         end = int(e_str)
                 elif e_str:
-                    start = file_size - int(e_str)
+                    suffix_len = int(e_str)
+                    if suffix_len <= 0:
+                        start = file_size
+                    else:
+                        start = max(0, file_size - suffix_len)
 
                 if start >= file_size or end >= file_size or start > end:
                     self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)

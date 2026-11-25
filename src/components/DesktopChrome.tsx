@@ -103,7 +103,7 @@ export function DesktopRail({ collapsed }: { collapsed: boolean }) {
           <span className="win-nav-copy">Search dramas and creators...</span>
           <kbd className="win-nav-key">/</kbd>
         </Button>
-        <div className="win-nav-group">
+        <div className="win-nav-items">
           {items.map((it) => (
             <Button key={it.key} aria-label={it.label}
               className={`win-nav-item ${onTab(it.key) ? "is-selected" : ""}`}

@@ -94,8 +94,10 @@ interface CacheEntry<T> {
   expires: number;
 }
 
+const MAX_API_MEMORY_CACHE = 200;
 const apiMemoryCache = new Map<string, CacheEntry<unknown>>();
 const inFlightRequests = new Map<string, Promise<unknown>>();
+let cacheEpoch = 0;
 
 /** Cache TTL in milliseconds for read-only metadata */
 const CACHE_TTL_MAP: Record<string, number> = {
@@ -107,13 +109,27 @@ const CACHE_TTL_MAP: Record<string, number> = {
   api_topic: 5 * 60 * 1000,
   api_search_hot: 5 * 60 * 1000,
   api_video: 5 * 60 * 1000,
-  api_play: 3 * 60 * 1000,
+  api_play: 60 * 1000,
   api_related: 5 * 60 * 1000,
   api_post_categories: 10 * 60 * 1000,
   api_post_category: 3 * 60 * 1000,
 };
 
+function setApiMemoryCache(key: string, entry: CacheEntry<unknown>): void {
+  const now = Date.now();
+  if (apiMemoryCache.size >= MAX_API_MEMORY_CACHE) {
+    for (const [k, v] of apiMemoryCache) {
+      if (v.expires <= now || apiMemoryCache.size >= MAX_API_MEMORY_CACHE) {
+        apiMemoryCache.delete(k);
+        if (apiMemoryCache.size < MAX_API_MEMORY_CACHE) break;
+      }
+    }
+  }
+  apiMemoryCache.set(key, entry);
+}
+
 export const clearApiMemoryCache = () => {
+  cacheEpoch += 1;
   apiMemoryCache.clear();
   inFlightRequests.clear();
 };
@@ -189,19 +205,22 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
     return inFlightRequests.get(cacheKey) as Promise<T>;
   }
 
+  const reqEpoch = cacheEpoch;
   const reqPromise = callNetwork<T>(cmd, args)
     .then((result) => {
-      if (cacheTtl && cacheKey) {
-        apiMemoryCache.set(cacheKey, {
-          value: result,
-          expires: Date.now() + cacheTtl,
-        });
+      if (reqEpoch === cacheEpoch) {
+        if (cacheTtl && cacheKey) {
+          setApiMemoryCache(cacheKey, {
+            value: result,
+            expires: Date.now() + cacheTtl,
+          });
+        }
+        if (cacheKey) inFlightRequests.delete(cacheKey);
       }
-      if (cacheKey) inFlightRequests.delete(cacheKey);
       return result;
     })
     .catch((err) => {
-      if (cacheKey) inFlightRequests.delete(cacheKey);
+      if (reqEpoch === cacheEpoch && cacheKey) inFlightRequests.delete(cacheKey);
       throw err;
     });
 

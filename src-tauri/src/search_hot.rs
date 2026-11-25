@@ -256,7 +256,7 @@ pub async fn fetch_hot_tags() -> Result<Value, String> {
     let url = format!("{}/", base.trim_end_matches('/'));
     let html = tokio::time::timeout(REQUEST_TIMEOUT, async {
         let referer = format!("{base}/");
-        let response = crate::net::get(
+        let mut response = crate::net::get(
             &url,
             REQUEST_TIMEOUT,
             Some("text/html,application/xhtml+xml"),
@@ -266,8 +266,20 @@ pub async fn fetch_hot_tags() -> Result<Value, String> {
         if !response.status().is_success() {
             return Err(format!("Homepage request failed (HTTP {})", response.status()));
         }
-        let bytes = response.bytes().await.map_err(|e| e.to_string())?;
-        String::from_utf8(bytes.to_vec()).map_err(|_| "Homepage is not valid UTF-8 HTML".into())
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_HTML_BYTES as u64)
+        {
+            return Err("Homepage exceeds 2 MiB limit".into());
+        }
+        let mut bytes = Vec::with_capacity(response.content_length().unwrap_or(0) as usize);
+        while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+            if bytes.len().saturating_add(chunk.len()) > MAX_HTML_BYTES {
+                return Err("Homepage exceeds 2 MiB limit".into());
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        String::from_utf8(bytes).map_err(|_| "Homepage is not valid UTF-8 HTML".into())
     })
     .await
     .map_err(|_| "Fetching popular tags timed out (12s)".to_string())??;

@@ -259,16 +259,23 @@ export function TagsPage({ onBack, wide }: { onBack: () => void; wide: boolean }
             <div className="flex items-center gap-2 mb-2">
               <IPinF size={14} className="text-primary" />
               <span className="text-[14px] font-bold text-on">Pinned Tags</span>
-              <span className="text-[11px] text-dim ml-auto">Tap to view · Hold to unpin</span>
+              <span className="text-[11px] text-dim ml-auto">Tap to view · Unpin</span>
             </div>
             <div className="flex flex-wrap gap-2">
               {pinnedTags.map((name) => (
-                <Button key={name} onClick={() => push({ kind: "tag", tag: name, name: formatDramaTag(name) })}
-                  onContextMenu={(e) => { e.preventDefault(); togglePin(name); }}
-                  className="ios-filter-pill flex items-center gap-1.5 border-primary/40 bg-primary/10 text-primary">
-                  <IPin size={11} />
-                  {formatDramaTag(name)}
-                </Button>
+                <div key={name} className="inline-flex items-center rounded-full border border-primary/40 bg-primary/10 text-primary overflow-hidden">
+                  <Button onClick={() => push({ kind: "tag", tag: name, name: formatDramaTag(name) })}
+                    className="flex items-center gap-1.5 pl-3 pr-2 py-1.5 text-[12.5px] font-medium pressable">
+                    <IPin size={11} />
+                    <span>{formatDramaTag(name)}</span>
+                  </Button>
+                  <Button
+                    aria-label={`Unpin ${formatDramaTag(name)}`}
+                    onClick={() => togglePin(name)}
+                    className="pr-2.5 pl-1 py-1.5 text-[11px] font-bold text-primary/75 hover:text-danger pressable">
+                    ×
+                  </Button>
+                </div>
               ))}
             </div>
           </section>
@@ -362,7 +369,7 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
         return [...prev, ...(res?.items || []).filter((x) => !seen.has(x.id))];
       });
       setPage(next);
-      setPages(res?.pagination?.pages || (res?.items?.length ? next + 1 : next));
+      setPages(res?.pagination?.pages || ((res?.items?.length || 0) >= 20 ? next + 1 : next));
       setErr("");
     } catch (e) {
       const msg = localizeError(e);
@@ -405,6 +412,7 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
                 <button
                   key={s.id}
                   type="button"
+                  aria-pressed={tagSort === s.id}
                   onClick={() => setTagSort(s.id)}
                   className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all pressable ${
                     tagSort === s.id

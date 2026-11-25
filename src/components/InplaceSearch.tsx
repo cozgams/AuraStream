@@ -1,12 +1,13 @@
 import { Button, Form, Input } from "./ios/controls";
 import { Loader } from "./ios/effects";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, fmt } from "../api";
 import type { Post, VideoCard } from "../types";
 import { MediaCard, Masonry } from "./cards";
 import { Empty } from "./ui";
 import { IBack, IClose, ISearch } from "../icons";
 import { localizeError } from "../i18n";
+import { registerOverlayBack } from "../back";
 
 export function InplaceSearch({ kind, postLabel = "Community", scope, onOpenVideo, onOpenPost, onClose, wide }: {
   kind: "video" | "post";
@@ -27,6 +28,26 @@ export function InplaceSearch({ kind, postLabel = "Community", scope, onOpenVide
   const [err, setErr] = useState<string | null>(null);
   const busy = useRef(false);
   const seqRef = useRef(0);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    const unsub = registerOverlayBack(() => {
+      onCloseRef.current();
+      return true;
+    });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onCloseRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      unsub();
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
 
   const run = async (keyword: string, p: number) => {
     if (p > 1 && busy.current) return;
@@ -91,7 +112,7 @@ export function InplaceSearch({ kind, postLabel = "Community", scope, onOpenVide
           <ISearch size={17} className="text-mut shrink-0" />
           <Input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={kind === "post" ? `Search ${postLabel}…` : `Search ${videoLabel}…`}
             className="flex-1 min-w-0 bg-transparent text-[14px] text-on placeholder-dim outline-none" />
-          {q && <Button aria-label="Close" type="button" onClick={() => { seqRef.current++; busy.current = false; setLoading(false); setErr(null); setQ(""); setSubmitted(""); setItems([]); setPosts([]); }} className="w-5 h-5 rounded-full bg-s4 flex items-center justify-center text-mut pressable"><IClose size={11} /></Button>}
+          {q && <Button aria-label="Clear search" type="button" onClick={() => { seqRef.current++; busy.current = false; setLoading(false); setErr(null); setQ(""); setSubmitted(""); setItems([]); setPosts([]); }} className="w-5 h-5 rounded-full bg-s4 flex items-center justify-center text-mut pressable"><IClose size={11} /></Button>}
         </Form>
       </div>
 

@@ -81,6 +81,7 @@ export function getAICaptionConfig(): AICaptionConfig {
     const storedGemini = localStorage.getItem(STORAGE_KEYS.GEMINI_KEY);
     const geminiKey = storedGemini && storedGemini.trim().length > 0 ? storedGemini.trim() : BUILTIN_GEMINI_KEY;
     const provider: AICaptionConfig["provider"] =
+      rawProvider === "none" ||
       rawProvider === "gemini" ||
       rawProvider === "groq" ||
       rawProvider === "whisper" ||
@@ -304,6 +305,9 @@ Rules:
       if (text) break;
     } catch (err) {
       if (signal?.aborted) throw new DOMException("Transcription cancelled", "AbortError");
+      if (err instanceof Error && err.message.startsWith("Invalid Gemini API Key")) {
+        throw err;
+      }
       lastError = err as Error;
     } finally {
       clearTimeout(modelTimer);
@@ -326,7 +330,11 @@ Rules:
   } catch {
     const match = cleaned.match(/\[\s*\{[\s\S]*\}\s*\]/);
     if (match) {
-      cues = JSON.parse(match[0]);
+      try {
+        cues = JSON.parse(match[0]);
+      } catch {
+        throw new Error("Failed to parse subtitle JSON from Gemini response");
+      }
     } else {
       throw new Error("Failed to parse subtitle JSON from Gemini response");
     }
@@ -768,21 +776,10 @@ export async function transcribeEpisodeWithAI(
     throw new Error("Stream is not ready yet. Wait for video playback to load.");
   }
   const config = getAICaptionConfig();
-  const provider: AICaptionConfig["provider"] =
-    config.provider !== "none"
-      ? config.provider
-      : config.groqKey
-      ? "groq"
-      : config.geminiKey
-      ? "gemini"
-      : config.whisperKey
-      ? "whisper"
-      : config.customUrl
-      ? "custom"
-      : "none";
+  const provider: AICaptionConfig["provider"] = config.provider;
 
   if (provider === "none") {
-    throw new Error("Configure a Gemini, Groq, OpenAI, or Custom API key/URL first.");
+    throw new Error("AI captions are disabled or missing an API key/URL in Settings.");
   }
 
   try {
@@ -1029,7 +1026,14 @@ export async function getSubtitlesForEpisode(
         if (plRes.ok) {
           const playlistText = await plRes.text();
           if (playlistText.includes("TYPE=SUBTITLES")) {
-            const subUri = parseExtXMediaSubtitleUri(playlistText, plUrl);
+            const rawSubUri = parseExtXMediaSubtitleUri(
+              playlistText,
+              isOfflinePl || isLocalPl ? plUrl : hlsPlaylistUrl
+            );
+            const subUri =
+              rawSubUri && !isOfflinePl && !isLocalPl && !isLocalMedia(rawSubUri) && /^https?:\/\//i.test(rawSubUri)
+                ? `${LOCAL}/seg?u=${encodeURIComponent(rawSubUri)}`
+                : rawSubUri;
             if (subUri) {
               const cues = await fetchHlsSubtitleCues(subUri);
               if (cues.length > 0) {

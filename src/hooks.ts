@@ -12,8 +12,10 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []) {
 
   const run = useCallback(async () => {
     const seq = ++seqRef.current;
-    setLoading(true);
-    setError(null);
+    if (alive.current) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const res = await fnRef.current();
       if (alive.current && seq === seqRef.current) setData(res);
@@ -61,8 +63,21 @@ export function usePaged<T>(fetcher: (page: number) => Promise<{ items: T[]; pag
       const res = await fetcherRef.current(next);
       if (seq !== seqRef.current) return;
       setItems((prev) => {
-        const seen = new Set(prev.map((x) => (x as { id: number }).id));
-        return [...prev, ...(res.items || []).filter((x) => !seen.has((x as { id: number }).id))];
+        const seen = new Set(
+          prev
+            .map((x) => (x as { id?: unknown }).id)
+            .filter((id): id is string | number => typeof id === "number" || typeof id === "string")
+        );
+        return [
+          ...prev,
+          ...(res.items || []).filter((x) => {
+            const id = (x as { id?: unknown }).id;
+            if (typeof id !== "number" && typeof id !== "string") return true;
+            if (seen.has(id)) return false;
+            seen.add(id);
+            return true;
+          }),
+        ];
       });
       setPage(next);
       setPages(res.pagination?.pages || next);

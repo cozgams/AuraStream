@@ -16,6 +16,7 @@ import {
   cancelBatchDownload,
   subscribeBatchProgress,
   subscribeDownloadProgress,
+  getActiveDownloads,
   isEpisodeDownloaded,
   isCellularConnection,
   isWifiOnlyDownloadEnabled,
@@ -69,6 +70,7 @@ export default function BatchDownloadSheet({
   const prevVideoIdRef = useRef(videoId);
   const maxBatchPctRef = useRef(0);
   const prevBatchKeyRef = useRef("");
+  const userEditedSelectionRef = useRef(false);
 
   const isCellular = isCellularConnection();
   const wifiOnly = isWifiOnlyDownloadEnabled();
@@ -105,9 +107,10 @@ export default function BatchDownloadSheet({
     const undownloaded = allEpisodes.filter((ep) => !isEpisodeDownloaded(videoId, ep));
     const preset = () => new Set(preselectAll ? undownloaded : undownloaded.slice(0, 5));
     if (justOpened || videoChangedWhileOpen) {
+      userEditedSelectionRef.current = false;
       setSelectedEps(preset());
       setDownloadQuality(getDownloadQualityPreference());
-    } else if (isOpen) {
+    } else if (isOpen && !userEditedSelectionRef.current) {
       // Episode list may resolve asynchronously: drop stale picks and refill if empty
       const valid = new Set(allEpisodes);
       setSelectedEps((prev) => {
@@ -181,6 +184,7 @@ export default function BatchDownloadSheet({
   const toggleEp = (ep: number) => {
     const st = activeMap.get(`${videoId}_${ep}`)?.status;
     if (downloadedSet.has(ep) || st === "downloading" || st === "queued") return;
+    userEditedSelectionRef.current = true;
     const next = new Set(selectedEps);
     if (next.has(ep)) next.delete(ep);
     else next.add(ep);
@@ -188,6 +192,7 @@ export default function BatchDownloadSheet({
   };
 
   const selectNext = (count: number) => {
+    userEditedSelectionRef.current = true;
     const candidatePool = allEpisodes.filter((ep) => {
       if (downloadedSet.has(ep)) return false;
       const st = activeMap.get(`${videoId}_${ep}`)?.status;
@@ -206,6 +211,7 @@ export default function BatchDownloadSheet({
   };
 
   const selectAllUnsaved = () => {
+    userEditedSelectionRef.current = true;
     const undownloaded = allEpisodes.filter((ep) => {
       if (downloadedSet.has(ep)) return false;
       const st = activeMap.get(`${videoId}_${ep}`)?.status;
@@ -215,6 +221,7 @@ export default function BatchDownloadSheet({
   };
 
   const clearSelection = () => {
+    userEditedSelectionRef.current = true;
     setSelectedEps(new Set());
   };
 
@@ -237,11 +244,12 @@ export default function BatchDownloadSheet({
     const safeTitle = formatDramaTitle(title) || title || `Drama #${videoId}`;
     try {
       const res = await executeBatchDownload(videoId, safeTitle, cover, list, allowCellular, downloadQuality);
+      const freshActive = new Map(getActiveDownloads().map((item) => [item.id, item]));
       setSelectedEps((prev) =>
         new Set(
           Array.from(prev).filter((ep) => {
             if (isEpisodeDownloaded(videoId, ep)) return false;
-            const st = activeMap.get(`${videoId}_${ep}`)?.status;
+            const st = freshActive.get(`${videoId}_${ep}`)?.status;
             return st !== "downloading" && st !== "queued";
           })
         )
@@ -452,11 +460,25 @@ export default function BatchDownloadSheet({
             <button
               type="button"
               onClick={() => {
+                setDownloadQuality("auto");
+                setDownloadQualityPreference("auto");
+              }}
+              className={`px-2 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${
+                downloadQuality === "auto"
+                  ? "bg-white dark:bg-neutral-800 text-slate-900 dark:text-white shadow-xs border border-black/5 dark:border-white/15"
+                  : "text-mut hover:text-on"
+              }`}
+            >
+              <span>Auto</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
                 setDownloadQuality("hevc");
                 setDownloadQualityPreference("hevc");
               }}
               className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1.5 ${
-                downloadQuality === "hevc" || downloadQuality === "auto"
+                downloadQuality === "hevc"
                   ? "bg-white dark:bg-neutral-800 text-slate-900 dark:text-white shadow-xs border border-black/5 dark:border-white/15"
                   : "text-mut hover:text-on"
               }`}

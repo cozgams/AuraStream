@@ -1,7 +1,7 @@
 import { MediaCard } from "../components/cards";
 import { Button, Surface } from "../components/ios/controls";
 import { Loader } from "../components/ios/effects";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, cover, fmt, isMobile } from "../api";
 import type { Post } from "../types";
 import { useStore } from "../store";
@@ -117,29 +117,35 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
     });
   };
 
-  useEffect(() => {
-    let alive = true;
+  const loadPost = useCallback((isMounted: () => boolean = () => true) => {
+    setErr(null);
+    setPost(null);
     setPlay(false);
     setSegs([]);
     setSeg(0);
     api.post(id)
       .then((p) => {
-        if (!alive) return;
+        if (!isMounted()) return;
         setPost(p);
-        if (p.video_url) { setSegs([p.video_url]); setPlay(true); }
+        if (p.video_url) { setSegs((prev) => (prev.length ? prev : [p.video_url!])); setPlay(true); }
       })
-      .catch((e) => { if (alive) setErr(localizeError(e)); });
+      .catch((e) => { if (isMounted()) setErr(localizeError(e)); });
     setResolving(true);
     api.postPlayback(id)
       .then((r) => {
-        if (!alive) return;
+        if (!isMounted()) return;
         const list = (r?.videos || []).map((v) => v?.url || "").filter(Boolean);
         if (list.length) { setSegs(list); setPlay(true); }
       })
       .catch(() => { /* No video */ })
-      .finally(() => { if (alive) setResolving(false); });
-    return () => { alive = false; };
+      .finally(() => { if (isMounted()) setResolving(false); });
   }, [id]);
+
+  useEffect(() => {
+    let alive = true;
+    loadPost(() => alive);
+    return () => { alive = false; };
+  }, [loadPost]);
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
@@ -150,10 +156,7 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
 
       <div className="flex-1 scroll-y pb-[calc(var(--sab,48px)+24px)]">
         {err ? (
-          <Empty icon={<IFireF size={26} />} title="Failed to load post" sub={err} action="Retry" onAction={() => {
-            setErr(null);
-            api.post(id).then(setPost).catch((e) => setErr(localizeError(e)));
-          }} />
+          <Empty icon={<IFireF size={26} />} title="Failed to load post" sub={err} action="Retry" onAction={() => loadPost()} />
         ) : !post ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
         ) : (

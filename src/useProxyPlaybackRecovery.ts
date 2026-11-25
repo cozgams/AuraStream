@@ -51,7 +51,10 @@ export function useProxyPlaybackRecovery(
     const time = Number.isFinite(duration) && duration > 0
       ? Math.min(snapshot.time, Math.max(0, duration - 0.15)) : snapshot.time;
     try { video.currentTime = time; } catch { return; }
-    pending.current = null;
+    // On loadedmetadata (readyState === 1), keep pending until loadeddata confirms seek landed
+    if (video.readyState >= 2 || time === 0 || Math.abs(video.currentTime - time) < 1.5) {
+      pending.current = null;
+    }
     video.playbackRate = snapshot.rate;
     const { activity, trace } = latest.current;
     trace("proxy.restored", { time, play_wanted: snapshot.playing });

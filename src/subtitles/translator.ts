@@ -189,17 +189,20 @@ try {
 function persistCache(): void {
   try {
     const obj: Record<string, string> = {};
-    let count = 0;
-    // Persist up to 200 most recent translations
-    for (const [k, v] of MEMORY_CACHE.entries()) {
+    // Persist the 200 most recent translations
+    const recent = Array.from(MEMORY_CACHE.entries()).slice(-200);
+    for (const [k, v] of recent) {
       obj[k] = v;
-      if (++count >= 200) break;
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
   } catch {
     // ignore
   }
 }
+
+const SORTED_DICTIONARY_ENTRIES = Object.entries(DIALOGUE_DICTIONARY).sort(
+  (a, b) => b[0].length - a[0].length
+);
 
 /**
  * Checks whether a text contains foreign characters (such as Chinese ideographs)
@@ -234,51 +237,53 @@ export async function translateDialogueToEnglish(text: string): Promise<string> 
     return res;
   }
 
-  // 3. Query fast, free public translation endpoint (MyMemory)
+  // 3. Query fast, free public translation endpoints only when online
   const pair = detectLangPair(trimmed);
-  try {
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(trimmed)}&langpair=${pair.myMemoryPair}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
-    if (res.ok) {
-      const data = await res.json();
-      const trText = data?.responseData?.translatedText;
-      if (trText && typeof trText === "string" && trText.trim() && !trText.includes("MYMEMORY WARNING")) {
-        const clean = trText.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
-        // If the translation actually returned non-Chinese English text
-        if (!containsForeignLanguage(clean)) {
-          MEMORY_CACHE.set(trimmed, clean);
-          persistCache();
-          return clean;
+  const isOffline = typeof navigator !== "undefined" && navigator.onLine === false;
+  if (!isOffline) {
+    try {
+      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(trimmed)}&langpair=${pair.myMemoryPair}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+      if (res.ok) {
+        const data = await res.json();
+        const trText = data?.responseData?.translatedText;
+        if (trText && typeof trText === "string" && trText.trim() && !trText.includes("MYMEMORY WARNING")) {
+          const clean = trText.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
+          if (!containsForeignLanguage(clean)) {
+            MEMORY_CACHE.set(trimmed, clean);
+            persistCache();
+            return clean;
+          }
         }
       }
+    } catch {
+      // network timeout or failure, proceed to fallback
     }
-  } catch {
-    // network timeout or failure, proceed to fallback
-  }
 
-  // 3b. Fallback public translation endpoint
-  try {
-    const url = `https://lingva.ml/api/v1/${pair.lingvaSrc}/en/${encodeURIComponent(trimmed)}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(3500) });
-    if (res.ok) {
-      const data = await res.json();
-      const trText = data?.translation;
-      if (trText && typeof trText === "string" && trText.trim()) {
-        const clean = trText.trim();
-        if (!containsForeignLanguage(clean)) {
-          MEMORY_CACHE.set(trimmed, clean);
-          persistCache();
-          return clean;
+    // 3b. Fallback public translation endpoint
+    try {
+      const url = `https://lingva.ml/api/v1/${pair.lingvaSrc}/en/${encodeURIComponent(trimmed)}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(3500) });
+      if (res.ok) {
+        const data = await res.json();
+        const trText = data?.translation;
+        if (trText && typeof trText === "string" && trText.trim()) {
+          const clean = trText.trim();
+          if (!containsForeignLanguage(clean)) {
+            MEMORY_CACHE.set(trimmed, clean);
+            persistCache();
+            return clean;
+          }
         }
       }
+    } catch {
+      // continue to dictionary fallback
     }
-  } catch {
-    // continue to dictionary fallback
   }
 
-  // 4. Offline rule-based transliterator / dictionary fallback
+  // 4. Offline rule-based transliterator / dictionary fallback (longest phrases first)
   let fallback = trimmed;
-  for (const [zh, en] of Object.entries(DIALOGUE_DICTIONARY)) {
+  for (const [zh, en] of SORTED_DICTIONARY_ENTRIES) {
     if (fallback.includes(zh)) {
       fallback = fallback.split(zh).join(` ${en} `);
     }

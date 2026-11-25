@@ -353,9 +353,9 @@ class AuraDownloadService : Service() {
     }
 
     fun computeNotifItemId(videoId: Int, episode: Int): Int {
-      var h = ((Math.abs(videoId) % 10000) * 100 + (episode % 100)) and 0x7fffffff
-      if (h == NOTIFICATION_ID || h == COMPLETE_NOTIFICATION_ID || h == 0) {
-        h = (h + 2) and 0x7fffffff
+      var h = (videoId * 131 + episode + 10000) and 0x7fffffff
+      if (h < 10000 || h == NOTIFICATION_ID || h == COMPLETE_NOTIFICATION_ID) {
+        h = (h + 10003) and 0x7fffffff
       }
       return h
     }
@@ -580,6 +580,10 @@ class AuraDownloadService : Service() {
       ACTION_STOP -> {
         if (!isInForeground) {
           ensureForegroundStarted(buildForegroundNotification("AuraStream", "Stopping downloads...", 0, "", "", 0))
+          if (!isInForeground) {
+            stopServiceCleanly(startId)
+            return START_NOT_STICKY
+          }
         }
         stopServiceCleanly(startId)
         return START_NOT_STICKY
@@ -587,6 +591,10 @@ class AuraDownloadService : Service() {
       ACTION_PAUSE_ALL -> {
         if (!isInForeground) {
           ensureForegroundStarted(buildForegroundNotification("AuraStream", "Pausing downloads...", 0, "", "", 0))
+          if (!isInForeground) {
+            stopServiceCleanly(startId)
+            return START_NOT_STICKY
+          }
         }
         writeControlAction("pause_all")
         mainHandler.postDelayed({ stopServiceCleanly(startId) }, 600L)
@@ -595,6 +603,10 @@ class AuraDownloadService : Service() {
       ACTION_CANCEL_ALL -> {
         if (!isInForeground) {
           ensureForegroundStarted(buildForegroundNotification("AuraStream", "Cancelling downloads...", 0, "", "", 0))
+          if (!isInForeground) {
+            stopServiceCleanly(startId)
+            return START_NOT_STICKY
+          }
         }
         writeControlAction("cancel_all")
         mainHandler.postDelayed({ stopServiceCleanly(startId) }, 600L)
@@ -625,7 +637,7 @@ class AuraDownloadService : Service() {
         if (!isInForeground) {
           ensureForegroundStarted(buildForegroundNotification("AuraStream", "AuraStream Downloads", 0, "", "", 0))
         }
-        if (!isRunning) {
+        if (!isInForeground || !isRunning) {
           stopServiceCleanly(startId)
         }
       }
@@ -639,7 +651,7 @@ class AuraDownloadService : Service() {
   }
 
   fun refreshNotification(reportedCount: Int) {
-    if (!isRunning) return
+    if (!isRunning || !isInForeground) return
     try {
       val notification = buildForegroundNotification("AuraStream", "Downloading...", 0, "", "", reportedCount)
       val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager

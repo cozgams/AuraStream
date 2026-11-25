@@ -317,7 +317,7 @@ export default function Player({
 
   return (
     <div ref={wrapRef} className={`relative bg-black overflow-hidden group ${className}`}>
-      <div className="absolute inset-0" inert={controlsLocked}>
+      <div className="absolute inset-0" inert={controlsLocked || undefined}>
       {poster && (
         <div
           className="absolute inset-0 z-0 overflow-hidden pointer-events-none transition-opacity duration-500 ease-out"

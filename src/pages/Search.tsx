@@ -216,7 +216,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
             <Surface role="region" aria-label={t("search.hot")} className="mt-3.5 rounded-(--r-md) bg-s2 p-3.5 a-rise">
               <div className="flex items-center justify-between">
                 <h2 className="flex items-center gap-1.5 text-[14px] font-semibold text-on/90"><IFireF size={15} className="text-primary" />{t("search.hot")}</h2>
-                <Button onClick={() => void refreshHot()} disabled={hotLoading} aria-label={t("search.hot")}
+                <Button onClick={() => void refreshHot()} disabled={hotLoading} aria-label="Refresh trending searches"
                   className="flex items-center gap-1 px-2 text-[12px] text-mut pressable">
                   {hotLoading ? <Loader className="w-3 h-3" /> : <IRefresh size={12} />}
                 </Button>
@@ -312,7 +312,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
                           e.stopPropagation();
                           removeSearch(h);
                         }}
-                        className="w-4 h-4 rounded-full flex items-center justify-center text-mut hover:text-on hover:bg-white/15 transition-colors cursor-pointer"
+                        className="w-6 h-6 -mr-0.5 rounded-full flex items-center justify-center text-mut hover:text-on hover:bg-white/15 transition-colors cursor-pointer"
                       >
                         <IClose size={11} />
                       </button>

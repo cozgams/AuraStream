@@ -33,7 +33,7 @@ import {
   ITrash,
   IUser,
 } from "../icons";
-import { getCurrentAuthUid, loadUserDataFromCloud, saveUserDataToCloud, type CloudUserData } from "../firebase";
+import { getCurrentAuthUid, hasActiveFirebaseSession, loadUserDataFromCloud, saveUserDataToCloud, type CloudUserData } from "../firebase";
 import { readStorage, writeStorage, STORAGE_KEYS } from "../storage";
 import {
   cancelAllDownloads,
@@ -168,6 +168,9 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
   const [loading, setLoading] = useState(false);
   const [confirmClearAllOpen, setConfirmClearAllOpen] = useState(false);
   const [confirmDeleteSeriesOpen, setConfirmDeleteSeriesOpen] = useState(false);
+  const [confirmDeleteEp, setConfirmDeleteEp] = useState<{ videoId: number; episode: number } | null>(null);
+  const [subviewLimit, setSubviewLimit] = useState(32);
+  const subviewFetchedRef = useRef<Map<number, Detail>>(new Map());
   const [manageStorageOpen, setManageStorageOpen] = useState(false);
   const [seriesMenuOpen, setSeriesMenuOpen] = useState(false);
   const [libraryInfoOpen, setLibraryInfoOpen] = useState(false);
@@ -228,27 +231,30 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
   });
 
   const handleSyncCloud = async () => {
+    const uid = getCurrentAuthUid();
+    if (!uid || (user?.user_type !== "firebase" && !hasActiveFirebaseSession())) {
+      toast("Sign in with a cloud account to sync your library", "info");
+      setLoginOpen(true);
+      return;
+    }
     setSyncingCloud(true);
     try {
-      const uid = getCurrentAuthUid();
-      if (uid && user?.user_type === "firebase") {
-        await saveUserDataToCloud(uid, {
-          favorites: favs,
-          watchLater,
-          history: history.map((h) => ({
-            id: h.id,
-            ep: h.ep,
-            t: h.t,
-            dur: h.dur,
-            updatedAt: h.at,
-            title: h.title,
-            cover: h.cover,
-          })),
-        });
-        const cloudData = await loadUserDataFromCloud(uid);
-        if (cloudData) {
-          mergeCloudUserData(cloudData);
-        }
+      await saveUserDataToCloud(uid, {
+        favorites: favs,
+        watchLater,
+        history: history.map((h) => ({
+          id: h.id,
+          ep: h.ep,
+          t: h.t,
+          dur: h.dur,
+          updatedAt: h.at,
+          title: h.title,
+          cover: h.cover,
+        })),
+      });
+      const cloudData = await loadUserDataFromCloud(uid);
+      if (cloudData) {
+        mergeCloudUserData(cloudData);
       }
       const now = Date.now();
       localStorage.setItem("aurastream_last_cloud_sync", String(now));
@@ -524,18 +530,18 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
   }, [active, view, selectMode]);
 
   useEffect(() => {
-    document.body.classList.toggle("has-selection-mode", selectMode);
+    document.body.classList.toggle("has-selection-mode", active && selectMode);
     return () => {
       document.body.classList.remove("has-selection-mode");
     };
-  }, [selectMode]);
+  }, [active, selectMode]);
 
   useEffect(() => {
-    document.body.classList.toggle("has-series-detail", view === "seriesDetail");
+    document.body.classList.toggle("has-series-detail", active && view === "seriesDetail");
     return () => {
       document.body.classList.remove("has-series-detail");
     };
-  }, [view]);
+  }, [active, view]);
 
   useEffect(() => {
     if (downloads.length === 0 && selectMode) {
@@ -755,6 +761,10 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
     return copy;
   }, [cards, view, favSort, favStatusFilter]);
 
+  useEffect(() => {
+    setSubviewLimit(32);
+  }, [view]);
+
   // Fetch full cards when in a dedicated subview (with offline fallback to detailCache / history / downloads)
   useEffect(() => {
     let alive = true;
@@ -762,11 +772,12 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
       setCards([]);
       return;
     }
-    const buildCombined = (remoteMap = new Map<number, Detail>()) =>
-      subviewIds
-        .slice(0, 32)
+    const targetIds = subviewIds.slice(0, subviewLimit);
+    const buildCombined = () =>
+      targetIds
         .map((id) => {
-          if (remoteMap.has(id)) return remoteMap.get(id)!;
+          const cached = subviewFetchedRef.current.get(id);
+          if (cached) return cached;
           if (detailCache[id]) return detailCache[id];
           const h = history.find((x) => x.id === id);
           const dlEps = downloads.filter((x) => x.videoId === id);
@@ -801,15 +812,25 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
       return;
     }
 
-    setLoading(true);
-    Promise.allSettled(subviewIds.slice(0, 32).map((id) => api.video(id)))
+    const missingIds = targetIds.filter((id) => !subviewFetchedRef.current.has(id));
+    if (missingIds.length === 0) {
+      setCards(buildCombined());
+      setLoading(false);
+      return;
+    }
+
+    const immediate = buildCombined();
+    if (immediate.length > 0) setCards(immediate);
+    setLoading(immediate.length === 0);
+    Promise.allSettled(missingIds.map((id) => api.video(id)))
       .then((rs) => {
         if (!alive) return;
-        const fetched = rs
-          .filter((r) => r.status === "fulfilled")
-          .map((r) => (r as PromiseFulfilledResult<Detail>).value);
-        const map = new Map(fetched.map((c) => [c.id, c]));
-        setCards(buildCombined(map));
+        for (const r of rs) {
+          if (r.status === "fulfilled" && r.value?.id) {
+            subviewFetchedRef.current.set(r.value.id, r.value);
+          }
+        }
+        setCards(buildCombined());
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -817,7 +838,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
     return () => {
       alive = false;
     };
-  }, [subviewIds.join(","), view, active]);
+  }, [subviewIds, subviewLimit, view, active, detailCache, history, downloads]);
 
   return (
     <div
@@ -1956,7 +1977,8 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                     const quota = storageStats?.quotaBytes || (storageStats?.freeBytes ? storageStats.freeBytes + totalDownloadsBytes * 2 : 64 * 1024 * 1024 * 1024);
                     const free = storageStats?.freeBytes ?? Math.max(0, quota - totalDownloadsBytes);
                     const auraPct = Math.min(100, Math.max(totalDownloadsBytes > 0 ? 2 : 0, (totalDownloadsBytes / quota) * 100));
-                    const freePct = Math.min(100, Math.max(5, (free / quota) * 100));
+                    const rawFreePct = Math.max(5, (free / quota) * 100);
+                    const freePct = Math.max(0, Math.min(100 - auraPct, rawFreePct));
                     const otherPct = Math.max(0, 100 - auraPct - freePct);
 
                     return (
@@ -2639,14 +2661,9 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                       </div>
                       <button
                         type="button"
-                        onClick={async (e) => {
+                        onClick={(e) => {
                           e.stopPropagation();
-                          if (window.confirm(`Delete Episode ${item.episode}?`)) {
-                            await deleteOfflineEpisode(item.videoId, item.episode);
-                            setDownloads(getOfflineEpisodes());
-                            void getDetailedStorageStats().then(setStorageStats);
-                            toast(`Deleted Episode ${item.episode}`, "ok");
-                          }
+                          setConfirmDeleteEp({ videoId: item.videoId, episode: item.episode });
                         }}
                         className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-red-500 pressable transition-colors"
                         aria-label="Delete Episode"
@@ -2693,6 +2710,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                       <button
                         key={st.id}
                         type="button"
+                        aria-pressed={favStatusFilter === st.id}
                         onClick={() => setFavStatusFilter(st.id)}
                         className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all pressable ${
                           favStatusFilter === st.id
@@ -2716,6 +2734,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                       <button
                         key={s.id}
                         type="button"
+                        aria-pressed={favSort === s.id}
                         onClick={() => setFavSort(s.id)}
                         className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all pressable ${
                           favSort === s.id
@@ -2783,6 +2802,16 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                 );
               })}
             </div>
+            {subviewIds.length > subviewLimit && (
+              <div className="flex justify-center py-3">
+                <Button
+                  onClick={() => setSubviewLimit((n) => n + 32)}
+                  className="px-5 h-9 rounded-full bg-s2 border border-edge/40 text-[12.5px] font-semibold text-on hover:bg-s3 pressable"
+                >
+                  Load More ({subviewIds.length - subviewLimit} remaining)
+                </Button>
+              </div>
+            )}
           </div>
         ) : (
           <Empty
@@ -2936,6 +2965,49 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
         </div>
       </Modal>
 
+      {/* Delete Single Episode Confirmation Modal */}
+      <Modal
+        open={confirmDeleteEp !== null}
+        onClose={() => setConfirmDeleteEp(null)}
+        label="Delete Episode"
+      >
+        <div className="p-4 flex flex-col gap-3 text-center">
+          <div className="w-12 h-12 rounded-full bg-red-500/15 text-red-500 mx-auto flex items-center justify-center">
+            <ITrash size={22} />
+          </div>
+          <div>
+            <h3 className="text-[16px] font-bold text-[#0f172a] dark:text-neutral-100">
+              Delete Episode {confirmDeleteEp?.episode ?? ""}?
+            </h3>
+            <p className="text-[12.5px] text-[#64748b] dark:text-neutral-400 mt-1">
+              This will remove the downloaded episode from offline device storage.
+            </p>
+          </div>
+          <div className="flex gap-2.5 mt-1">
+            <Button
+              onClick={() => setConfirmDeleteEp(null)}
+              className="flex-1 h-9 rounded-xl bg-slate-100 dark:bg-neutral-800 text-[13px] font-semibold text-[#0f172a] dark:text-neutral-100 pressable"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                const target = confirmDeleteEp;
+                setConfirmDeleteEp(null);
+                if (!target) return;
+                await deleteOfflineEpisode(target.videoId, target.episode);
+                setDownloads(getOfflineEpisodes());
+                void getDetailedStorageStats().then(setStorageStats);
+                toast(`Deleted Episode ${target.episode}`, "ok");
+              }}
+              className="flex-1 h-9 rounded-xl bg-red-500 text-white text-[13px] font-bold pressable"
+            >
+              Delete
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
       {/* Manage Downloads & Storage Modal */}
       <Modal
         open={manageStorageOpen}
@@ -2990,22 +3062,24 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
           <div className="flex flex-col gap-2 mt-1">
             <button
               type="button"
+              disabled={downloads.length === 0}
               onClick={() => {
                 setManageStorageOpen(false);
                 setSelectMode(true);
               }}
-              className="w-full h-10 rounded-xl bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-[#0f172a] dark:text-neutral-100 text-[13px] font-semibold flex items-center justify-center gap-2 pressable"
+              className="w-full h-10 rounded-xl bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-[#0f172a] dark:text-neutral-100 text-[13px] font-semibold flex items-center justify-center gap-2 pressable disabled:opacity-40"
             >
               <ICheck size={14} />
               <span>Select Episodes to Delete</span>
             </button>
             <button
               type="button"
+              disabled={downloads.length === 0}
               onClick={() => {
                 setManageStorageOpen(false);
                 setConfirmClearAllOpen(true);
               }}
-              className="w-full h-10 rounded-xl bg-red-50 dark:bg-red-500/15 hover:bg-red-100 dark:hover:bg-red-500/25 text-red-600 dark:text-red-400 text-[13px] font-semibold flex items-center justify-center gap-2 pressable"
+              className="w-full h-10 rounded-xl bg-red-50 dark:bg-red-500/15 hover:bg-red-100 dark:hover:bg-red-500/25 text-red-600 dark:text-red-400 text-[13px] font-semibold flex items-center justify-center gap-2 pressable disabled:opacity-40"
             >
               <ITrash size={14} />
               <span>Clear All Offline Downloads</span>
@@ -3201,7 +3275,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                 type="button"
                 onClick={handleSyncCloud}
                 disabled={syncingCloud}
-                className="px-3 py-1.5 rounded-xl bg-primary text-white text-[11.5px] font-bold flex items-center gap-1.5 pressable disabled:opacity-50 shrink-0 shadow-xs"
+                className="px-3 py-1.5 rounded-xl bg-primary text-on-primary text-[11.5px] font-bold flex items-center gap-1.5 pressable disabled:opacity-50 shrink-0 shadow-xs"
               >
                 <IRefresh size={12} className={syncingCloud ? "animate-spin" : ""} />
                 <span>{syncingCloud ? "Syncing..." : "Sync Now"}</span>
@@ -3213,7 +3287,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                   setLibraryInfoOpen(false);
                   setLoginOpen(true);
                 }}
-                className="px-3 py-1.5 rounded-xl bg-primary text-white text-[11.5px] font-bold pressable shrink-0 shadow-xs"
+                className="px-3 py-1.5 rounded-xl bg-primary text-on-primary text-[11.5px] font-bold pressable shrink-0 shadow-xs"
               >
                 Sign In
               </button>
@@ -3270,7 +3344,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
             <button
               type="button"
               onClick={() => setLibraryInfoOpen(false)}
-              className="w-full h-11 rounded-xl bg-primary text-white hover:bg-primary/95 text-[13.5px] font-bold pressable active:scale-95 transition-all shadow-xs"
+              className="w-full h-11 rounded-xl bg-primary text-on-primary hover:bg-primary/95 text-[13.5px] font-bold pressable active:scale-95 transition-all shadow-xs"
             >
               Done
             </button>

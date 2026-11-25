@@ -365,21 +365,6 @@ body.has-series-detail .hg-tabbar {
   --ios-glass:rgb(24 24 28 / .92); --ios-glass-solid:#18181c; --ios-selected:rgb(255 255 255 / .14); --ios-scrim:rgb(0 0 0 / .65);
   --ios-shadow:0 16px 40px rgb(0 0 0 / .5),inset 0 1px 0 rgb(255 255 255 / .08),inset 0 -1px 0 rgb(0 0 0 / .24);
 }
-.ios-segmented-indicator {
-  position:absolute; z-index:0; top:4px; bottom:4px; left:4px;
-  width:calc((100% - 8px - (var(--segment-count, 2) - 1)*4px)/var(--segment-count, 2));
-  border:1px solid rgba(255, 255, 255, 0.12) !important;
-  border-radius:var(--control-radius);
-  background:var(--p-s4) !important;
-  box-shadow:0 2px 8px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
-  pointer-events:none;
-  transform:translateX(calc(var(--segment-index, 0)*100% + var(--segment-index, 0)*4px));
-  transition:transform .34s var(--motion-spring);
-}
-.ios-segmented-items > [aria-pressed=true] {
-  color: #ffffff !important;
-  font-weight: 700 !important;
-}
 html.theme-light {
   --motion-ink:#1a73e8;
   --motion-on-ink:#fff;
@@ -395,16 +380,6 @@ html.theme-light {
   --ios-glass:rgb(248 247 243 / .88); --ios-glass-solid:#f8f7f3; --ios-selected:rgb(255 255 255 / .92); --ios-scrim:rgb(0 0 0 / .40);
   --ios-shadow:0 12px 32px rgb(39 35 30 / .12),0 2px 0 rgb(255 255 255 / .85) inset;
 }
-html.theme-light .ios-segmented-indicator {
-  background: #ffffff !important;
-  border: 1px solid rgba(0, 0, 0, 0.06) !important;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08), 0 0.5px 1.5px rgba(0, 0, 0, 0.04) !important;
-}
-html.theme-light .ios-segmented-items > [aria-pressed=true] {
-  color: var(--p-on, #25241f) !important;
-  font-weight: 700 !important;
-}
-
 body { background:var(--p-canvas); }
 .ios-page {
   background-color:var(--p-bg);

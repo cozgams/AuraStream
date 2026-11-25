@@ -159,7 +159,7 @@ function LayerBox({
   return (
     <div
       ref={ref}
-      inert={inert}
+      inert={inert || undefined}
       aria-hidden={ariaHidden}
       className={boxClass}
       style={boxStyle}
@@ -171,10 +171,9 @@ function LayerBox({
 }
 
 function AppBody() {
-  const { platform, tab, stack, pop, loginOpen, setLoginOpen, fs, clean } = useStore();
+  const { platform, tab, stack, pop, loginOpen, setLoginOpen, fs, clean, setClean } = useStore();
   const mainRef = useRef<HTMLDivElement>(null);
   const [wide, setWide] = useState(!isMobile);
-  const [collapsed] = useState(false);
 
   useLayoutEffect(() => {
     const el = mainRef.current;
@@ -193,28 +192,35 @@ function AppBody() {
         if (e.key === "Escape") t.blur();
         return;
       }
+      if (e.key === "Escape" && runBack()) return;
       if (loginOpen) { if (e.key === "Escape") setLoginOpen(false); return; }
-      if (e.key === "Escape") { if (stack.length) pop(); return; }
+      if (e.key === "Escape") {
+        if (stack.length) {
+          if (clean) setClean(false);
+          pop();
+        }
+        return;
+      }
     };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
-  }, [stack.length, pop, loginOpen, setLoginOpen]);
+  }, [stack.length, pop, loginOpen, setLoginOpen, clean, setClean]);
 
   const vis = (k: Tab) => (tab === k ? `absolute inset-0 ${k === "home" ? "" : "ios-tab-active"}` : "absolute inset-0 hidden pointer-events-none");
   const pageActive = stack.length === 0 && !loginOpen;
-  const bottomInset = isMobile ? (fs || clean ? 0 : (platform === "android" ? 78 : 74)) : 14;
+  const cleanActive = clean && (tab === "home" || stack[stack.length - 1]?.kind === "feed");
+  const bottomInset = isMobile ? (fs || cleanActive ? 0 : (platform === "android" ? 78 : 74)) : 14;
   /* Stack pages (feed from search/category/profile) render without bottom nav */
   const stackInset = isMobile ? 0 : 14;
 
   return (
     <div className={`absolute inset-0 flex bg-canvas plat-${platform}`}>
-      {!isMobile && <DesktopRail collapsed={collapsed} />}
       <div ref={mainRef} className="relative flex-1 min-w-0 overflow-hidden win-main">
         <LayerBox hidden={stack.length > 0} inert={!pageActive} ariaHidden={!pageActive} className="absolute inset-0">
-          <div className={vis("home")} inert={!pageActive || tab !== "home"} aria-hidden={!pageActive || tab !== "home"}><Home active={pageActive && tab === "home"} bottomInset={bottomInset} /></div>
-          <div className={vis("search")} inert={!pageActive || tab !== "search"} aria-hidden={!pageActive || tab !== "search"}><Search active={pageActive && tab === "search"} wide={wide} /></div>
-          <div className={vis("category")} inert={!pageActive || tab !== "category"} aria-hidden={!pageActive || tab !== "category"}><Category wide={wide} active={pageActive && tab === "category"} /></div>
-          <div className={vis("profile")} inert={!pageActive || tab !== "profile"} aria-hidden={!pageActive || tab !== "profile"}><Profile wide={wide} active={pageActive && tab === "profile"} /></div>
+          <div className={vis("home")} inert={(!pageActive || tab !== "home") || undefined} aria-hidden={!pageActive || tab !== "home"}><Home active={pageActive && tab === "home"} bottomInset={bottomInset} /></div>
+          <div className={vis("search")} inert={(!pageActive || tab !== "search") || undefined} aria-hidden={!pageActive || tab !== "search"}><Search active={pageActive && tab === "search"} wide={wide} /></div>
+          <div className={vis("category")} inert={(!pageActive || tab !== "category") || undefined} aria-hidden={!pageActive || tab !== "category"}><Category wide={wide} active={pageActive && tab === "category"} /></div>
+          <div className={vis("profile")} inert={(!pageActive || tab !== "profile") || undefined} aria-hidden={!pageActive || tab !== "profile"}><Profile wide={wide} active={pageActive && tab === "profile"} /></div>
         </LayerBox>
 
         {stack.map((p, i) => (
@@ -230,8 +236,8 @@ function AppBody() {
           </LayerBox>
         ))}
 
-        {isMobile && !fs && !clean && stack.length === 0 && !loginOpen && tab !== "home" && tab !== "profile" && <ContinueWatchingBar />}
-        {isMobile && !fs && !clean && stack.length === 0 && !loginOpen && <TabBar />}
+        {isMobile && !fs && !cleanActive && stack.length === 0 && !loginOpen && tab !== "home" && tab !== "profile" && <ContinueWatchingBar />}
+        {isMobile && !fs && !cleanActive && stack.length === 0 && !loginOpen && <TabBar />}
       </div>
     </div>
   );
@@ -276,14 +282,19 @@ function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boole
   useEffect(() => {
     const fn = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) {
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) {
         if (e.key === "Escape") t.blur();
         return;
       }
+      if (e.key === "Escape" && runBack()) return;
       if (loginOpen) { if (e.key === "Escape") setLoginOpen(false); return; }
       if (e.key === "Escape") { if (stack.length) pop(); return; }
-      if (e.key === "/") { e.preventDefault(); setTab("search"); return; }
-      if (tab !== "home" && stack.length === 0 && ["1", "2", "3", "4"].includes(e.key) && !e.repeat) {
+      if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey && stack.length === 0 && !loginOpen) {
+        e.preventDefault();
+        setTab("search");
+        return;
+      }
+      if (tab !== "home" && stack.length === 0 && ["1", "2", "3", "4"].includes(e.key) && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
         setTab((["home", "search", "category", "profile"] as Tab[])[Number(e.key) - 1]);
       }
     };
@@ -299,10 +310,10 @@ function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boole
       {!theater && <DesktopRail collapsed={collapsed} />}
       <div ref={mainRef} className={`relative flex-1 min-w-0 overflow-hidden win-main ${theater ? "is-theater-main" : ""}`}>
         <LayerBox hidden={stack.length > 0} inert={!pageActive} ariaHidden={!pageActive} className="absolute inset-0">
-          <div className={vis("home")} inert={!pageActive || tab !== "home"} aria-hidden={!pageActive || tab !== "home"}><Home active={pageActive && tab === "home"} bottomInset={14} /></div>
-          <div className={vis("search")} inert={!pageActive || tab !== "search"} aria-hidden={!pageActive || tab !== "search"}><Search active={pageActive && tab === "search"} wide={wide} /></div>
-          <div className={vis("category")} inert={!pageActive || tab !== "category"} aria-hidden={!pageActive || tab !== "category"}><Category wide={wide} active={pageActive && tab === "category"} /></div>
-          <div className={vis("profile")} inert={!pageActive || tab !== "profile"} aria-hidden={!pageActive || tab !== "profile"}><Profile wide={wide} active={pageActive && tab === "profile"} /></div>
+          <div className={vis("home")} inert={(!pageActive || tab !== "home") || undefined} aria-hidden={!pageActive || tab !== "home"}><Home active={pageActive && tab === "home"} bottomInset={14} /></div>
+          <div className={vis("search")} inert={(!pageActive || tab !== "search") || undefined} aria-hidden={!pageActive || tab !== "search"}><Search active={pageActive && tab === "search"} wide={wide} /></div>
+          <div className={vis("category")} inert={(!pageActive || tab !== "category") || undefined} aria-hidden={!pageActive || tab !== "category"}><Category wide={wide} active={pageActive && tab === "category"} /></div>
+          <div className={vis("profile")} inert={(!pageActive || tab !== "profile") || undefined} aria-hidden={!pageActive || tab !== "profile"}><Profile wide={wide} active={pageActive && tab === "profile"} /></div>
         </LayerBox>
         {stack.map((p, i) => (
           <LayerBox
@@ -310,7 +321,8 @@ function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boole
             hidden={i !== stack.length - 1}
             inert={i !== stack.length - 1 || loginOpen}
             ariaHidden={i !== stack.length - 1 || loginOpen}
-            className="absolute inset-0 z-30 bg-bg win-page-in"
+            enterClass="win-page-in"
+            className="absolute inset-0 z-30 bg-bg"
             style={{ zIndex: 30 + i, boxShadow: "-18px 0 40px rgba(0,0,0,.5)" }}>
             <StackPage page={p} onBack={pop} wide={wide} top={i === stack.length - 1} bottomInset={14} />
           </LayerBox>
@@ -336,7 +348,7 @@ function MobileShell() {
 
 /* ============ Application Entrypoint ============ */
 export default function App() {
-  const { platform, loginOpen, setLoginOpen, tab, setTab, stack, pop, fs, setFs, toast } = useStore();
+  const { platform, loginOpen, setLoginOpen, tab, setTab, stack, pop, fs, setFs, clean, setClean, toast } = useStore();
   const [startupUpdate, setStartupUpdate] = useState<UpdateInfo | null>(null);
   const lastBackPressRef = useRef<number>(0);
   useEffect(() => {
@@ -381,7 +393,11 @@ export default function App() {
     if (fs) { setFs(false); return; }                        // Immersive fullscreen
     if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return; }
     if (loginOpen) { setLoginOpen(false); return; }
-    if (stack.length) { pop(); return; }
+    if (stack.length) {
+      if (clean) setClean(false);
+      pop();
+      return;
+    }
     if (tab !== "home") { setTab("home"); return; }
     
     // Double tap back to exit on Home tab
@@ -478,8 +494,6 @@ export default function App() {
       <LoginModal />
       <UpdateModal info={startupUpdate} onClose={() => setStartupUpdate(null)} showSkip />
       <ToastHost />
-      {/* Login modal backdrop */}
-      {loginOpen && <div className="hidden" onClick={() => setLoginOpen(false)} />}
     </>
   );
 }
