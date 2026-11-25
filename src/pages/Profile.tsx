@@ -949,7 +949,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                     title="Toggle Select All"
                     aria-label="Select all toggle"
                   >
-                    <IMore size={16} className="rotate-90" />
+                    <ICheck size={16} strokeWidth={2.3} />
                   </button>
                 </>
               ) : (
@@ -975,8 +975,9 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                     disabled={downloads.length === 0}
                     className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 pressable font-bold disabled:opacity-40"
                     aria-label="Select mode"
+                    title="Select episodes"
                   >
-                    <IMore size={16} className="rotate-90" />
+                    <ILayers size={16} />
                   </button>
                 </>
               )}
@@ -1076,6 +1077,17 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
         ref={scrollRef}
         className="ios-page-body flex-1 scroll-y overflow-x-hidden px-4 pt-0"
         style={{ paddingBottom: "calc(var(--sab, 48px) + 140px)" }}
+        onKeyDown={(e) => {
+          if (
+            (e.key === "Enter" || e.key === " ") &&
+            e.target instanceof HTMLElement &&
+            e.target.tagName === "DIV" &&
+            e.target.getAttribute("role") === "button"
+          ) {
+            e.preventDefault();
+            e.target.click();
+          }
+        }}
       >
         {/* =====================================================================
             1. Overview Page (AuraStream Profile / You Tab)
@@ -1384,7 +1396,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                   role="button"
                   tabIndex={0}
                   onClick={() => setView("watchlater")}
-                  className="min-h-[92px] h-[94px] rounded-2xl overflow-hidden relative shadow-[0_6px_18px_-4px_rgba(121,134,203,0.45),inset_0_1px_0_rgba(255,255,255,0.35)] border border-white/40 dark:border-white/15 p-3 flex flex-col justify-between cursor-pointer pressable active:scale-[0.98] transition-transform"
+                  className="min-h-[92px] h-[94px] rounded-2xl overflow-hidden relative shadow-[0_6px_18px_-4px_rgba(27,38,59,0.42),inset_0_1px_0_rgba(255,255,255,0.28)] border border-white/40 dark:border-white/15 p-3 flex flex-col justify-between cursor-pointer pressable active:scale-[0.98] transition-transform"
                   style={{
                     background: "linear-gradient(135deg, #0d1b2a 0%, #1b263b 40%, #294362 70%, #466995 100%)",
                   }}
@@ -1557,7 +1569,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
           /* =====================================================================
               2. Downloads Hub View (Image 2 & Image 3 Screen 1)
               ===================================================================== */
-          <div className="flex flex-col gap-3.5 a-rise min-w-0 w-full overflow-x-hidden pb-[calc(var(--sab,0px)+140px)]">
+          <div className="flex flex-col gap-3.5 a-rise min-w-0 w-full overflow-x-hidden pb-4">
             {/* Search Input Bar (when search is toggled in top bar) */}
             {downloadSearchOpen && (
               <div className="relative flex items-center bg-white/95 dark:bg-neutral-900/95 border border-blue-200/90 dark:border-blue-500/30 rounded-full px-3.5 py-2 shadow-xs a-fade-in">
@@ -2352,8 +2364,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                   </div>
                 </div>
 
-                {/* Safe bottom scroll margin so floating bottom tabs never obstruct list */}
-                <div className="h-16 shrink-0 pointer-events-none" aria-hidden="true" />
+                {/* Bottom spacing handled by scroll container */}
               </div>
             ) : (
               <div className="p-8 text-center flex flex-col items-center justify-center gap-2 bg-white/80 dark:bg-neutral-900/80 rounded-2xl border border-white/60 dark:border-white/10 shadow-xs">
@@ -2440,8 +2451,8 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
             )}
               </>
             )}
-            {/* Safe bottom spacer for downloads list so floating bottom tabs never obstruct items */}
-            <div className="h-[calc(var(--sab,0px)+120px)] shrink-0 pointer-events-none" aria-hidden="true" />
+            {/* Safe bottom spacer */}
+            <div className="h-6 shrink-0 pointer-events-none" aria-hidden="true" />
           </div>
         ) : view === "seriesDetail" && selectedSeriesGroup ? (
           /* =====================================================================

@@ -1357,25 +1357,29 @@ class MainActivity : TauriActivity() {
 
           val apkFile = File(updatesDir, cleanName)
           if (apkFile.exists() && validateOtaApkFile(apkFile, 0L) == null) {
-            dispatchOtaEvent(JSONObject().apply {
-              put("status", "downloaded")
-              put("progress", 100)
-              put("downloadedBytes", apkFile.length())
-              put("totalBytes", apkFile.length())
-              put("speedBytesPerSec", 0L)
-              put("filePath", apkFile.absolutePath)
-            })
+            if (!otaCancelled && otaDownloadToken.get() == myToken) {
+              dispatchOtaEvent(JSONObject().apply {
+                put("status", "downloaded")
+                put("progress", 100)
+                put("downloadedBytes", apkFile.length())
+                put("totalBytes", apkFile.length())
+                put("speedBytesPerSec", 0L)
+                put("filePath", apkFile.absolutePath)
+              })
+            }
             return@Thread
           }
 
           partFile = File(updatesDir, "$cleanName.$myToken.part")
-          dispatchOtaEvent(JSONObject().apply {
-            put("status", "downloading")
-            put("progress", 0)
-            put("downloadedBytes", 0L)
-            put("totalBytes", 0L)
-            put("speedBytesPerSec", 0L)
-          })
+          if (!otaCancelled && otaDownloadToken.get() == myToken) {
+            dispatchOtaEvent(JSONObject().apply {
+              put("status", "downloading")
+              put("progress", 0)
+              put("downloadedBytes", 0L)
+              put("totalBytes", 0L)
+              put("speedBytesPerSec", 0L)
+            })
+          }
 
           var expectedTotalBytes = 0L
           var lastError: Exception? = null
@@ -1478,7 +1482,7 @@ class MainActivity : TauriActivity() {
                     } else {
                       0
                     }
-                    if (pct != lastPct || now - lastEmitMs >= 250L) {
+                    if ((pct != lastPct || now - lastEmitMs >= 250L) && !otaCancelled && otaDownloadToken.get() == myToken) {
                       lastPct = pct
                       lastEmitMs = now
                       dispatchOtaEvent(JSONObject().apply {
@@ -1532,14 +1536,16 @@ class MainActivity : TauriActivity() {
             partFile.delete()
           }
 
-          dispatchOtaEvent(JSONObject().apply {
-            put("status", "downloaded")
-            put("progress", 100)
-            put("downloadedBytes", apkFile.length())
-            put("totalBytes", if (expectedTotalBytes > 0L) expectedTotalBytes else apkFile.length())
-            put("speedBytesPerSec", 0L)
-            put("filePath", apkFile.absolutePath)
-          })
+          if (!otaCancelled && otaDownloadToken.get() == myToken) {
+            dispatchOtaEvent(JSONObject().apply {
+              put("status", "downloaded")
+              put("progress", 100)
+              put("downloadedBytes", apkFile.length())
+              put("totalBytes", if (expectedTotalBytes > 0L) expectedTotalBytes else apkFile.length())
+              put("speedBytesPerSec", 0L)
+              put("filePath", apkFile.absolutePath)
+            })
+          }
         } catch (_: InterruptedException) {
           try { partFile?.delete() } catch (_: Exception) {}
           if (otaDownloadToken.get() == myToken && otaCancelled) {

@@ -1316,7 +1316,9 @@ async fn download_hls_to_dir(
                 } else {
                     let local_name = format!("key_{}.key", key_map.len());
                     let key_path = part_dir.join(&local_name);
-                    if !(key_path.is_file() && key_path.metadata().map(|m| m.len() > 0).unwrap_or(false)) {
+                    let url_marker = part_dir.join(format!("{local_name}.url"));
+                    let same_url = fs::read_to_string(&url_marker).ok().as_deref() == Some(abs_uri.as_str());
+                    if !(same_url && key_path.is_file() && key_path.metadata().map(|m| m.len() > 0).unwrap_or(false)) {
                         let (_, key_bytes) = crate::net::fetch_bytes(&abs_uri).await?;
                         if key_bytes.is_empty() {
                             return Err("Empty HLS decryption key received".into());
@@ -1325,6 +1327,7 @@ async fn download_hls_to_dir(
                             return Err("__cancelled__".to_string());
                         }
                         atomic_write_bytes(&key_path, &key_bytes)?;
+                        let _ = fs::write(&url_marker, abs_uri.as_bytes());
                     }
                     key_map.insert(abs_uri.clone(), local_name.clone());
                     local_name

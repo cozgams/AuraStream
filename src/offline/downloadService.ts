@@ -114,6 +114,7 @@ let batchState: BatchProgressState = {
   currentEpisode: 0,
   failedCount: 0,
 };
+const nativeNotifThrottle = new Map<string, { pct: number; at: number }>();
 
 function getNativeBridge(): NativeExportBridge | undefined {
   if (typeof window === "undefined") return undefined;
@@ -215,15 +216,20 @@ function applyNativeDownloadSnapshot(payload: { queue?: unknown[]; completed?: u
         autoResume: item.autoResume,
       });
 
-      // Synchronize native notification with active download progress
+      // Synchronize native notification with active download progress (throttled)
       if (item.status === "downloading" && videoId > 0 && episode > 0) {
-        const sizeText =
-          totalBytes > 0
-            ? `${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}`
-            : downloadedBytes > 0
-            ? formatBytes(downloadedBytes)
-            : "";
-        notifyNativeDownloadProgress(videoId, episode, title, progress, speedFormatted, sizeText);
+        const now = Date.now();
+        const prevNotif = nativeNotifThrottle.get(item.id);
+        if (!prevNotif || progress === 100 || Math.abs(progress - prevNotif.pct) >= 2 || now - prevNotif.at >= 750) {
+          nativeNotifThrottle.set(item.id, { pct: progress, at: now });
+          const sizeText =
+            totalBytes > 0
+              ? `${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}`
+              : downloadedBytes > 0
+              ? formatBytes(downloadedBytes)
+              : "";
+          notifyNativeDownloadProgress(videoId, episode, title, progress, speedFormatted, sizeText);
+        }
       }
     }
   }
@@ -304,7 +310,7 @@ function applyNativeDownloadSnapshot(payload: { queue?: unknown[]; completed?: u
     }
   }
 
-  notifyProgress(true);
+  notifyProgress(false);
 }
 
 export async function syncNativeDownloadState(): Promise<void> {
@@ -715,6 +721,7 @@ export async function syncOfflineEpisodesFromIndexedDB(): Promise<OfflineEpisode
         idbRecords.has(it.id) ||
         st === "downloading" ||
         st === "queued" ||
+        st === "completed" ||
         (it.storage === "native" && !nativeOk)
       ) {
         mergedMap.set(it.id, it);
@@ -2832,10 +2839,13 @@ export async function executeBatchDownload(
     };
     const episodeIds = unDownloaded.map((ep) => `${videoId}_${ep}`);
 
-    // Background prefetch real subtitles for batch episodes so English CC is available offline
-    for (const ep of unDownloaded) {
-      void getSubtitlesForEpisode(videoId, ep, title).catch(() => {});
-    }
+    // Background prefetch real subtitles in small waves so English CC is ready offline
+    void (async () => {
+      for (let i = 0; i < unDownloaded.length; i += 3) {
+        const slice = unDownloaded.slice(i, i + 3);
+        await Promise.allSettled(slice.map((ep) => getSubtitlesForEpisode(videoId, ep, title)));
+      }
+    })();
 
     await invoke("native_download_enqueue", {
       items: unDownloaded.map((ep) => ({

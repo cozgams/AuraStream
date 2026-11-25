@@ -306,7 +306,7 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
         return nextList;
       });
       setText("");
-      toast("Comment posted", "ok");
+      toast(user?.user_type === "firebase" ? "Saved to your comments" : "Comment posted", "ok");
     } catch (e) {
       toast(localizeError(e), "info");
     } finally {

@@ -347,6 +347,10 @@ export default function Player({
         loop={loop}
         className="relative z-10 w-full h-full object-contain bg-transparent"
         onClick={() => {
+          if (isMobile && playing && !controlsVisible) {
+            flashControls();
+            return;
+          }
           if (isMobile && playing) {
             flashControls();
           }
@@ -411,7 +415,8 @@ export default function Player({
       )}
 
       {!playing && !waiting && (
-        <Button onClick={toggle} aria-label="Play"
+        <Button onClick={(e) => { e.stopPropagation(); toggle(); }} aria-label="Play"
+          data-card
           className="absolute inset-0 z-20 flex items-center justify-center">
           <span className="w-16 h-16 rounded-full bg-black/45 backdrop-blur-sm flex items-center justify-center elev-2 pressable">
             <IPlayF size={26} className="text-white ml-0.5" />
