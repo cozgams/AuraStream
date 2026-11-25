@@ -213,7 +213,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
       <div ref={scrollRef} className="flex-1 scroll-y px-4 pb-52">
         {!querying ? (
           <>
-            <Surface role="region" aria-label={t("search.hot")} className="mt-1 rounded-(--r-md) bg-s2 p-3.5 a-rise">
+            <Surface role="region" aria-label={t("search.hot")} className="mt-3.5 rounded-(--r-md) bg-s2 p-3.5 a-rise">
               <div className="flex items-center justify-between">
                 <h2 className="flex items-center gap-1.5 text-[14px] font-semibold text-on/90"><IFireF size={15} className="text-primary" />{t("search.hot")}</h2>
                 <Button onClick={() => void refreshHot()} disabled={hotLoading} aria-label={t("search.hot")}
@@ -287,16 +287,16 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
             </Surface>
 
             {searchHist.length > 0 && (
-              <div className="mt-1 a-rise">
+              <div className="mt-5 a-rise">
                 <div className="flex items-center justify-between">
                   <span className="text-[14px] font-bold text-on">{t("search.history")}</span>
-                  <Button onClick={clearSearchHist} className="text-[12px] text-dim pressable">{t("search.clear")}</Button>
+                  <Button onClick={clearSearchHist} className="px-2 py-0.5 rounded-full text-[12px] text-dim hover:bg-s3 transition-colors pressable">{t("search.clear")}</Button>
                 </div>
                 <div className="flex flex-wrap gap-2 mt-2.5">
                   {searchHist.map((h) => (
                     <div
                       key={h}
-                      className="group inline-flex items-center gap-1.5 pl-3 pr-1.5 h-8 rounded-(--r-ctl) bg-s3 text-[13px] text-on/80 border border-white/5 hover:border-white/15 transition-all"
+                      className="group inline-flex items-center gap-1.5 pl-3 pr-1.5 h-8 rounded-(--r-ctl) bg-s3 text-[13px] text-on/85 border border-edge/40 hover:border-primary/40 shadow-2xs transition-all"
                     >
                       <button
                         type="button"
@@ -332,7 +332,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
                   const display = formatDramaTag(t);
                   return (
                     <Button key={t} onClick={() => { setQ(t); submit(t); }}
-                      className="px-3 h-7 rounded-(--r-ctl) bg-s3 text-[13px] text-on/85 pressable">{display}</Button>
+                      className="px-3 h-7 rounded-(--r-ctl) bg-s3 border border-edge/30 hover:border-primary/40 hover:text-primary text-[13px] text-on/85 transition-colors pressable">{display}</Button>
                   );
                 })}
               </div>

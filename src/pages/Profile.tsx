@@ -1165,10 +1165,10 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
             </div>
 
             {/* History Shelf */}
-            <div className="flex flex-col gap-1 mt-0.5">
+            <div className="flex flex-col gap-1.5 mt-1">
               <div className="flex items-center justify-between px-1">
                 <div className="flex items-center gap-2">
-                  <div className="w-5 h-5 rounded-full bg-blue-100/70 dark:bg-blue-500/20 text-[#1a73e8] dark:text-blue-400 flex items-center justify-center shrink-0">
+                  <div className="w-5 h-5 rounded-full bg-primary/15 text-primary flex items-center justify-center shrink-0">
                     <IHist size={12} strokeWidth={2.4} />
                   </div>
                   <span className="text-[14.5px] font-bold text-[#0f172a] dark:text-neutral-100 tracking-tight">
@@ -1179,7 +1179,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                   <button
                     type="button"
                     onClick={() => setView("history")}
-                    className="text-[11.5px] font-bold text-[#1a73e8] dark:text-blue-400 hover:text-[#1557b0] dark:hover:text-blue-300 flex items-center gap-0.5 pressable"
+                    className="text-[11.5px] font-bold text-primary hover:opacity-80 flex items-center gap-0.5 pressable"
                   >
                     <span>View all</span>
                     <IChevR size={12} strokeWidth={2.6} />
@@ -1255,11 +1255,11 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                             </span>
                           </div>
 
-                          {/* Blue Progress Bar along Bottom */}
+                          {/* Accent Progress Bar along Bottom */}
                           {progressPct > 0 && (
-                            <div className="absolute bottom-0 inset-x-0 h-1 bg-black/40 overflow-hidden">
+                            <div className="absolute bottom-0 inset-x-0 h-1 bg-black/45 overflow-hidden">
                               <div
-                                className="h-full bg-[#2563eb] rounded-full transition-all duration-300"
+                                className="h-full bg-primary rounded-full transition-all duration-300"
                                 style={{ width: `${progressPct}%` }}
                               />
                             </div>
@@ -1304,10 +1304,10 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
             </div>
 
             {/* Playlists Shelf */}
-            <div className="flex flex-col gap-1 mt-0.5">
+            <div className="flex flex-col gap-1.5 mt-1">
               <div className="flex items-center justify-between px-1">
                 <div className="flex items-center gap-2">
-                  <div className="w-5 h-5 rounded-full bg-blue-100/70 dark:bg-blue-500/20 text-[#1a73e8] dark:text-blue-400 flex items-center justify-center shrink-0">
+                  <div className="w-5 h-5 rounded-full bg-primary/15 text-primary flex items-center justify-center shrink-0">
                     <IStarF size={12} />
                   </div>
                   <span className="text-[14.5px] font-bold text-[#0f172a] dark:text-neutral-100 tracking-tight">Playlists</span>
@@ -1315,7 +1315,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                 <button
                   type="button"
                   onClick={() => setView("favs")}
-                  className="text-[11.5px] font-bold text-[#1a73e8] dark:text-blue-400 hover:text-[#1557b0] dark:hover:text-blue-300 flex items-center gap-0.5 pressable"
+                  className="text-[11.5px] font-bold text-primary hover:opacity-80 flex items-center gap-0.5 pressable"
                 >
                   <span>View all</span>
                   <IChevR size={12} strokeWidth={2.6} />
@@ -1328,7 +1328,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                   role="button"
                   tabIndex={0}
                   onClick={() => setView("favs")}
-                  className="min-h-[88px] h-[90px] rounded-2xl overflow-hidden relative shadow-sm border border-white/60 dark:border-white/10 p-2.5 flex flex-col justify-between cursor-pointer pressable active:scale-[0.98] transition-transform"
+                  className="min-h-[92px] h-[94px] rounded-2xl overflow-hidden relative shadow-[0_6px_18px_-4px_rgba(121,134,203,0.45),inset_0_1px_0_rgba(255,255,255,0.35)] border border-white/40 dark:border-white/15 p-3 flex flex-col justify-between cursor-pointer pressable active:scale-[0.98] transition-transform"
                   style={{
                     background: "linear-gradient(135deg, #7986cb 0%, #a278b5 35%, #e1819d 70%, #fca380 100%)",
                   }}
@@ -1363,7 +1363,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                   role="button"
                   tabIndex={0}
                   onClick={() => setView("watchlater")}
-                  className="min-h-[88px] h-[90px] rounded-2xl overflow-hidden relative shadow-sm border border-white/60 dark:border-white/10 p-2.5 flex flex-col justify-between cursor-pointer pressable active:scale-[0.98] transition-transform"
+                  className="min-h-[92px] h-[94px] rounded-2xl overflow-hidden relative shadow-[0_6px_18px_-4px_rgba(121,134,203,0.45),inset_0_1px_0_rgba(255,255,255,0.35)] border border-white/40 dark:border-white/15 p-3 flex flex-col justify-between cursor-pointer pressable active:scale-[0.98] transition-transform"
                   style={{
                     background: "linear-gradient(135deg, #0d1b2a 0%, #1b263b 40%, #294362 70%, #466995 100%)",
                   }}
@@ -1444,15 +1444,15 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
               {/* Progress / Storage Bar Indicator */}
               {activeDownloads.length > 0 ? (
                 <div className="flex items-center gap-2 pt-0.5">
-                  <div className="flex-1 h-1.5 rounded-full bg-blue-100 dark:bg-blue-950/60 overflow-hidden">
+                  <div className="flex-1 h-1.5 rounded-full bg-s3 overflow-hidden">
                     <div
-                      className="h-full bg-[#1a73e8] rounded-full transition-all duration-300"
+                      className="h-full bg-primary rounded-full transition-all duration-300"
                       style={{
                         width: `${Math.min(100, Math.max(3, activeDownloadsProgressPercent))}%`,
                       }}
                     />
                   </div>
-                  <span className="text-[10.5px] font-extrabold text-[#1a73e8] dark:text-blue-400 tabular-nums">
+                  <span className="text-[10.5px] font-extrabold text-primary tabular-nums">
                     {activeDownloadsProgressPercent}%
                   </span>
                 </div>

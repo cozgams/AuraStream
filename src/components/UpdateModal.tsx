@@ -18,6 +18,7 @@ import {
   type OtaDownloadStage,
 } from "../otaUpdater";
 import { useStore } from "../store";
+import { IRefresh } from "../icons";
 import { Button, Surface } from "./ios/controls";
 import { Modal } from "./ui";
 
@@ -210,16 +211,23 @@ export default function UpdateModal({
       label="New Version Available"
     >
       <div className="p-5">
-        <div className="text-[16px] font-bold text-on">New Version Available</div>
-        <p className="text-[12px] text-mut mt-1.5">
-          v{info.current} to <b className="text-on">v{info.latest}</b>
-          {info.published_at ? ` · ${info.published_at.slice(0, 10)}` : ""}
-          {asset?.abi ? ` · ${asset.abi}` : ""}
-          {asset?.size ? ` · ${formatBytes(asset.size)}` : ""}
-        </p>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-primary/15 text-primary border border-primary/25 flex items-center justify-center shrink-0">
+            <IRefresh size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[16px] font-bold text-on leading-tight">New Version Available</div>
+            <p className="text-[12px] text-mut mt-0.5">
+              v{info.current} to <b className="text-on">v{info.latest}</b>
+              {info.published_at ? ` · ${info.published_at.slice(0, 10)}` : ""}
+              {asset?.abi ? ` · ${asset.abi}` : ""}
+              {asset?.size ? ` · ${formatBytes(asset.size)}` : ""}
+            </p>
+          </div>
+        </div>
 
         {!!formattedNotes && (
-          <Surface className="mt-3 max-h-[160px] scroll-y rounded-(--r-sm) bg-s2 p-3 text-[12px] text-mut whitespace-pre-wrap leading-relaxed">
+          <Surface className="mt-3.5 max-h-[160px] scroll-y rounded-2xl bg-s2 border border-edge/30 p-3 text-[12px] text-mut whitespace-pre-wrap leading-relaxed">
             {formattedNotes}
           </Surface>
         )}
