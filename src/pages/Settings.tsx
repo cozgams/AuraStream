@@ -28,7 +28,7 @@ import {
   ISettings,
 } from "../icons";
 import UpdateModal from "../components/UpdateModal";
-import { getAvailableUpdateInfo, isAutoUpdateCheckEnabled, setAutoUpdateCheckEnabled, setAvailableUpdateInfo, isAndroidNativeOtaSupported, subscribeAvailableUpdate } from "../otaUpdater";
+import { getAvailableUpdateInfo, getOtaRuntimeState, isAutoUpdateCheckEnabled, setAutoUpdateCheckEnabled, setAvailableUpdateInfo, isAndroidNativeOtaSupported, subscribeAvailableUpdate, subscribeOtaRuntimeState, type OtaRuntimeState } from "../otaUpdater";
 import { getAndroidPermissionsStatus, type AndroidPermissionsStatus } from "../offline/exportService";
 import { clearSubtitleCache } from "../subtitles/aiSubtitleService";
 import {
@@ -151,6 +151,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
   const [checking, setChecking] = useState(false);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo | null>(() => getAvailableUpdateInfo());
+  const [otaRuntime, setOtaRuntime] = useState<OtaRuntimeState>(() => getOtaRuntimeState());
   const [autoUpdateOn, setAutoUpdateOn] = useState(() => isAutoUpdateCheckEnabled());
   const [androidPerms, setAndroidPerms] = useState<AndroidPermissionsStatus | null>(() => getAndroidPermissionsStatus());
   const playbackLog = usePlaybackLog();
@@ -178,6 +179,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
     };
     const syncOtaCfg = () => setAutoUpdateOn(isAutoUpdateCheckEnabled());
     const unsubAvailUpdate = subscribeAvailableUpdate(setAvailableUpdate);
+    const unsubOtaRuntime = subscribeOtaRuntimeState(setOtaRuntime);
     const refreshPerms = () => setAndroidPerms(getAndroidPermissionsStatus());
     const onVis = () => {
       if (document.visibilityState === "visible") refreshPerms();
@@ -190,6 +192,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
     document.addEventListener("visibilitychange", onVis);
     return () => {
       unsubAvailUpdate();
+      unsubOtaRuntime();
       window.removeEventListener("aurastream:storage-config-changed", syncStorageCfg);
       window.removeEventListener("aurastream:playback-config-changed", syncPlaybackCfg);
       window.removeEventListener("aurastream:ota-config-changed", syncOtaCfg);
@@ -849,9 +852,19 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
               }
               hasChevron
               disabled={checking}
-              onClick={checkUpdate}
+              onClick={() => {
+                if (otaRuntime.stage === "downloading" && availableUpdate?.has_update) {
+                  setUpdate(availableUpdate);
+                  return;
+                }
+                void checkUpdate();
+              }}
               badge={
-                availableUpdate?.has_update ? (
+                otaRuntime.stage === "downloading" && availableUpdate?.has_update ? (
+                  <span className="px-2 py-0.5 rounded-full bg-primary/15 text-primary font-mono text-[11px] font-bold border border-primary/25">
+                    {otaRuntime.progress}%
+                  </span>
+                ) : availableUpdate?.has_update ? (
                   <span className="px-2 py-0.5 rounded-full bg-primary/15 text-primary font-mono text-[11px] font-bold border border-primary/25">
                     v{availableUpdate.latest} Ready
                   </span>

@@ -154,6 +154,44 @@ try {
     };
     const exactArm64Asset = otaMod.resolveBestUpdateAsset(multiAssetInfo, "arm64");
 
+    // E2. OTA runtime state transitions & cached APK check
+    const origNativeBridge = window.AuraNativeExport;
+    window.AuraNativeExport = {
+      isAvailable: () => true,
+      beginExport: () => true,
+      writeChunk: () => true,
+      finishExport: () => "",
+      canInstallPackages: () => true,
+      startOtaDownload: () => true,
+      cancelOtaDownload: () => true,
+      installDownloadedApk: () => "STARTED",
+      getCachedOtaApkInfo: (name) =>
+        name.includes("arm64")
+          ? JSON.stringify({ ready: true, filePath: `/data/cache/updates/${name}`, size: 14400000 })
+          : JSON.stringify({ ready: false }),
+    };
+    const cachedArm64 = otaMod.getCachedOtaApk("AuraStream_0.1.57_arm64.apk", 14400000);
+    otaMod.startOtaUpdateDownload(
+      "https://github.com/cozgams/AuraStream/releases/download/v0.1.57/AuraStream_0.1.57_arm.apk",
+      "AuraStream_0.1.57_arm.apk",
+      11800000
+    );
+    window.dispatchEvent(
+      new CustomEvent("aurastream:ota-progress", {
+        detail: { status: "downloading", progress: 45, downloadedBytes: 5310000, totalBytes: 11800000, speedBytesPerSec: 1024000 },
+      })
+    );
+    const midOtaState = otaMod.getOtaRuntimeState();
+    window.dispatchEvent(
+      new CustomEvent("aurastream:ota-progress", {
+        detail: { status: "downloaded", progress: 100, downloadedBytes: 11800000, totalBytes: 11800000, filePath: "/data/cache/updates/AuraStream_0.1.57_arm.apk" },
+      })
+    );
+    const readyOtaState = otaMod.getOtaRuntimeState();
+    otaMod.cancelOtaUpdateDownload();
+    const cancelledOtaState = otaMod.getOtaRuntimeState();
+    window.AuraNativeExport = origNativeBridge;
+
     // F. Offline zero-internet safeguards: Smart Download defaults OFF & preloadEpisode skips downloaded ep
     const smartDefault = dlMod.isSmartDownloadEnabled();
     stMod.writeStorage(
@@ -284,6 +322,12 @@ try {
       armUrl: armAsset?.url,
       x86Url: x86Asset?.url,
       exactArm64Size: exactArm64Asset?.size,
+      cachedArm64Ready: cachedArm64.ready,
+      cachedArm64Path: cachedArm64.filePath,
+      midOtaStage: midOtaState.stage,
+      midOtaProgress: midOtaState.progress,
+      readyOtaStage: readyOtaState.stage,
+      cancelledOtaStage: cancelledOtaState.stage,
       smartDefault,
       preloadedDownloaded,
       playCalls: window.__playCalls,
@@ -339,6 +383,12 @@ try {
     `https://github.com/cozgams/AuraStream/releases/download/v${pkgVersion}/AuraStream_${pkgVersion}_x86_64.apk`
   );
   assert.equal(results.exactArm64Size, 14400000, "Multi-ABI release asset list must preserve exact APK byte size");
+  assert.equal(results.cachedArm64Ready, true, "Cached verified APK check must report ready=true");
+  assert.equal(results.cachedArm64Path, "/data/cache/updates/AuraStream_0.1.57_arm64.apk");
+  assert.equal(results.midOtaStage, "downloading");
+  assert.equal(results.midOtaProgress, 45);
+  assert.equal(results.readyOtaStage, "ready");
+  assert.equal(results.cancelledOtaStage, "idle");
   assert.equal(results.smartDefault, false, "Smart Auto-Download must default OFF to save data");
   assert.equal(results.preloadedDownloaded, false, "preloadEpisode must skip already-downloaded episodes");
   assert.equal(results.playCalls, 0, "preloadEpisode must make 0 api.play calls for downloaded episodes");

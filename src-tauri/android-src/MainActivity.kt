@@ -1081,6 +1081,110 @@ class MainActivity : TauriActivity() {
       }
     }
 
+    private fun sanitizeOtaApkName(fileName: String): String {
+      return fileName.replace("[^a-zA-Z0-9._-]".toRegex(), "_").trim('_').let {
+        when {
+          it.isEmpty() -> "AuraStream_update.apk"
+          it.endsWith(".apk", ignoreCase = true) -> it
+          else -> "$it.apk"
+        }
+      }
+    }
+
+    private fun packageVersionCodeCompat(info: android.content.pm.PackageInfo): Long {
+      return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        info.longVersionCode
+      } else {
+        @Suppress("DEPRECATION")
+        info.versionCode.toLong()
+      }
+    }
+
+    private fun installedVersionCodeCompat(): Long {
+      return try {
+        val currentInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+          activity.packageManager.getPackageInfo(
+            activity.packageName,
+            PackageManager.PackageInfoFlags.of(0)
+          )
+        } else {
+          @Suppress("DEPRECATION")
+          activity.packageManager.getPackageInfo(activity.packageName, 0)
+        }
+        packageVersionCodeCompat(currentInfo)
+      } catch (_: Exception) {
+        0L
+      }
+    }
+
+    private fun validateOtaApkFile(file: File, expectedSize: Long = 0L): String? {
+      if (!file.exists() || !file.isFile || file.length() < 1_000_000L) {
+        return "Downloaded APK appears incomplete (${file.length()} bytes)"
+      }
+      if (expectedSize > 0L && file.length() != expectedSize) {
+        return "Incomplete update download (${file.length()} / $expectedSize bytes)"
+      }
+      val header = ByteArray(4)
+      val headerRead = try {
+        file.inputStream().use { it.read(header) }
+      } catch (_: Exception) {
+        0
+      }
+      val validZip = headerRead == 4 &&
+        header[0] == 0x50.toByte() &&
+        header[1] == 0x4B.toByte() &&
+        header[2] == 0x03.toByte() &&
+        header[3] == 0x04.toByte()
+      if (!validZip) {
+        return "Downloaded file is not a valid APK package"
+      }
+      val pkgInfo = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+          activity.packageManager.getPackageArchiveInfo(
+            file.absolutePath,
+            PackageManager.PackageInfoFlags.of(0)
+          )
+        } else {
+          @Suppress("DEPRECATION")
+          activity.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+        }
+      } catch (_: Exception) {
+        null
+      }
+      if (pkgInfo == null || pkgInfo.packageName != activity.packageName) {
+        return "Downloaded file does not match ${activity.packageName}"
+      }
+      val apkVer = packageVersionCodeCompat(pkgInfo)
+      val currentVer = installedVersionCodeCompat()
+      if (currentVer > 0L && apkVer < currentVer) {
+        return "Update package version ($apkVer) is older than installed ($currentVer)"
+      }
+      return null
+    }
+
+    @JavascriptInterface
+    fun getCachedOtaApkInfo(fileName: String, expectedSize: Long): String {
+      return try {
+        val cleanName = sanitizeOtaApkName(fileName)
+        val updatesDir = File(activity.cacheDir, "updates")
+        val apkFile = File(updatesDir, cleanName)
+        if (!apkFile.exists()) {
+          return JSONObject().apply { put("ready", false) }.toString()
+        }
+        val err = validateOtaApkFile(apkFile, expectedSize)
+        if (err != null) {
+          return JSONObject().apply { put("ready", false) }.toString()
+        }
+        JSONObject().apply {
+          put("ready", true)
+          put("filePath", apkFile.absolutePath)
+          put("size", apkFile.length())
+        }.toString()
+      } catch (_: Exception) {
+        JSONObject().apply { put("ready", false) }.toString()
+      }
+    }
+
     private fun isAllowedOtaUrl(rawUrl: String, isRedirectHop: Boolean): Boolean {
       if (rawUrl.contains("..") || rawUrl.contains("\\")) return false
       val uri = try { URI(rawUrl).normalize() } catch (_: Exception) { return false }
@@ -1170,30 +1274,36 @@ class MainActivity : TauriActivity() {
       cancelOtaDownload()
       val myToken = otaDownloadToken.incrementAndGet()
       otaCancelled = false
-
-      val cleanName = fileName.replace("[^a-zA-Z0-9._-]".toRegex(), "_").trim('_').let {
-        when {
-          it.isEmpty() -> "AuraStream_update.apk"
-          it.endsWith(".apk", ignoreCase = true) -> it
-          else -> "$it.apk"
-        }
-      }
+      val cleanName = sanitizeOtaApkName(fileName)
 
       Thread {
         var partFile: File? = null
         var myConn: HttpURLConnection? = null
         try {
+          activity.acquireWakeLock()
           val updatesDir = File(activity.cacheDir, "updates")
           if (!updatesDir.exists()) updatesDir.mkdirs()
           updatesDir.listFiles()?.forEach { oldFile ->
-            if (oldFile.isFile && !oldFile.name.endsWith(".$myToken.part")) {
+            val keepFile = oldFile.name == cleanName || oldFile.name.endsWith(".$myToken.part")
+            if (oldFile.isFile && !keepFile) {
               try { oldFile.delete() } catch (_: Exception) {}
             }
           }
 
           val apkFile = File(updatesDir, cleanName)
-          partFile = File(updatesDir, "$cleanName.$myToken.part")
+          if (apkFile.exists() && validateOtaApkFile(apkFile, 0L) == null) {
+            dispatchOtaEvent(JSONObject().apply {
+              put("status", "downloaded")
+              put("progress", 100)
+              put("downloadedBytes", apkFile.length())
+              put("totalBytes", apkFile.length())
+              put("speedBytesPerSec", 0L)
+              put("filePath", apkFile.absolutePath)
+            })
+            return@Thread
+          }
 
+          partFile = File(updatesDir, "$cleanName.$myToken.part")
           dispatchOtaEvent(JSONObject().apply {
             put("status", "downloading")
             put("progress", 0)
@@ -1202,97 +1312,141 @@ class MainActivity : TauriActivity() {
             put("speedBytesPerSec", 0L)
           })
 
-          var currentUrl = url
-          var conn: HttpURLConnection? = null
-          for (hop in 0..6) {
+          var expectedTotalBytes = 0L
+          var lastError: Exception? = null
+
+          for (attempt in 1..3) {
             if (otaCancelled || otaDownloadToken.get() != myToken) {
-              if (otaDownloadToken.get() == myToken && otaCancelled) {
-                dispatchOtaEvent(JSONObject().apply { put("status", "cancelled") })
-              }
-              return@Thread
+              throw InterruptedException("cancelled")
             }
-            if (!isAllowedOtaUrl(currentUrl, isRedirectHop = hop > 0)) {
-              throw SecurityException("Redirected to untrusted update host")
-            }
-            val nextConn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
-              instanceFollowRedirects = false
-              connectTimeout = 20_000
-              readTimeout = 30_000
-              setRequestProperty("User-Agent", "AuraStream-Android-OTA")
-              setRequestProperty("Accept", "application/octet-stream, application/vnd.android.package-archive")
-            }
-            myConn = nextConn
-            otaActiveConnection = nextConn
-            val code = nextConn.responseCode
-            if (code in listOf(301, 302, 303, 307, 308)) {
-              val loc = nextConn.getHeaderField("Location") ?: throw IllegalStateException("Redirect missing Location")
-              nextConn.disconnect()
-              currentUrl = URL(URL(currentUrl), loc).toString()
-              continue
-            }
-            conn = nextConn
-            break
-          }
-
-          val finalConn = conn ?: throw IllegalStateException("Too many redirects while fetching update")
-          val responseCode = finalConn.responseCode
-          if (responseCode != HttpURLConnection.HTTP_OK) {
-            throw IllegalStateException("Update server returned HTTP $responseCode")
-          }
-
-          val totalBytes = finalConn.contentLengthLong.coerceAtLeast(0L)
-          var downloadedBytes = 0L
-          var lastEmitMs = 0L
-          var lastPct = -1
-          var sampleStartMs = System.currentTimeMillis()
-          var sampleStartBytes = 0L
-          var currentSpeedBps = 0L
-
-          finalConn.inputStream.use { input ->
-            FileOutputStream(partFile).use { output ->
-              val buffer = ByteArray(32 * 1024)
-              while (true) {
+            val resumeOffset = if (partFile.exists()) partFile.length() else 0L
+            try {
+              var currentUrl = url
+              var conn: HttpURLConnection? = null
+              for (hop in 0..6) {
                 if (otaCancelled || otaDownloadToken.get() != myToken) {
                   throw InterruptedException("cancelled")
                 }
-                val read = input.read(buffer)
-                if (read == -1) break
-                output.write(buffer, 0, read)
-                downloadedBytes += read
-
-                val now = System.currentTimeMillis()
-                val speedElapsedMs = now - sampleStartMs
-                if (speedElapsedMs >= 450L) {
-                  val bytesDelta = (downloadedBytes - sampleStartBytes).coerceAtLeast(0L)
-                  val instantSpeed = (bytesDelta * 1000L) / speedElapsedMs.coerceAtLeast(1L)
-                  currentSpeedBps = if (currentSpeedBps > 0L) {
-                    (currentSpeedBps * 6L + instantSpeed * 4L) / 10L
-                  } else {
-                    instantSpeed
+                if (!isAllowedOtaUrl(currentUrl, isRedirectHop = hop > 0)) {
+                  throw SecurityException("Redirected to untrusted update host")
+                }
+                val nextConn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+                  instanceFollowRedirects = false
+                  connectTimeout = 20_000
+                  readTimeout = 30_000
+                  setRequestProperty("User-Agent", "AuraStream-Android-OTA")
+                  setRequestProperty("Accept", "application/octet-stream, application/vnd.android.package-archive")
+                  if (resumeOffset > 0L) {
+                    setRequestProperty("Range", "bytes=$resumeOffset-")
                   }
-                  sampleStartMs = now
-                  sampleStartBytes = downloadedBytes
                 }
+                myConn = nextConn
+                otaActiveConnection = nextConn
+                val code = nextConn.responseCode
+                if (code in listOf(301, 302, 303, 307, 308)) {
+                  val loc = nextConn.getHeaderField("Location") ?: throw IllegalStateException("Redirect missing Location")
+                  nextConn.disconnect()
+                  currentUrl = URL(URL(currentUrl), loc).toString()
+                  continue
+                }
+                conn = nextConn
+                break
+              }
 
-                val pct = if (totalBytes > 0L) {
-                  ((downloadedBytes * 100L) / totalBytes).toInt().coerceIn(0, 99)
-                } else {
-                  0
+              val finalConn = conn ?: throw IllegalStateException("Too many redirects while fetching update")
+              val responseCode = finalConn.responseCode
+              if (responseCode != HttpURLConnection.HTTP_OK && responseCode != HttpURLConnection.HTTP_PARTIAL) {
+                throw IllegalStateException("Update server returned HTTP $responseCode")
+              }
+
+              val isPartialAppend = responseCode == HttpURLConnection.HTTP_PARTIAL && resumeOffset > 0L
+              if (!isPartialAppend && partFile.exists()) {
+                partFile.delete()
+              }
+
+              var downloadedBytes = if (isPartialAppend) resumeOffset else 0L
+              val contentLen = finalConn.contentLengthLong.coerceAtLeast(0L)
+              val contentRange = finalConn.getHeaderField("Content-Range") ?: ""
+              val rangeTotal = contentRange.substringAfter("/", "").toLongOrNull() ?: 0L
+              val totalBytes = when {
+                rangeTotal > 0L -> rangeTotal
+                isPartialAppend && contentLen > 0L -> resumeOffset + contentLen
+                contentLen > 0L -> contentLen
+                else -> expectedTotalBytes
+              }
+              if (totalBytes > 0L) expectedTotalBytes = totalBytes
+
+              var lastEmitMs = 0L
+              var lastPct = -1
+              var sampleStartMs = System.currentTimeMillis()
+              var sampleStartBytes = downloadedBytes
+              var currentSpeedBps = 0L
+
+              finalConn.inputStream.use { input ->
+                FileOutputStream(partFile, isPartialAppend).use { output ->
+                  val buffer = ByteArray(32 * 1024)
+                  while (true) {
+                    if (otaCancelled || otaDownloadToken.get() != myToken) {
+                      throw InterruptedException("cancelled")
+                    }
+                    val read = input.read(buffer)
+                    if (read == -1) break
+                    output.write(buffer, 0, read)
+                    downloadedBytes += read
+
+                    val now = System.currentTimeMillis()
+                    val speedElapsedMs = now - sampleStartMs
+                    if (speedElapsedMs >= 450L) {
+                      val bytesDelta = (downloadedBytes - sampleStartBytes).coerceAtLeast(0L)
+                      val instantSpeed = (bytesDelta * 1000L) / speedElapsedMs.coerceAtLeast(1L)
+                      currentSpeedBps = if (currentSpeedBps > 0L) {
+                        (currentSpeedBps * 6L + instantSpeed * 4L) / 10L
+                      } else {
+                        instantSpeed
+                      }
+                      sampleStartMs = now
+                      sampleStartBytes = downloadedBytes
+                    }
+
+                    val pct = if (totalBytes > 0L) {
+                      ((downloadedBytes * 100L) / totalBytes).toInt().coerceIn(0, 99)
+                    } else {
+                      0
+                    }
+                    if (pct != lastPct || now - lastEmitMs >= 250L) {
+                      lastPct = pct
+                      lastEmitMs = now
+                      dispatchOtaEvent(JSONObject().apply {
+                        put("status", "downloading")
+                        put("progress", pct)
+                        put("downloadedBytes", downloadedBytes)
+                        put("totalBytes", totalBytes)
+                        put("speedBytesPerSec", currentSpeedBps)
+                      })
+                    }
+                  }
                 }
-                if (pct != lastPct || now - lastEmitMs >= 250L) {
-                  lastPct = pct
-                  lastEmitMs = now
-                  dispatchOtaEvent(JSONObject().apply {
-                    put("status", "downloading")
-                    put("progress", pct)
-                    put("downloadedBytes", downloadedBytes)
-                    put("totalBytes", totalBytes)
-                    put("speedBytesPerSec", currentSpeedBps)
-                  })
-                }
+              }
+              lastError = null
+              break
+            } catch (interrupted: InterruptedException) {
+              throw interrupted
+            } catch (sec: SecurityException) {
+              throw sec
+            } catch (e: Exception) {
+              lastError = e
+              try { myConn?.disconnect() } catch (_: Exception) {}
+              if (attempt == 3 || otaCancelled || otaDownloadToken.get() != myToken) {
+                throw e
+              }
+              try {
+                Thread.sleep(1500L * attempt)
+              } catch (_: InterruptedException) {
+                throw InterruptedException("cancelled")
               }
             }
           }
+          if (lastError != null) throw lastError
 
           if (otaCancelled || otaDownloadToken.get() != myToken) {
             try { partFile.delete() } catch (_: Exception) {}
@@ -1302,40 +1456,9 @@ class MainActivity : TauriActivity() {
             return@Thread
           }
 
-          if (totalBytes > 0L && downloadedBytes != totalBytes) {
-            throw IllegalStateException("Incomplete update download ($downloadedBytes / $totalBytes bytes)")
-          }
-          if (!partFile.exists() || partFile.length() < 1_000_000L) {
-            throw IllegalStateException("Downloaded APK appears incomplete (${partFile.length()} bytes)")
-          }
-
-          // Verify ZIP/APK magic bytes PK\x03\x04
-          val header = ByteArray(4)
-          val headerRead = partFile.inputStream().use { it.read(header) }
-          val validZip = headerRead == 4 &&
-            header[0] == 0x50.toByte() &&
-            header[1] == 0x4B.toByte() &&
-            header[2] == 0x03.toByte() &&
-            header[3] == 0x04.toByte()
-          if (!validZip) {
-            throw IllegalStateException("Downloaded file is not a valid APK package")
-          }
-
-          val pkgInfo = try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-              activity.packageManager.getPackageArchiveInfo(
-                partFile.absolutePath,
-                android.content.pm.PackageManager.PackageInfoFlags.of(0)
-              )
-            } else {
-              @Suppress("DEPRECATION")
-              activity.packageManager.getPackageArchiveInfo(partFile.absolutePath, 0)
-            }
-          } catch (_: Exception) {
-            null
-          }
-          if (pkgInfo == null || pkgInfo.packageName != activity.packageName) {
-            throw IllegalStateException("Downloaded file does not match ${activity.packageName}")
+          val validationErr = validateOtaApkFile(partFile, expectedTotalBytes)
+          if (validationErr != null) {
+            throw IllegalStateException(validationErr)
           }
 
           if (apkFile.exists()) apkFile.delete()
@@ -1348,7 +1471,7 @@ class MainActivity : TauriActivity() {
             put("status", "downloaded")
             put("progress", 100)
             put("downloadedBytes", apkFile.length())
-            put("totalBytes", if (totalBytes > 0L) totalBytes else apkFile.length())
+            put("totalBytes", if (expectedTotalBytes > 0L) expectedTotalBytes else apkFile.length())
             put("speedBytesPerSec", 0L)
             put("filePath", apkFile.absolutePath)
           })
@@ -1374,6 +1497,9 @@ class MainActivity : TauriActivity() {
           if (otaActiveConnection === myConn) {
             otaActiveConnection = null
           }
+          if (activity.activeDownloadCount <= 0 && !AuraDownloadService.hasActiveDiskDownloads(activity)) {
+            activity.releaseWakeLock()
+          }
         }
       }.apply {
         name = "AuraOtaDownloader"
@@ -1389,6 +1515,11 @@ class MainActivity : TauriActivity() {
         val apkFile = File(filePath).canonicalFile
         if (!apkFile.path.startsWith(updatesDir.path + File.separator) || !apkFile.exists() || !apkFile.isFile) {
           return "ERROR:Downloaded update file not found"
+        }
+        val err = validateOtaApkFile(apkFile, 0L)
+        if (err != null) {
+          try { apkFile.delete() } catch (_: Exception) {}
+          return "ERROR:$err"
         }
         if (!canInstallPackages()) {
           return "NEED_PERMISSION"

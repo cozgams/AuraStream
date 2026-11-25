@@ -312,7 +312,7 @@ fn version_in(text: &str) -> String {
             }
             j += 1;
         }
-        if dots == 2 {
+        if dots == 2 && j > start && chars[j - 1].is_ascii_digit() {
             return chars[start..j].iter().collect();
         }
         i = j.max(i + 1);
@@ -325,6 +325,73 @@ fn version_in(text: &str) -> String {
 pub async fn line_health() -> Result<Value, String> {
     Ok(crate::lines::health().await)
 }
+
+fn parse_release_payload(v: &Value, current: &str) -> Option<(Value, bool)> {
+    if v.get("draft").and_then(Value::as_bool) == Some(true)
+        || v.get("prerelease").and_then(Value::as_bool) == Some(true)
+    {
+        return None;
+    }
+    let tag = v
+        .get("tag_name")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    if tag.is_empty() {
+        return None;
+    }
+    let html = v
+        .get("html_url")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("https://github.com/{REPO}/releases"));
+    let notes = v.get("body").and_then(|x| x.as_str()).unwrap_or("");
+    let latest = {
+        let found = version_in(&tag);
+        if found.is_empty() {
+            tag.trim_start_matches(['v', 'V']).to_string()
+        } else {
+            found
+        }
+    };
+    let raw_assets = v.get("assets").and_then(Value::as_array).cloned().unwrap_or_default();
+    let matching_assets: Vec<(String, String, Option<u64>)> = raw_assets
+        .iter()
+        .filter_map(|a| {
+            let name = a.get("name").and_then(Value::as_str)?;
+            let url = a.get("browser_download_url").and_then(Value::as_str)?;
+            let size = a.get("size").and_then(Value::as_u64);
+            Some((name.to_string(), url.to_string(), size))
+        })
+        .filter(|(n, _, _)| asset_rank(n) > 0)
+        .collect();
+    let has_assets = !matching_assets.is_empty();
+    let asset = matching_assets
+        .iter()
+        .max_by_key(|(n, _, _)| asset_rank(n))
+        .cloned();
+    let resolved_asset = asset
+        .map(|(name, url, size)| json!({ "name": name, "url": url, "size": size }));
+    let all_assets: Vec<Value> = matching_assets
+        .into_iter()
+        .map(|(name, url, size)| json!({ "name": name, "url": url, "size": size }))
+        .collect();
+    let payload = json!({
+        "current": current,
+        "latest": latest,
+        "tag": tag,
+        "arch": std::env::consts::ARCH,
+        "has_update": !latest.is_empty() && has_assets && is_newer(&latest, current),
+        "asset": resolved_asset,
+        "assets": all_assets,
+        "url": html,
+        "name": v.get("name").and_then(|x| x.as_str()).unwrap_or(""),
+        "published_at": v.get("published_at").and_then(|x| x.as_str()).unwrap_or(""),
+        "notes": notes.chars().take(1600).collect::<String>(),
+    });
+    Some((payload, has_assets))
+}
+
 /// Compare GitHub Release tag with current version.
 #[tauri::command]
 pub async fn check_update() -> Result<Value, String> {
@@ -344,61 +411,36 @@ pub async fn check_update() -> Result<Value, String> {
         let status = resp.status();
         if status.is_success() {
             if let Ok(v) = resp.json::<Value>().await {
-                let tag = v
-                    .get("tag_name")
-                    .and_then(|x| x.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let html = v
-                    .get("html_url")
-                    .and_then(|x| x.as_str())
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| format!("https://github.com/{REPO}/releases"));
-                let notes = v.get("body").and_then(|x| x.as_str()).unwrap_or("");
-                let latest = {
-                    let found = version_in(&tag);
-                    if found.is_empty() {
-                        tag.trim_start_matches(['v', 'V']).to_string()
-                    } else {
-                        found
+                if let Some((payload, true)) = parse_release_payload(&v, &current) {
+                    return Ok(payload);
+                }
+                // Latest release may have no installable package assets uploaded yet;
+                // inspect recent releases for the newest release that has downloadable assets.
+                let list_url = format!("https://api.github.com/repos/{REPO}/releases?per_page=8");
+                if let Ok(list_resp) = crate::net::get_with_ua(
+                    &list_url,
+                    timeout,
+                    Some("application/vnd.github+json"),
+                    Some(&ua),
+                )
+                .await
+                {
+                    if list_resp.status().is_success() {
+                        if let Ok(Value::Array(items)) = list_resp.json::<Value>().await {
+                            for rel in items {
+                                if let Some((payload, true)) = parse_release_payload(&rel, &current) {
+                                    return Ok(payload);
+                                }
+                            }
+                        }
                     }
-                };
-                let raw_assets = v.get("assets").and_then(Value::as_array).cloned().unwrap_or_default();
-                let matching_assets: Vec<(String, String, Option<u64>)> = raw_assets
-                    .iter()
-                    .filter_map(|a| {
-                        let name = a.get("name").and_then(Value::as_str)?;
-                        let url = a.get("browser_download_url").and_then(Value::as_str)?;
-                        let size = a.get("size").and_then(Value::as_u64);
-                        Some((name.to_string(), url.to_string(), size))
-                    })
-                    .filter(|(n, _, _)| asset_rank(n) > 0)
-                    .collect();
-                let asset = matching_assets
-                    .iter()
-                    .max_by_key(|(n, _, _)| asset_rank(n))
-                    .cloned();
-                let resolved_asset = asset
-                    .map(|(name, url, size)| json!({ "name": name, "url": url, "size": size }))
-                    .or_else(|| fallback_android_asset(&latest, &tag));
-                let all_assets: Vec<Value> = matching_assets
-                    .into_iter()
-                    .map(|(name, url, size)| json!({ "name": name, "url": url, "size": size }))
-                    .collect();
-                return Ok(json!({
-                    "current": current,
-                    "latest": latest,
-                    "tag": tag,
-                    "arch": std::env::consts::ARCH,
-                    "has_update": !latest.is_empty() && is_newer(&latest, &current),
-                    "asset": resolved_asset,
-                    "assets": all_assets,
-                    "url": html,
-                    "name": v.get("name").and_then(|x| x.as_str()).unwrap_or(""),
-                    "published_at": v.get("published_at").and_then(|x| x.as_str()).unwrap_or(""),
-                    "notes": notes.chars().take(800).collect::<String>(),
-                }));
+                }
+                if let Some((payload, _)) = parse_release_payload(&v, &current) {
+                    return Ok(payload);
+                }
             }
+        } else if status.as_u16() == 404 {
+            return Err("Releases unreachable (HTTP 404 — repository may be private or have no published releases)".into());
         }
     }
 
@@ -1330,9 +1372,22 @@ mod tests {
         assert_eq!(version_in("hgfix-1.2.1-r5"), "1.2.1");
         assert_eq!(version_in("v1.2.0"), "1.2.0");
         assert_eq!(version_in("AuraStream 2.1.0+build.1"), "2.1.0");
+        assert_eq!(version_in("v1.2."), "");
         assert_eq!(version_in("release-notes"), "");
         assert!(is_newer(&version_in("hgfix-1.2.2-r6"), "1.2.1+hg.1"));
         assert!(is_newer(&version_in("hgfix-1.10.0-r9"), "1.9.9+hg.1"));
         assert!(!is_newer(&version_in("hgfix-1.2.1-r5"), "1.2.1+hg.1"));
+    }
+
+    #[test]
+    fn release_payload_requires_installable_assets_for_update() {
+        let rel_no_assets = json!({
+            "tag_name": "v99.0.0",
+            "html_url": "https://github.com/cozgams/AuraStream/releases/tag/v99.0.0",
+            "assets": []
+        });
+        let (payload, has_assets) = super::parse_release_payload(&rel_no_assets, "0.1.56").unwrap();
+        assert!(!has_assets);
+        assert_eq!(payload["has_update"], false);
     }
 }

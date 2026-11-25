@@ -534,14 +534,25 @@ pub async fn get_stream(
     Err("Too many redirects".into())
 }
 
-/// Execute HTTP GET request with DNS validation, proxy routing, and custom User-Agent.
+/// Execute HTTP GET request with DNS validation, proxy routing, custom User-Agent,
+/// and automatic public DoH fallback if system DNS or connect fails.
 pub async fn get_with_ua(
     raw: &str,
     timeout: Duration,
     accept: Option<&str>,
     user_agent: Option<&str>,
 ) -> Result<reqwest::Response, String> {
-    get_with_dns_ua(raw, timeout, accept, None, user_agent, false).await
+    match get_with_dns_ua(raw, timeout, accept, None, user_agent, false).await {
+        Ok(resp) => Ok(resp),
+        Err(first_err) => {
+            if proxy_active(&network_policy::parse_target(raw)?) {
+                return Err(first_err);
+            }
+            get_with_dns_ua(raw, timeout, accept, None, user_agent, true)
+                .await
+                .map_err(|_| first_err)
+        }
+    }
 }
 
 /// Execute a single-hop non-redirecting HTTP GET request and return status, target URL, and Location header.
@@ -550,24 +561,36 @@ pub async fn get_redirect_location(
     timeout: Duration,
     user_agent: Option<&str>,
 ) -> Result<(reqwest::StatusCode, url::Url, Option<String>), String> {
-    tokio::time::timeout(timeout, async {
-        let initial = network_policy::parse_target(raw)?;
-        let (target, http) = client_for(initial.as_str()).await?;
-        let mut request = http.get(target.clone()).timeout(timeout);
-        if let Some(ua) = user_agent {
-            request = request.header("User-Agent", ua);
+    let probe = |public_dns: bool| async move {
+        tokio::time::timeout(timeout, async {
+            let initial = network_policy::parse_target(raw)?;
+            let (target, http) = client_for_dns(initial.as_str(), public_dns).await?;
+            let mut request = http.get(target.clone()).timeout(timeout);
+            if let Some(ua) = user_agent {
+                request = request.header("User-Agent", ua);
+            }
+            let response = request.send().await.map_err(|e| err_text(&e))?;
+            let status = response.status();
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|h| h.to_str().ok())
+                .map(str::to_string);
+            Ok((status, target, location))
+        })
+        .await
+        .map_err(|_| "Request timed out".to_string())?
+    };
+
+    match probe(false).await {
+        Ok(ok) => Ok(ok),
+        Err(first_err) => {
+            if proxy_active(&network_policy::parse_target(raw)?) {
+                return Err(first_err);
+            }
+            probe(true).await.map_err(|_| first_err)
         }
-        let response = request.send().await.map_err(|e| err_text(&e))?;
-        let status = response.status();
-        let location = response
-            .headers()
-            .get(reqwest::header::LOCATION)
-            .and_then(|h| h.to_str().ok())
-            .map(str::to_string);
-        Ok((status, target, location))
-    })
-    .await
-    .map_err(|_| "Request timed out".to_string())?
+    }
 }
 
 async fn get_with_dns(

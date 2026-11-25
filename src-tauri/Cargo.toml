@@ -1,6 +1,6 @@
 [package]
 name = "hghubx"
-version = "0.1.56"
+version = "0.1.57"
 description = "AuraStream client - Created by AAA"
 authors = ["AAA"]
 edition = "2021"

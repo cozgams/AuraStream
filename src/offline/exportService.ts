@@ -61,6 +61,7 @@ export interface NativeExportBridge {
   getLastExportedUri?(): string;
   openInGallery?(pathOrUri?: string): boolean;
   getDeviceAbi?(): string;
+  getCachedOtaApkInfo?(fileName: string, expectedSize: number): string;
   canInstallPackages?(): boolean;
   openInstallPermissionSettings?(): boolean;
   startOtaDownload?(url: string, fileName: string): boolean;

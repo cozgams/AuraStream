@@ -8,7 +8,7 @@ import { Avatar, Empty, Modal, Toggle } from "../components/ui";
 import { MediaCard } from "../components/cards";
 import ExportSheet from "../components/ExportSheet";
 import UpdateModal from "../components/UpdateModal";
-import { getAvailableUpdateInfo, setAvailableUpdateInfo, subscribeAvailableUpdate } from "../otaUpdater";
+import { getAvailableUpdateInfo, getOtaRuntimeState, setAvailableUpdateInfo, subscribeAvailableUpdate, subscribeOtaRuntimeState, type OtaRuntimeState } from "../otaUpdater";
 import { registerOverlayBack } from "../back";
 import {
   IBack,
@@ -199,8 +199,10 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo | null>(() => getAvailableUpdateInfo());
+  const [otaRuntime, setOtaRuntime] = useState<OtaRuntimeState>(() => getOtaRuntimeState());
 
   useEffect(() => subscribeAvailableUpdate(setAvailableUpdate), []);
+  useEffect(() => subscribeOtaRuntimeState(setOtaRuntime), []);
 
   const handleCheckUpdate = async () => {
     if (availableUpdate?.has_update && typeof navigator !== "undefined" && navigator.onLine === false) {
@@ -1518,7 +1520,13 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
             <div className="flex flex-col items-center justify-center gap-1.5 pt-1 pb-1">
               <button
                 type="button"
-                onClick={handleCheckUpdate}
+                onClick={() => {
+                  if (otaRuntime.stage === "downloading" && availableUpdate?.has_update) {
+                    setUpdateInfo(availableUpdate);
+                    return;
+                  }
+                  void handleCheckUpdate();
+                }}
                 disabled={checkingUpdate}
                 className={`px-3 py-1 rounded-full text-[10.5px] font-bold pressable disabled:opacity-50 transition-colors ${
                   availableUpdate?.has_update
@@ -1528,6 +1536,8 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
               >
                 {checkingUpdate
                   ? "Checking for Updates..."
+                  : otaRuntime.stage === "downloading" && availableUpdate?.has_update
+                  ? `Downloading v${availableUpdate.latest} (${otaRuntime.progress}%)`
                   : availableUpdate?.has_update
                   ? `Update Ready: v${availableUpdate.latest}`
                   : "Check for Updates"}

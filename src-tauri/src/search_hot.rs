@@ -234,10 +234,9 @@ pub fn parse_hot_tags(html: &str) -> Result<Vec<HotTag>, String> {
                 continue;
             };
             let name = normalized_text(anchor);
-            if name.is_empty() || seen.contains(&name) {
+            if name.is_empty() || !seen.insert(slug.clone()) {
                 continue;
             }
-            seen.insert(name.clone());
             items.push(HotTag { name, slug });
             if items.len() == MAX_HOT_TAGS {
                 return Ok(items);
@@ -279,7 +278,7 @@ pub async fn fetch_hot_tags() -> Result<Value, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_items, video_id_from_href, JS_MAX_SAFE_INTEGER};
+    use super::{parse_hot_tags, parse_items, video_id_from_href, JS_MAX_SAFE_INTEGER};
 
     #[test]
     fn parses_hot_section_in_dom_order_and_decodes_entities() {

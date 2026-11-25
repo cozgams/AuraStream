@@ -437,12 +437,20 @@ export default function App() {
 
     let alive = true;
     let checked = false;
+    let lastCheckedAt = 0;
+    const CHECK_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+
     const runCheck = () => {
-      if (!alive || checked || (typeof navigator !== "undefined" && navigator.onLine === false)) return;
+      if (!alive || !isAutoUpdateCheckEnabled()) return;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+      const now = Date.now();
+      if (checked && now - lastCheckedAt < CHECK_COOLDOWN_MS) return;
+
       api.checkUpdate()
         .then((info) => {
           if (!alive) return;
           checked = true;
+          lastCheckedAt = Date.now();
           setAvailableUpdateInfo(info?.has_update ? info : null);
           if (!info?.has_update || !info.latest) return;
           if (info.latest === getSkippedUpdateVersion()) return;
@@ -452,14 +460,15 @@ export default function App() {
     };
 
     const timer = window.setTimeout(runCheck, 3500);
-    const onOnline = () => {
-      if (!checked) runCheck();
-    };
+    const onOnline = () => runCheck();
+    const onResume = () => runCheck();
     window.addEventListener("online", onOnline);
+    window.addEventListener("aurastream:app-resumed", onResume);
     return () => {
       alive = false;
       window.clearTimeout(timer);
       window.removeEventListener("online", onOnline);
+      window.removeEventListener("aurastream:app-resumed", onResume);
     };
   }, []);
 
