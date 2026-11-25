@@ -111,7 +111,7 @@ function SettingItem({
       </span>
       <div className="flex-1 min-w-0 pr-1">
         <div className="text-[13.5px] font-medium text-on leading-snug">{title}</div>
-        {description && <div className="text-[11px] text-mut leading-snug mt-0.5 truncate">{description}</div>}
+        {description && <div className="text-[11px] text-mut leading-snug mt-0.5 line-clamp-2">{description}</div>}
       </div>
       {badge && <div className="shrink-0 text-[12px] font-medium">{badge}</div>}
       {action && <div className="shrink-0 flex items-center ml-2">{action}</div>}

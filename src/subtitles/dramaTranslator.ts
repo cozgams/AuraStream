@@ -358,21 +358,7 @@ export function formatDramaTitle(rawTitle: string | undefined): string {
   }
 
   // Final cleanup: format spacing, strip outer brackets/parentheses, and punctuation
-  let cleaned = translated
-    .replace(/[《》【】\[\]]/g, "")
-    .replace(/^[（(]+|[）)]+$/g, "")
-    .replace(/\s*[（(]\s*/g, " (")
-    .replace(/\s*[）)]\s*/g, ") ")
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/[！!]+/g, "!")
-    .replace(/[？?]+/g, "?")
-    .replace(/\s*[:：]+\s*/g, ": ")
-    .replace(/\s*[,，]+\s*/g, ", ")
-    .replace(/\s*[;；]+\s*/g, "; ")
-    .replace(/\s+/g, " ")
-    .replace(/^[:,\s\-#()（）]+|[:,\s\-#()（）]+$/g, "")
-    .trim();
+  let cleaned = cleanTranslatedPunctuation(translated, true);
 
   const SINGLE_WORD_EXPANSIONS: Record<string, string> = {
     "blg": "BLG: Rise of Champions",
@@ -455,10 +441,38 @@ export function formatDramaAuthor(rawAuthor: string | undefined): string {
   return result || "AAA";
 }
 
+function cleanTranslatedPunctuation(text: string, stripOuter = false): string {
+  let cleaned = text
+    .replace(/[《》【】\[\]]/g, "")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[！!]+/g, "!")
+    .replace(/[？?]+/g, "?")
+    .replace(/\s*[、，,]+\s*/g, ", ")
+    .replace(/\s*[。]+\s*/g, ". ")
+    .replace(/\s*[:：]+\s*/g, ": ")
+    .replace(/\s*[;；]+\s*/g, "; ")
+    .replace(/(?:,\s*){2,}/g, ", ")
+    .replace(/(?:\.\s*){2,}/g, ". ")
+    .replace(/\s+/g, " ");
+
+  if (stripOuter) {
+    cleaned = cleaned
+      .replace(/^[（(]+|[）)]+$/g, "")
+      .replace(/\s*[（(]\s*/g, " (")
+      .replace(/\s*[）)]\s*/g, ") ")
+      .replace(/\s+/g, " ")
+      .replace(/^[:,\s\-#()（）]+|[:,\s\-#()（）]+$/g, "");
+  } else {
+    cleaned = cleaned.replace(/^[:,;\s]+|[:,;\s]+$/g, "");
+  }
+  return cleaned.trim();
+}
+
 export function formatDramaDesc(rawDesc: string | undefined): string {
   if (!rawDesc) return "";
   const desc = rawDesc.trim();
-  if (!/[\u4e00-\u9fff]/.test(desc)) return desc;
+  if (!/[\u4e00-\u9fff]/.test(desc)) return cleanTranslatedPunctuation(desc);
 
   let translated = desc;
   for (const [pattern, replacement] of KEYWORD_MAP) {
@@ -469,24 +483,14 @@ export function formatDramaDesc(rawDesc: string | undefined): string {
       CHAR_MAP[char] ? ` ${CHAR_MAP[char]} ` : " "
     );
   }
-  return translated
-    .replace(/[《》【】\[\]]/g, "")
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/[！!]+/g, "!")
-    .replace(/[？?]+/g, "?")
-    .replace(/\s*[:：]+\s*/g, ": ")
-    .replace(/\s*[,，]+\s*/g, ", ")
-    .replace(/\s*[;；]+\s*/g, "; ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return cleanTranslatedPunctuation(translated);
 }
 
 export function formatCommentText(rawText: string | undefined): string {
   if (!rawText) return "";
   const text = rawText.trim();
   if (COMMON_COMMENTS[text]) return COMMON_COMMENTS[text];
-  if (!/[\u4e00-\u9fff]/.test(text)) return text;
+  if (!/[\u4e00-\u9fff]/.test(text)) return cleanTranslatedPunctuation(text) || "Great episode!";
 
   let translated = text;
   for (const [pattern, replacement] of KEYWORD_MAP) {
@@ -497,23 +501,13 @@ export function formatCommentText(rawText: string | undefined): string {
       CHAR_MAP[char] ? ` ${CHAR_MAP[char]} ` : " "
     );
   }
-  return translated
-    .replace(/[《》【】\[\]]/g, "")
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/[！!]+/g, "!")
-    .replace(/[？?]+/g, "?")
-    .replace(/\s*[:：]+\s*/g, ": ")
-    .replace(/\s*[,，]+\s*/g, ", ")
-    .replace(/\s*[;；]+\s*/g, "; ")
-    .replace(/\s+/g, " ")
-    .trim() || "Great episode!";
+  return cleanTranslatedPunctuation(translated) || "Great episode!";
 }
 
 function formatSingleSubtitleLine(line: string): string {
   const text = line.trim();
   if (!text) return "";
-  if (!/[\u4e00-\u9fff]/.test(text)) return text.replace(/\s+/g, " ").trim();
+  if (!/[\u4e00-\u9fff]/.test(text)) return cleanTranslatedPunctuation(text);
 
   let translated = text;
   for (const [pattern, replacement] of KEYWORD_MAP) {
@@ -524,17 +518,7 @@ function formatSingleSubtitleLine(line: string): string {
       CHAR_MAP[char] ? ` ${CHAR_MAP[char]} ` : " "
     );
   }
-  return translated
-    .replace(/[《》【】\[\]]/g, "")
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/[！!]+/g, "!")
-    .replace(/[？?]+/g, "?")
-    .replace(/\s*[:：]+\s*/g, ": ")
-    .replace(/\s*[,，]+\s*/g, ", ")
-    .replace(/\s*[;；]+\s*/g, "; ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return cleanTranslatedPunctuation(translated);
 }
 
 export function formatSubtitleText(rawText: string | undefined): string {

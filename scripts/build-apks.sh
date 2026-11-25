@@ -20,6 +20,14 @@ if [ -z "$KEY_ALIAS" ] || [ -z "$KS_PASS" ]; then
 fi
 
 echo "=== Building split APKs for v$VERSION ==="
+# Gradle incremental JNI tasks track symlink inodes rather than target .so mtimes;
+# clear native-lib intermediates so fresh Cargo/Vite assets are always packaged.
+rm -rf \
+  src-tauri/gen/android/app/build/intermediates/merged_jni_libs \
+  src-tauri/gen/android/app/build/intermediates/merged_native_libs \
+  src-tauri/gen/android/app/build/intermediates/stripped_native_libs \
+  src-tauri/gen/android/app/build/outputs/apk
+
 pnpm tauri android build --apk --target aarch64 armv7 x86_64 --split-per-abi
 
 APK_BASE="/data/home/Project/A/HGhubX/src-tauri/gen/android/app/build/outputs/apk"
@@ -34,6 +42,10 @@ for abi in arm64 arm x86_64; do
   printf '%s\n' "$KS_PASS" | apksigner sign --ks "$KEYSTORE" --ks-key-alias "$KEY_ALIAS" --ks-pass stdin "$out_apk"
   rm -f "${out_apk}.idsig"
   apksigner verify "$out_apk"
+  if [ "$(unzip -p "$out_apk" "lib/*/libhghubx_lib.so" | grep -acF "$VERSION")" -eq 0 ]; then
+    echo "Error: stale native library packaged in $out_apk (missing $VERSION)" >&2
+    exit 1
+  fi
 done
 
 echo "=== Successfully built and signed all APKs for v$VERSION ==="

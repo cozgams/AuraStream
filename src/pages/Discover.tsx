@@ -63,12 +63,12 @@ export function TopicsPage({ onBack, wide }: { onBack: () => void; wide: boolean
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
       <div className="shrink-0 bg-s1" style={{ paddingTop: "var(--sat, 0px)" }}>
-        <div className="px-3 pt-2 pb-3 flex items-center gap-2.5">
-          <Button aria-label="Back" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={20} /></Button>
-          <span className="text-[17px] font-bold text-on">{t("cat.topics_title")}</span>
-          <span className="text-[12px] text-mut">{items.length} {t("cat.topics").toLowerCase()}</span>
-          <Button onClick={() => setSearching(true)} aria-label="Search dramas" className="ml-auto w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><ISearch size={19} /></Button>
-          <Button aria-label="Refresh" onClick={load} className="w-9 h-9 rounded-full flex items-center justify-center text-mut hover:bg-s3 pressable"><IRefresh size={16} /></Button>
+        <div className="px-3 pt-2 pb-3 flex items-center gap-2">
+          <Button aria-label="Back" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable shrink-0"><IBack size={20} /></Button>
+          <span className="text-[17px] font-bold text-on truncate">{t("cat.topics_title")}</span>
+          <span className="text-[12px] text-mut whitespace-nowrap shrink-0">{items.length} {t("cat.topics").toLowerCase()}</span>
+          <Button onClick={() => setSearching(true)} aria-label="Search dramas" className="ml-auto w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable shrink-0"><ISearch size={19} /></Button>
+          <Button aria-label="Refresh" onClick={load} className="w-9 h-9 rounded-full flex items-center justify-center text-mut hover:bg-s3 pressable shrink-0"><IRefresh size={16} /></Button>
         </div>
       </div>
 
@@ -79,11 +79,11 @@ export function TopicsPage({ onBack, wide }: { onBack: () => void; wide: boolean
           <Empty icon={<TopicIcon size={26} />} title="Failed to load topics" sub={err} action="Retry" onAction={load} />
         ) : items.length ? (
           <div className="grid grid-cols-2 gap-3">
-            {items.map((t) => (
+            {items.map((t, index) => (
               <Button key={t.id} onClick={() => push({ kind: "topic", slug: t.slug, name: formatDramaTitle(t.title) })}
                 className="ios-topic-card text-left overflow-hidden bg-s1 elev-1 pressable a-rise">
                 <div className="relative w-full" style={{ paddingTop: "56%" }}>
-                  <Img src={t.cover} />
+                  <Img src={t.cover} eager={index < 6} />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
                   <span className="absolute bottom-2 left-2 px-2 py-0.5 rounded-full bg-black/55 backdrop-blur-sm text-[12px] font-semibold text-white/90">
                     {t.video_count ?? 0} titles

@@ -68,7 +68,7 @@ export function RankRow({ item, onOpen, metricMax }: {
   const tagsStr = item.tags?.slice(0, 2).map(formatDramaTag).join(" · ") || "Trending · Drama";
   return <Button className="ios-rank-row" onClick={onOpen}>
     <span className={`ios-rank-number ${item.rank < 4 ? "is-top" : ""}`}>{String(item.rank).padStart(2, "0")}</span>
-    <span className="ios-rank-cover"><Img src={item.cover} />{typeof item.score === "number" && <ScoreBadge score={item.score} />}</span>
+    <span className="ios-rank-cover"><Img src={item.cover} eager={item.rank <= 6} />{typeof item.score === "number" && <ScoreBadge score={item.score} />}</span>
     <span className="ios-rank-copy"><strong>{formatDramaTitle(item.title)}</strong><span>{tagsStr}</span>
       <span className="ios-rank-meter" aria-hidden="true"><span style={{ width: `${Math.max(6, item.metric_value / Math.max(1, metricMax) * 100)}%` }} /></span>
     </span>

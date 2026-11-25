@@ -2350,6 +2350,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
             style={{
               top: rotated ? 12 : "calc(var(--sat, 0px) + 6px)",
               right: rotated ? "calc(var(--sab, 0px) + 12px)" : 12,
+              background: "rgba(12, 15, 22, 0.72)",
+              border: "1px solid rgba(255, 255, 255, 0.18)",
             }}>
             <ICompress size={18} />
           </Button>
@@ -2363,7 +2365,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               className="hg-chip shrink-0 w-9 h-9 rounded-full flex items-center justify-center pressable">
               {paused ? <IPlayF size={18} /> : <IPauseF size={17} />}
             </Button>
-            <span className="shrink-0 text-[12px] font-semibold hg-ink-2 tabular-nums">{fmtTime(time)}</span>
+            <span className="shrink-0 px-2 py-0.5 rounded-full bg-black/55 border border-white/10 text-[12px] font-semibold text-white/95 tabular-nums">{fmtTime(time)}</span>
             {paused && episodes.length > 1 && (
               <span className="shrink-0 px-2 py-0.5 rounded-full bg-white/15 text-white/90 text-[11px] font-bold tracking-tight">
                 {`Ep. ${curEp} / ${episodes.length}`}
@@ -2386,7 +2388,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 <IVertSwap size={12} />{t("player.next_ep")}
               </Button>
             )}
-            <span className="shrink-0 text-[12px] hg-ink-4 tabular-nums">{fmtTime(duration)}</span>
+            <span className="shrink-0 px-2 py-0.5 rounded-full bg-black/55 border border-white/10 text-[12px] font-medium text-white/90 tabular-nums">{fmtTime(duration)}</span>
           </div>
         </>
       )}
@@ -2665,12 +2667,12 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 </div>
 
                 {/* 2b. Streaming Source & CDN Lines */}
-                <div className="p-3 rounded-2xl bg-s2/90 border border-edge/30 flex items-center justify-between shadow-2xs">
-                  <div className="flex flex-col">
-                    <div className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${(typeof navigator !== "undefined" && navigator.onLine === false) ? "bg-amber-500" : "bg-emerald-500 animate-pulse"}`} />
-                      <span className="text-[13px] font-bold text-on">Streaming Source</span>
-                      <span className="text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                <div className="p-3 rounded-2xl bg-s2/90 border border-edge/30 flex items-center justify-between gap-2 shadow-2xs">
+                  <div className="flex flex-col min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${(typeof navigator !== "undefined" && navigator.onLine === false) ? "bg-amber-500" : "bg-emerald-500 animate-pulse"}`} />
+                      <span className="text-[13px] font-bold text-on whitespace-nowrap">Streaming Source</span>
+                      <span className="text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 whitespace-nowrap shrink-0">
                         {(typeof navigator !== "undefined" && navigator.onLine === false) ? "Offline Ready" : "Multi-Line Ready"}
                       </span>
                     </div>
@@ -2684,10 +2686,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       setPanel(null);
                       setLineOpen(true);
                     }}
-                    className="px-3 py-1.5 rounded-xl bg-s1 border border-edge/30 text-[12px] font-bold text-on shadow-2xs hover:bg-s3 pressable flex items-center gap-1"
+                    className="px-3 py-1.5 rounded-xl bg-s1 border border-edge/30 text-[12px] font-bold text-on shadow-2xs hover:bg-s3 pressable flex items-center gap-1 whitespace-nowrap shrink-0"
                   >
                     <span>Switch Line</span>
-                    <IChevR size={12} className="text-mut" />
+                    <IChevR size={12} className="text-mut shrink-0" />
                   </button>
                 </div>
 

@@ -1964,10 +1964,10 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                       <FolderDownloadIcon size={38} className="shrink-0 drop-shadow-sm" />
                       <div>
                         <div className="text-[11px] font-semibold text-[#64748b] dark:text-neutral-400">Device Storage</div>
-                        <div className="text-[15px] font-black text-[#0f172a] dark:text-neutral-100 tracking-tight">
-                          {formatBytes(totalDownloadsBytes)} AuraStream
+                        <div className="text-[15px] font-black text-[#0f172a] dark:text-neutral-100 tracking-tight flex flex-wrap items-baseline gap-x-1.5">
+                          <span className="whitespace-nowrap">{formatBytes(totalDownloadsBytes)} AuraStream</span>
                           {storageStats?.freeBytes != null && (
-                            <span className="text-[12px] font-medium text-emerald-600 dark:text-emerald-400 ml-1.5">
+                            <span className="text-[12px] font-medium text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
                               · {formatBytes(storageStats.freeBytes)} Free
                             </span>
                           )}
@@ -2390,7 +2390,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
               </>
             ) : (
               /* Empty Downloads Screen */
-              <div className="flex flex-col items-center justify-center py-16 px-4 text-center select-none relative a-fade-in">
+              <div className="flex flex-col items-center justify-center py-8 pb-28 px-4 text-center select-none relative a-fade-in">
                 {/* Floating graphic with orbital ring and sparkles */}
                 <div className="relative mb-5 flex items-center justify-center">
                   {/* Aura blur behind */}
@@ -2452,7 +2452,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
               </>
             )}
             {/* Safe bottom spacer */}
-            <div className="h-6 shrink-0 pointer-events-none" aria-hidden="true" />
+            <div className="h-24 sm:h-8 shrink-0 pointer-events-none" aria-hidden="true" />
           </div>
         ) : view === "seriesDetail" && selectedSeriesGroup ? (
           /* =====================================================================

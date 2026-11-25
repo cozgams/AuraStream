@@ -257,7 +257,7 @@ export default function DownloadChoiceSheet({
                 handleSingleAction();
               }
             }}
-            className={`w-full p-4 rounded-[20px] border text-left pressable transition-all flex items-center justify-between gap-3.5 shadow-xs cursor-pointer active:scale-[0.985] ${
+            className={`w-full p-3.5 sm:p-4 rounded-[20px] border text-left pressable transition-all flex flex-col gap-3 shadow-xs cursor-pointer active:scale-[0.985] ${
               isTargetDownloaded
                 ? "bg-emerald-500/10 border-emerald-500/40 text-on hover:bg-emerald-500/15"
                 : isTargetDownloading
@@ -269,9 +269,9 @@ export default function DownloadChoiceSheet({
                 : "bg-white dark:bg-neutral-800/90 border-amber-500/35 hover:border-amber-500/60 hover:bg-amber-500/5 text-on"
             }`}
           >
-            <div className="flex items-center gap-3.5 min-w-0 flex-1">
+            <div className="flex items-center gap-3 min-w-0">
               <div
-                className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-xs ${
+                className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 shadow-xs ${
                   isTargetDownloaded
                     ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
                     : isTargetDownloading
@@ -284,20 +284,20 @@ export default function DownloadChoiceSheet({
                 }`}
               >
                 {isTargetDownloaded ? (
-                  <ICheck size={24} strokeWidth={2.8} />
+                  <ICheck size={22} strokeWidth={2.8} />
                 ) : isTargetDownloading ? (
-                  <Loader className="w-6 h-6 spinner text-amber-600" />
+                  <Loader className="w-5 h-5 spinner text-amber-600" />
                 ) : isTargetError ? (
-                  <IAlertTriangle size={22} />
+                  <IAlertTriangle size={20} />
                 ) : isTargetPaused ? (
-                  <IPauseF size={20} />
+                  <IPauseF size={18} />
                 ) : (
-                  <IDownload size={22} />
+                  <IDownload size={20} />
                 )}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="text-[15px] font-bold text-on flex items-center gap-2">
-                  <span>
+                <div className="text-[15px] font-bold text-on flex items-center gap-2 flex-wrap">
+                  <span className="truncate">
                     {isTargetDownloaded
                       ? `Episode ${targetEpisode} Saved`
                       : isTargetQueued
@@ -311,44 +311,46 @@ export default function DownloadChoiceSheet({
                       : `Download Episode ${targetEpisode}`}
                   </span>
                   {isTargetDownloaded ? (
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold uppercase tracking-wide shrink-0">
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold uppercase tracking-wide shrink-0 whitespace-nowrap">
                       Offline
                     </span>
                   ) : (
                     targetEpisode === currentEpisode && (
-                      <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-bold uppercase tracking-wide shrink-0">
+                      <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-bold uppercase tracking-wide shrink-0 whitespace-nowrap">
                         Current
                       </span>
                     )
                   )}
                 </div>
-                <div className="text-[12px] text-mut mt-0.5 leading-snug">
-                  {isTargetDownloaded
-                    ? "Saved permanently · Tap to export MP4 to gallery"
-                    : isTargetQueued
-                    ? "Waiting in background queue · Tap pause or cancel"
-                    : isTargetDownloading
-                    ? targetActiveProg && targetActiveProg.downloadedBytes > 0
-                      ? `Downloading · ${targetProgress}% (${formatBytes(targetActiveProg.downloadedBytes)}${
-                          targetActiveProg.totalBytes > 0 ? ` / ${formatBytes(targetActiveProg.totalBytes)}` : ""
-                        } · ${targetActiveProg.speedFormatted}${
-                          targetActiveProg.etaFormatted && targetActiveProg.etaFormatted !== "--"
-                            ? ` · ${targetActiveProg.etaFormatted} left`
-                            : ""
-                        })`
-                      : "Connecting to stream..."
-                    : isTargetPaused
-                    ? `Paused · ${targetProgress}%${
-                        targetActiveProg?.downloadedBytes ? ` (${formatBytes(targetActiveProg.downloadedBytes)})` : ""
-                      } · Tap to resume`
-                    : isTargetError
-                    ? targetActiveProg?.error || "Download failed · Tap to retry"
-                    : `Ultra-fast single episode download (~${estEpMb} MB)`}
-                </div>
               </div>
             </div>
 
-            <div className="shrink-0 flex items-center gap-1.5 ml-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1 text-[12px] text-mut leading-snug">
+                {isTargetDownloaded
+                  ? "Saved permanently · Tap to export MP4 to gallery"
+                  : isTargetQueued
+                  ? "Waiting in background queue · Tap pause or cancel"
+                  : isTargetDownloading
+                  ? targetActiveProg && targetActiveProg.downloadedBytes > 0
+                    ? `Downloading · ${targetProgress}% (${formatBytes(targetActiveProg.downloadedBytes)}${
+                        targetActiveProg.totalBytes > 0 ? ` / ${formatBytes(targetActiveProg.totalBytes)}` : ""
+                      } · ${targetActiveProg.speedFormatted}${
+                        targetActiveProg.etaFormatted && targetActiveProg.etaFormatted !== "--"
+                          ? ` · ${targetActiveProg.etaFormatted} left`
+                          : ""
+                      })`
+                    : "Connecting to stream..."
+                  : isTargetPaused
+                  ? `Paused · ${targetProgress}%${
+                      targetActiveProg?.downloadedBytes ? ` (${formatBytes(targetActiveProg.downloadedBytes)})` : ""
+                    } · Tap to resume`
+                  : isTargetError
+                  ? targetActiveProg?.error || "Download failed · Tap to retry"
+                  : `Ultra-fast single episode download (~${estEpMb} MB)`}
+              </div>
+
+              <div className="shrink-0 flex items-center gap-1.5">
               {isTargetDownloaded ? (
                 <div className="px-3.5 py-2 rounded-xl bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[12.5px] font-bold flex items-center gap-1.5 shadow-xs whitespace-nowrap">
                   <IExport size={14} /> Export
@@ -415,6 +417,7 @@ export default function DownloadChoiceSheet({
                   <IDownload size={14} /> Download
                 </div>
               )}
+              </div>
             </div>
           </div>
 
@@ -433,28 +436,31 @@ export default function DownloadChoiceSheet({
                 onOpenBatchDownload();
               }
             }}
-            className="w-full p-4 rounded-[20px] border border-border/90 bg-white dark:bg-neutral-800/90 hover:bg-s2 text-on text-left pressable transition-all flex items-center justify-between gap-3.5 shadow-xs cursor-pointer active:scale-[0.985]"
+            className="w-full p-3.5 sm:p-4 rounded-[20px] border border-border/90 bg-white dark:bg-neutral-800/90 hover:bg-s2 text-on text-left pressable transition-all flex flex-col gap-3 shadow-xs cursor-pointer active:scale-[0.985]"
           >
-            <div className="flex items-center gap-3.5 min-w-0 flex-1">
-              <div className="w-12 h-12 rounded-2xl bg-s3 text-on flex items-center justify-center shrink-0 border border-border">
-                <IDownload size={22} className="text-on" />
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-11 h-11 rounded-2xl bg-s3 text-on flex items-center justify-center shrink-0 border border-border">
+                <IDownload size={20} className="text-on" />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="text-[15px] font-bold text-on flex items-center gap-2">
-                  <span>Download Full Season</span>
-                  <span className="px-2 py-0.5 rounded-full bg-s3 text-on/80 text-[10px] font-bold uppercase tracking-wide shrink-0">
+                <div className="text-[15px] font-bold text-on flex items-center gap-2 flex-wrap">
+                  <span className="truncate">Download Full Season</span>
+                  <span className="px-2 py-0.5 rounded-full bg-s3 text-on/80 text-[10px] font-bold uppercase tracking-wide shrink-0 whitespace-nowrap">
                     Batch
                   </span>
-                </div>
-                <div className="text-[12px] text-mut mt-0.5 leading-snug">
-                  All {totalEps} episodes (~{estimatedBatchFormatted}) · Background sequential queue
                 </div>
               </div>
             </div>
 
-            <div className="shrink-0 ml-2">
-              <div className="px-3.5 py-2 rounded-xl bg-[#1c1c1e] dark:bg-white text-white dark:text-black hover:bg-black text-[12.5px] font-bold flex items-center gap-1.5 shadow-xs whitespace-nowrap">
-                <IDownload size={13} /> All ({totalEps})
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1 text-[12px] text-mut leading-snug">
+                All {totalEps} episodes (~{estimatedBatchFormatted}) · Background sequential queue
+              </div>
+
+              <div className="shrink-0">
+                <div className="px-3.5 py-2 rounded-xl bg-[#1c1c1e] dark:bg-white text-white dark:text-black hover:bg-black text-[12.5px] font-bold flex items-center gap-1.5 shadow-xs whitespace-nowrap">
+                  <IDownload size={13} /> All ({totalEps})
+                </div>
               </div>
             </div>
           </div>

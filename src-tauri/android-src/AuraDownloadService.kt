@@ -15,6 +15,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import org.json.JSONArray
@@ -76,6 +77,7 @@ class AuraDownloadService : Service() {
 
     const val NOTIFICATION_ID = 9001
     const val COMPLETE_NOTIFICATION_ID = 9002
+    private const val MIN_NOTIFY_INTERVAL_MS = 650L
 
     const val ACTION_START = "com.aurastream.app.action.START_DOWNLOAD"
     const val ACTION_UPDATE = "com.aurastream.app.action.UPDATE_DOWNLOAD"
@@ -109,6 +111,8 @@ class AuraDownloadService : Service() {
     private var sessionCompletedCount: Int = 0
     @Volatile
     private var sessionInitialTotal: Int = 0
+    private val notifyLock = Any()
+    private var lastForegroundNotifyAtMs: Long = 0L
 
     @JvmStatic
     fun ensureSilentChannels(context: Context) {
@@ -552,11 +556,17 @@ class AuraDownloadService : Service() {
         startForeground(NOTIFICATION_ID, notification)
       }
       isInForeground = true
+      synchronized(notifyLock) {
+        lastForegroundNotifyAtMs = SystemClock.elapsedRealtime()
+      }
     } catch (e: Exception) {
       e.printStackTrace()
       try {
         startForeground(NOTIFICATION_ID, notification)
         isInForeground = true
+        synchronized(notifyLock) {
+          lastForegroundNotifyAtMs = SystemClock.elapsedRealtime()
+        }
       } catch (e2: Exception) {
         e2.printStackTrace()
       }
@@ -652,6 +662,11 @@ class AuraDownloadService : Service() {
 
   fun refreshNotification(reportedCount: Int) {
     if (!isRunning || !isInForeground) return
+    val now = SystemClock.elapsedRealtime()
+    synchronized(notifyLock) {
+      if (now - lastForegroundNotifyAtMs < MIN_NOTIFY_INTERVAL_MS) return
+      lastForegroundNotifyAtMs = now
+    }
     try {
       val notification = buildForegroundNotification("AuraStream", "Downloading...", 0, "", "", reportedCount)
       val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
