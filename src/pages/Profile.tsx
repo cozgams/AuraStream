@@ -1541,7 +1541,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
           /* =====================================================================
               2. Downloads Hub View (Image 2 & Image 3 Screen 1)
               ===================================================================== */
-          <div className="flex flex-col gap-3.5 a-rise min-w-0 w-full overflow-x-hidden pb-[calc(var(--sab,0px)+96px)]">
+          <div className="flex flex-col gap-3.5 a-rise min-w-0 w-full overflow-x-hidden pb-[calc(var(--sab,0px)+140px)]">
             {/* Search Input Bar (when search is toggled in top bar) */}
             {downloadSearchOpen && (
               <div className="relative flex items-center bg-white/95 dark:bg-neutral-900/95 border border-blue-200/90 dark:border-blue-500/30 rounded-full px-3.5 py-2 shadow-xs a-fade-in">

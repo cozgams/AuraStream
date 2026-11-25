@@ -250,8 +250,15 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
       observeHls(hls, trace);
       hls.loadSource(url);
       hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_LOADED, () => {
+        if (!activity.isActive()) hls.stopLoad();
+      });
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        if (!hls.loadingEnabled && activity.isActive()) hls.startLoad(resume?.time ?? -1);
+        if (!activity.isActive()) {
+          hls.stopLoad();
+          return;
+        }
+        if (!hls.loadingEnabled) hls.startLoad(resume?.time ?? -1);
         const shouldPlay = autoPlayRef.current && (!resume || resume.playing !== false);
         if (shouldPlay) activity.play("manifest_autoplay", true);
       });

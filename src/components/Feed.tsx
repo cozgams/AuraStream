@@ -252,9 +252,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     mode: "idle" | "hold" | "scrub" | "pan" | "brightness" | "volume";
     base: number; width: number; playing: boolean; startVal: number;
   } | null>(null);
-  /* Single/Double Tap detection: Smooth debounced single-tap vs precise double-tap seek */
+  /* Single/Double Tap detection: Instant single-tap response with quick double-tap restore & seek */
   const lastTapRef = useRef<{ t: number; x: number; y: number }>({ t: 0, x: 0, y: 0 });
-  const singleTapTimerRef = useRef<number | null>(null);
   const hasSkippedIntroRef = useRef<Record<string, boolean>>({});
   const preloadedKeysRef = useRef<Set<string>>(new Set());
   const [seekRipple, setSeekRipple] = useState<{ dir: "left" | "right" | "center"; text: string; id: number } | null>(null);
@@ -1183,10 +1182,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         Math.hypot(g.x - prevTap.x, g.y - prevTap.y) < 40;
 
       if (isQuickDoubleTap) {
-        if (singleTapTimerRef.current) {
-          window.clearTimeout(singleTapTimerRef.current);
-          singleTapTimerRef.current = null;
-        }
         lastTapRef.current = { t: 0, x: 0, y: 0 };
         flushSync(() => {
           setClean(false);
@@ -1224,18 +1219,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           triggerSeekRipple("center", wasPaused ? "Play" : "Pause");
         }
       } else {
-        if (singleTapTimerRef.current) {
-          window.clearTimeout(singleTapTimerRef.current);
-          singleTapTimerRef.current = null;
-        }
         lastTapRef.current = { t: now, x: g.x, y: g.y };
-        singleTapTimerRef.current = window.setTimeout(() => {
-          singleTapTimerRef.current = null;
-          flushSync(() => {
-            setClean((c) => !c);
-            if (!isDesktop && fs) setIdle((i) => !i);
-          });
-        }, 220);
+        flushSync(() => {
+          setClean((c) => !c);
+          if (!isDesktop && fs) setIdle((i) => !i);
+        });
       }
     }
   };
@@ -1243,10 +1231,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   useEffect(() => {
     if (!active || controlsLocked) {
       onUp(true);
-      if (singleTapTimerRef.current) {
-        window.clearTimeout(singleTapTimerRef.current);
-        singleTapTimerRef.current = null;
-      }
       lastTapRef.current = { t: 0, x: 0, y: 0 };
     }
     // Cancel pending gestures when the page is hidden or controls are locked.
@@ -1255,7 +1239,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
   useEffect(() => () => {
     if (gesture.current?.timer) window.clearTimeout(gesture.current.timer);
-    if (singleTapTimerRef.current) window.clearTimeout(singleTapTimerRef.current);
     if (hudTimerRef.current) window.clearTimeout(hudTimerRef.current);
     if (seekRippleTimer.current) window.clearTimeout(seekRippleTimer.current);
     window.clearTimeout(swipeTimer.current);

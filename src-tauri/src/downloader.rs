@@ -924,11 +924,17 @@ fn is_stale_cdn_error(err: &str) -> bool {
 fn is_transient_network_error(err: &str) -> bool {
     let lower = err.to_ascii_lowercase();
     lower.contains("dns resolution")
+        || lower.contains("fallback dns")
         || lower.contains("timed out")
         || lower.contains("timeout")
         || lower.contains("connection reset")
+        || lower.contains("connection closed")
+        || lower.contains("reset by peer")
+        || lower.contains("tls handshake")
         || lower.contains("broken pipe")
         || lower.contains("eof")
+        || lower.contains("network")
+        || lower.contains("unreachable")
         || lower.contains("error sending request")
         || lower.contains("client error (connect)")
         || lower.contains("http 429")
@@ -1483,7 +1489,7 @@ async fn download_hls_to_dir(
             let len = match seg_len {
                 Some(existing_len) => existing_len,
                 None => {
-                    let backoffs_ms = [800u64, 2000u64];
+                    let backoffs_ms = [600u64, 1500u64, 3000u64];
                     let mut attempt = 0usize;
                     let data = loop {
                         if !is_owner_active(&id, token, cancel_cl.as_ref()) || failed_cl.load(Ordering::Acquire) {

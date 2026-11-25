@@ -312,7 +312,7 @@ try {
       const sampleHeading = page.getByRole("heading", { name: "Sample User", exact: true });
       await sampleHeading.waitFor();
       await sampleHeading.click();
-      const accountModal = page.getByRole("dialog", { name: "My Local Library", exact: true });
+      const accountModal = page.getByRole("dialog", { name: "Account & Library", exact: true });
       await accountModal.waitFor();
       await accountModal.getByRole("button", { name: "Sign Out", exact: true }).click();
       await accountModal.waitFor({ state: "hidden" });

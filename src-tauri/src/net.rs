@@ -428,10 +428,37 @@ async fn client_for_dns(raw: &str, public_dns: bool) -> Result<(url::Url, Arc<re
         // Proxy route: remote proxy resolves host addresses directly.
         (Vec::new(), CLIENT_TTL)
     } else if public_dns {
-        let resolver = build_client(crate::media_dns::HOST, &crate::media_dns::BOOTSTRAP, &route)?;
-        let resolution = crate::media_dns::resolve(&resolver, host, port).await?;
-        network_policy::check_addresses_with_mode(&resolution.addresses, strict)?;
-        (resolution.addresses, CLIENT_TTL.min(resolution.ttl))
+        let mut last_err = String::from("Fallback DNS request failed");
+        let mut resolved = None;
+        for provider in crate::media_dns::providers() {
+            if let Ok(resolver) = build_client(provider.host, provider.bootstrap, &route) {
+                match crate::media_dns::resolve_with_path(&resolver, provider.host, provider.path, host, port).await {
+                    Ok(res) => {
+                        resolved = Some(res);
+                        break;
+                    }
+                    Err(e) => {
+                        last_err = e;
+                    }
+                }
+            }
+        }
+        match resolved {
+            Some(resolution) => {
+                network_policy::check_addresses_with_mode(&resolution.addresses, strict)?;
+                (resolution.addresses, CLIENT_TTL.min(resolution.ttl))
+            }
+            None => {
+                // If public DoH endpoints are unreachable, degrade gracefully to system DNS
+                // instead of failing an active media download mid-transfer.
+                let fallback = if strict {
+                    network_policy::resolve_target(&target, strict).await.map_err(|_| last_err.clone())?
+                } else {
+                    Vec::new()
+                };
+                (fallback, Duration::from_secs(15))
+            }
+        }
     } else if strict {
         (network_policy::resolve_target(&target, strict).await?, CLIENT_TTL)
     } else {
@@ -1571,7 +1598,10 @@ pub async fn fetch_bytes(url: &str) -> Result<(Option<String>, Vec<u8>), String>
                 }
             }
             if let Err(error) = &result {
-                if target.as_ref().is_some_and(|target| crate::media_dns::eligible(target, error)) {
+                if using_public_dns && error.to_ascii_lowercase().contains("fallback dns") {
+                    public_dns.store(false, Ordering::Relaxed);
+                    crate::playback_log::record("network.dns_fallback", json!({"resource": resource, "attempt": attempt, "public_dns": false, "error_kind": "doh_unavailable"}));
+                } else if target.as_ref().is_some_and(|target| crate::media_dns::eligible(target, error)) {
                     public_dns.store(!using_public_dns, Ordering::Relaxed);
                     crate::playback_log::record("network.dns_fallback", json!({"resource": resource, "attempt": attempt, "public_dns": !using_public_dns, "error_kind": crate::playback_log::error_kind(error)}));
                 }

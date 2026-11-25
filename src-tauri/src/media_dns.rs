@@ -9,6 +9,31 @@ pub(crate) const BOOTSTRAP: [SocketAddr; 2] = [
     SocketAddr::new(IpAddr::V4(Ipv4Addr::new(223, 5, 5, 5)), 443),
     SocketAddr::new(IpAddr::V4(Ipv4Addr::new(223, 6, 6, 6)), 443),
 ];
+const CLOUDFLARE_BOOTSTRAP: [SocketAddr; 2] = [
+    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 443),
+    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 0, 0, 1)), 443),
+];
+const GOOGLE_BOOTSTRAP: [SocketAddr; 2] = [
+    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 443),
+    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 4, 4)), 443),
+];
+
+pub(crate) struct DohProvider {
+    pub(crate) host: &'static str,
+    pub(crate) path: &'static str,
+    pub(crate) bootstrap: &'static [SocketAddr],
+}
+
+const PROVIDERS: [DohProvider; 3] = [
+    DohProvider { host: "cloudflare-dns.com", path: "/dns-query", bootstrap: &CLOUDFLARE_BOOTSTRAP },
+    DohProvider { host: "dns.google", path: "/resolve", bootstrap: &GOOGLE_BOOTSTRAP },
+    DohProvider { host: HOST, path: "/resolve", bootstrap: &BOOTSTRAP },
+];
+
+pub(crate) fn providers() -> &'static [DohProvider] {
+    &PROVIDERS
+}
+
 const MAX_RESPONSE_BYTES: usize = 16 * 1024;
 
 #[derive(Default)]
@@ -83,13 +108,16 @@ fn answers(value: &Value, port: u16) -> Result<Resolution, String> {
     })
 }
 
-pub(crate) async fn resolve(
+pub(crate) async fn resolve_with_path(
     http: &reqwest::Client,
+    endpoint_host: &str,
+    endpoint_path: &str,
     host: &str,
     port: u16,
 ) -> Result<Resolution, String> {
     let mut response = http
-        .get(format!("https://{HOST}/resolve"))
+        .get(format!("https://{endpoint_host}{endpoint_path}"))
+        .header(reqwest::header::ACCEPT, "application/dns-json")
         .query(&[("name", host), ("type", "A")])
         .timeout(Duration::from_secs(4))
         .send()
@@ -106,6 +134,15 @@ pub(crate) async fn resolve(
     }
     let value: Value = serde_json::from_slice(&bytes).map_err(|_| "Fallback DNS response invalid")?;
     answers(&value, port)
+}
+
+#[allow(dead_code)]
+pub(crate) async fn resolve(
+    http: &reqwest::Client,
+    host: &str,
+    port: u16,
+) -> Result<Resolution, String> {
+    resolve_with_path(http, HOST, "/resolve", host, port).await
 }
 
 #[cfg(test)]
