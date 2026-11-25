@@ -416,11 +416,13 @@ class MainActivity : TauriActivity() {
       return false
     }
 
+    @Suppress("UNUSED_PARAMETER")
     @JavascriptInterface
     fun enterPictureInPictureWithAspect(num: Int, den: Int): Boolean {
       return false
     }
 
+    @Suppress("UNUSED_PARAMETER")
     @JavascriptInterface
     fun setAutoPip(enabled: Boolean) {
       activity.autoPipEnabled = false

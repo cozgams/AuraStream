@@ -113,7 +113,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [waiting, setWaiting] = useState(false);
   const [videoStarted, setVideoStarted] = useState(false);
   const [err, setErr] = useState("");
-  const [panel, setPanel] = useState<"episodes" | "comments" | "article" | "detail" | "captions" | "more" | null>(null);
+  const [panel, setPanel] = useState<"episodes" | "comments" | "article" | "detail" | "more" | null>(null);
   const [lineOpen, setLineOpen] = useState(false);
   const [descOpen, setDescOpen] = useState(false);
   const [cancelAutoNext, setCancelAutoNext] = useState(false);
@@ -136,8 +136,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   /* Watch progress: throttled writeback to store on time update */
   const liveRef = useRef({ id: 0, ep: 1, dur: 0, t: 0 });
   const lastSaveRef = useRef(0);
-  const ccTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const ccLongPressedRef = useRef(false);
   const theater = store.theater;
   const setTheater = store.setTheater;
   const fs = store.fs;
@@ -2294,7 +2292,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           onLock={lockControls}
           onTheater={() => setTheater((v) => !v)}
           onFullscreen={toggleFull}
-          onOpenCaptions={() => setPanel("captions")}
           onNext={() => {
             if (nextEpObj) pickEp(nextEpObj.ep_num);
             else go(1);
