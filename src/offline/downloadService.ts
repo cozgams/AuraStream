@@ -114,7 +114,6 @@ let batchState: BatchProgressState = {
   currentEpisode: 0,
   failedCount: 0,
 };
-const nativeNotifThrottle = new Map<string, { pct: number; at: number }>();
 
 function getNativeBridge(): NativeExportBridge | undefined {
   if (typeof window === "undefined") return undefined;
@@ -215,22 +214,8 @@ function applyNativeDownloadSnapshot(payload: { queue?: unknown[]; completed?: u
         isHevc: item.isHevc,
         autoResume: item.autoResume,
       });
-
-      // Synchronize native notification with active download progress (throttled)
-      if (item.status === "downloading" && videoId > 0 && episode > 0) {
-        const now = Date.now();
-        const prevNotif = nativeNotifThrottle.get(item.id);
-        if (!prevNotif || progress === 100 || Math.abs(progress - prevNotif.pct) >= 2 || now - prevNotif.at >= 750) {
-          nativeNotifThrottle.set(item.id, { pct: progress, at: now });
-          const sizeText =
-            totalBytes > 0
-              ? `${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}`
-              : downloadedBytes > 0
-              ? formatBytes(downloadedBytes)
-              : "";
-          notifyNativeDownloadProgress(videoId, episode, title, progress, speedFormatted, sizeText);
-        }
-      }
+      // Native AuraDownloadService polls active_status.json directly with its own notification ID space;
+      // do not emit duplicate JS progress notifications for Rust-managed items.
     }
   }
 
@@ -432,9 +417,9 @@ export function setDownloadNotificationEnabled(enabled: boolean): void {
 }
 
 function computeNotifId(videoId: number, episode: number): number {
-  let h = ((Math.abs(videoId) % 10000) * 100 + (episode % 100)) & 0x7fffffff;
-  if (h === 9001 || h === 9002 || h === 0) {
-    h = (h + 2) & 0x7fffffff;
+  let h = (videoId * 131 + episode + 10000) & 0x7fffffff;
+  if (h < 10000 || h === 9001 || h === 9002) {
+    h = (h + 10003) & 0x7fffffff;
   }
   return h;
 }
@@ -2843,7 +2828,20 @@ export async function executeBatchDownload(
     void (async () => {
       for (let i = 0; i < unDownloaded.length; i += 3) {
         const slice = unDownloaded.slice(i, i + 3);
-        await Promise.allSettled(slice.map((ep) => getSubtitlesForEpisode(videoId, ep, title)));
+        const fetched = await Promise.allSettled(
+          slice.map(async (ep) => {
+            await getSubtitlesForEpisode(videoId, ep, title);
+            return { ep, cues: loadCachedCues(videoId, ep) };
+          })
+        );
+        for (const r of fetched) {
+          if (r.status === "fulfilled" && r.value.cues.length > 0) {
+            void invoke("native_offline_set_cues", {
+              id: `${videoId}_${r.value.ep}`,
+              cues: r.value.cues,
+            }).catch(() => {});
+          }
+        }
       }
     })();
 
@@ -3054,6 +3052,23 @@ export async function checkStorageAvailableForBatch(estimatedBytes: number): Pro
       ? undefined
       : `Low storage space: only ${formatBytes(freeBytes)} available. Batch download requires ${formatBytes(estimatedBytes)} + 150 MB buffer.`,
   };
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("aurastream:network-changed", (ev) => {
+    const detail = (ev as CustomEvent<{ cellular?: boolean; connected?: boolean }>).detail;
+    if (!detail) return;
+    const isCellular = Boolean(detail.cellular);
+    const connected = detail.connected !== false;
+    if (isNativeRustDownloaderAvailable()) {
+      void invoke("native_download_set_cellular", { cellular: isCellular }).catch(() => {});
+      if (isCellular && isWifiOnlyDownloadEnabled()) {
+        void invoke("native_download_pause_all").catch(() => {});
+      } else if (!isCellular && connected && isWifiOnlyDownloadEnabled()) {
+        void invoke("native_download_resume_all", { onlyAutoResumable: true, cellular: false }).catch(() => {});
+      }
+    }
+  });
 }
 
 /* ── Device Storage Space Estimation ────────────────────────────── */

@@ -282,6 +282,8 @@ pub fn run() {
             api::api_collect,
             api::api_follow,
             downloader::native_download_enqueue,
+            downloader::native_download_set_cellular,
+            downloader::native_offline_set_cues,
             downloader::native_download_pause,
             downloader::native_download_pause_all,
             downloader::native_download_resume,

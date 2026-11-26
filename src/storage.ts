@@ -42,9 +42,9 @@ let nativeCache: Record<string, string> | null = null;
 let nativeDirty = false;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
-function getNativeBridge(): { loadAppState?: () => string; saveAppState?: (data: string) => boolean } | null {
+function getNativeBridge(): { loadAppState?: () => string; saveAppState?: (data: string) => boolean; saveAppStateNow?: (data: string) => boolean } | null {
   if (typeof window === "undefined") return null;
-  return (window as unknown as { AuraNativeExport?: { loadAppState?: () => string; saveAppState?: (data: string) => boolean } }).AuraNativeExport ?? null;
+  return (window as unknown as { AuraNativeExport?: { loadAppState?: () => string; saveAppState?: (data: string) => boolean; saveAppStateNow?: (data: string) => boolean } }).AuraNativeExport ?? null;
 }
 
 function ensureNativeCache(): Record<string, string> | null {
@@ -77,10 +77,11 @@ export function flushNativeStateSync(): void {
   }
   if (!nativeDirty || !nativeCache) return;
   const bridge = getNativeBridge();
-  if (typeof bridge?.saveAppState !== "function") return;
+  const writer = bridge?.saveAppStateNow ?? bridge?.saveAppState;
+  if (typeof writer !== "function") return;
   nativeDirty = false;
   try {
-    const ok = bridge.saveAppState(JSON.stringify(nativeCache));
+    const ok = writer.call(bridge, JSON.stringify(nativeCache));
     if (ok === false) {
       nativeDirty = true;
     }

@@ -229,20 +229,27 @@ export default function BatchDownloadSheet({
   const estBytes = Math.round(effectiveSelected.length * avgMb * 1024 * 1024);
   const estFormatted = formatBytes(estBytes);
 
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) setSubmitting(false);
+  }, [isOpen]);
+
   const startBatch = async () => {
-    if (effectiveSelected.length === 0) return;
-    if (cellularBlocked) {
-      toast("Cellular network detected. Allow cellular or connect to Wi-Fi", "info");
-      return;
-    }
-    const storageCheck = await checkStorageAvailableForBatch(estBytes);
-    if (!storageCheck.sufficient) {
-      toast(storageCheck.reason || t("batch.low_storage_warning"), "info");
-      return;
-    }
-    const list = [...effectiveSelected].sort((a, b) => a - b);
-    const safeTitle = formatDramaTitle(title) || title || `Drama #${videoId}`;
+    if (effectiveSelected.length === 0 || submitting) return;
+    setSubmitting(true);
     try {
+      if (cellularBlocked) {
+        toast("Cellular network detected. Allow cellular or connect to Wi-Fi", "info");
+        return;
+      }
+      const storageCheck = await checkStorageAvailableForBatch(estBytes);
+      if (!storageCheck.sufficient) {
+        toast(storageCheck.reason || t("batch.low_storage_warning"), "info");
+        return;
+      }
+      const list = [...effectiveSelected].sort((a, b) => a - b);
+      const safeTitle = formatDramaTitle(title) || title || `Drama #${videoId}`;
       const res = await executeBatchDownload(videoId, safeTitle, cover, list, allowCellular, downloadQuality);
       const freshActive = new Map(getActiveDownloads().map((item) => [item.id, item]));
       setSelectedEps((prev) =>
@@ -261,12 +268,14 @@ export default function BatchDownloadSheet({
       }
     } catch (e) {
       toast((e as Error).message || "Batch download failed", "info");
+    } finally {
+      setSubmitting(false);
     }
   };
 
   return (
     <Sheet open={isOpen} onClose={onClose} label={t("batch.title")}>
-      <div className="flex flex-col max-h-[85vh] overflow-hidden bg-s1 text-on">
+      <div className="flex flex-col max-h-[85dvh] overflow-hidden bg-s1 text-on">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-edge/30 shrink-0">
           <div className="flex items-center gap-2.5">
@@ -505,7 +514,7 @@ export default function BatchDownloadSheet({
         </div>
 
         {/* Footer Summary & Action Button */}
-        <div className="px-4 pt-3 pb-[calc(var(--sab,0px)+16px)] border-t border-edge/30 flex flex-wrap items-center justify-between gap-2.5 shrink-0 bg-s1">
+        <div className="px-4 pt-3 pb-3 border-t border-edge/30 flex flex-wrap items-center justify-between gap-2.5 shrink-0 bg-s1">
           <div className="flex flex-col min-w-0 flex-1">
             <span className="text-[13px] font-bold text-on truncate">
               {effectiveSelected.length > 0
@@ -524,7 +533,7 @@ export default function BatchDownloadSheet({
           </div>
 
           <Button
-            disabled={effectiveSelected.length === 0}
+            disabled={effectiveSelected.length === 0 || submitting}
             onClick={startBatch}
             className={`px-4 sm:px-5 h-10 rounded-xl text-[13px] font-bold flex items-center justify-center gap-2 shrink-0 whitespace-nowrap pressable ${
               effectiveSelected.length > 0

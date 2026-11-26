@@ -36,8 +36,8 @@ export function useMediaSession({
   onPreviousTrack,
   onNextTrack,
 }: MediaSessionOptions): void {
-  const handlersRef = useRef({ onPlay, onPause, onSeek, onPreviousTrack, onNextTrack, time });
-  handlersRef.current = { onPlay, onPause, onSeek, onPreviousTrack, onNextTrack, time };
+  const handlersRef = useRef({ onPlay, onPause, onSeek, onPreviousTrack, onNextTrack, time, duration });
+  handlersRef.current = { onPlay, onPause, onSeek, onPreviousTrack, onNextTrack, time, duration };
 
   useEffect(() => {
     if (typeof window === "undefined" || !("mediaSession" in navigator)) return;
@@ -127,7 +127,8 @@ export function useMediaSession({
       session.setActionHandler("seekforward", (details) => {
         const offset = details.seekOffset || 10;
         const cur = handlersRef.current.time || 0;
-        const maxDur = Number.isFinite(duration) && duration > 0 ? duration : Number.POSITIVE_INFINITY;
+        const d = handlersRef.current.duration;
+        const maxDur = Number.isFinite(d) && d > 0 ? d : Number.POSITIVE_INFINITY;
         handlersRef.current.onSeek?.(Math.min(maxDur, cur + offset));
       });
       session.setActionHandler("previoustrack", () => {

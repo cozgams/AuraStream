@@ -226,7 +226,7 @@ export default function LoginModal() {
             <ILogin size={21} />
           </span>
           <h2>{title}</h2>
-          <Button className="ios-icon-button" aria-label="Close" onClick={() => setLoginOpen(false)}>
+          <Button className="ios-icon-button" aria-label="Close" disabled={busy} onClick={() => { if (!busy) setLoginOpen(false); }}>
             <IClose size={19} />
           </Button>
         </div>
@@ -453,11 +453,11 @@ export default function LoginModal() {
   );
 
   return isMobile ? (
-    <Sheet open={loginOpen} onClose={() => setLoginOpen(false)} label={title}>
+    <Sheet open={loginOpen} onClose={() => { if (!busy) setLoginOpen(false); }} label={title}>
       {content}
     </Sheet>
   ) : (
-    <Modal open={loginOpen} onClose={() => setLoginOpen(false)} label={title} width={440}>
+    <Modal open={loginOpen} onClose={() => { if (!busy) setLoginOpen(false); }} label={title} width={440}>
       {content}
     </Modal>
   );

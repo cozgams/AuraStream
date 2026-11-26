@@ -170,6 +170,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
   useEffect(() => {
     const syncStorageCfg = () => {
       setDownloadQuality(getDownloadQualityPreference());
+      setDownloadNotifs(isDownloadNotificationEnabled());
       setWifiOnlyDl(isWifiOnlyDownloadEnabled());
       setSmartDl(isSmartDownloadEnabled());
     };
@@ -325,7 +326,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                   <div className="text-[11px] text-mut">{t("settings.accent_desc")}</div>
                 </div>
               </div>
-              <div className="grid grid-cols-6 gap-2 pt-1">
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 pt-1">
                 {(
                   [
                     ["blue", "Blue", "#1a73e8"],

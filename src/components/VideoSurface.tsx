@@ -108,7 +108,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
       const resume = !v.paused;
       try { v.currentTime = target; trace("seek.assigned", { target, source }); }
       catch (e) { trace("seek.rejected", { error_name: (e as Error).name }); console.warn("Seek suppressed:", e); }
-      if (resume) { const p = v.play(); if (p && p.catch) p.catch(() => {}); }
+      if (resume) activity.play("seek", true);
     },
     trace,
     rate: (r: number) => { const v = videoRef.current; if (v) v.playbackRate = r; },
@@ -424,8 +424,8 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         }
       }
 
-      // > 8s stall watchdog: attempt recovery (hls.recoverMediaError() or reload)
-      if (stalledDuration >= 8000 && stallStageRef.current < 2) {
+      // > 12s stall watchdog: attempt recovery after hls.js retries have had time to work
+      if (stalledDuration >= 12000 && stallStageRef.current < 2) {
         stallStageRef.current = 2;
         trace("playback.stall_watchdog.recover", {
           currentTime: curTime,
@@ -452,13 +452,13 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
               }, { once: true });
             }
             video.load();
-            video.play().catch(() => {});
+            activity.play("error_recover", true);
           } catch { /* ignore */ }
         }
       }
 
-      // > 14s stall watchdog: report error if video remains stuck
-      if (stalledDuration >= 14000 && stallStageRef.current < 3) {
+      // > 24s stall watchdog: exceed fragLoadingTimeOut (20s) before declaring fatal stall
+      if (stalledDuration >= 24000 && stallStageRef.current < 3) {
         stallStageRef.current = 3;
         trace("playback.stall_watchdog.fatal", {
           currentTime: curTime,

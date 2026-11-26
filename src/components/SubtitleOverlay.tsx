@@ -29,6 +29,7 @@ type Props = {
   isDesktop?: boolean;
   clean?: boolean;
   fs?: boolean;
+  rotated?: boolean;
   bottomOffset?: number;
   videoEl?: HTMLVideoElement | null;
   onTrackStatus?: (info: SubtitleTrackStatus) => void;
@@ -46,6 +47,7 @@ export default function SubtitleOverlay({
   isDesktop = false,
   clean = false,
   fs = false,
+  rotated = false,
   bottomOffset,
   videoEl,
   onTrackStatus,
@@ -59,6 +61,9 @@ export default function SubtitleOverlay({
   const [videoFrameBottom, setVideoFrameBottom] = useState<number | null>(null);
   const prevEpisodeKeyRef = useRef<string>("");
   const inFlightTranslationsRef = useRef<Set<string>>(new Set());
+  const liveTranslatedRef = useRef(liveTranslated);
+  liveTranslatedRef.current = liveTranslated;
+  const nativeFingerprintRef = useRef("");
   const trackSourceRef = useRef<SubtitleTrack["source"]>(trackSource);
   trackSourceRef.current = trackSource;
   const onTrackStatusRef = useRef(onTrackStatus);
@@ -80,7 +85,7 @@ export default function SubtitleOverlay({
 
   // Frame-accurate video rect calculation for letterboxed / aspect-ratio playback
   useEffect(() => {
-    if (!videoEl) {
+    if (!videoEl || rotated) {
       setVideoFrameBottom(null);
       return;
     }
@@ -120,7 +125,7 @@ export default function SubtitleOverlay({
       videoEl.removeEventListener("resize", calculateBounds);
       ro?.disconnect();
     };
-  }, [videoEl, videoEl?.videoWidth, videoEl?.videoHeight]);
+  }, [videoEl, rotated, videoEl?.videoWidth, videoEl?.videoHeight]);
 
   // Load real subtitles when videoId, episode, or streamUrl changes
   useEffect(() => {
@@ -231,11 +236,13 @@ export default function SubtitleOverlay({
           zh: text,
         });
       }
-      if (disposed) return;
+      const fp = `${extracted.length}:${extracted[0]?.en || ""}:${extracted[extracted.length - 1]?.en || ""}`;
+      if (disposed || fp === nativeFingerprintRef.current) return;
+      nativeFingerprintRef.current = fp;
       setNativeCues(extracted);
       if (extracted.some((c) => containsForeignLanguage(c.en))) {
         translateCuesToEnglish(extracted)
-          .then((translated) => { if (!disposed) setNativeCues(translated); })
+          .then((translated) => { if (!disposed && nativeFingerprintRef.current === fp) setNativeCues(translated); })
           .catch(() => {});
       }
     };
@@ -298,9 +305,20 @@ export default function SubtitleOverlay({
   const rawTime = videoEl ? videoTime : (playbackClock ? clockTime : (propTime ?? 0));
   const currentTime = Math.max(0, rawTime + (styleConfig.offsetSec || 0));
 
-  // Find active cue
-  const activeCue = shouldTrackTime
-    ? effectiveCues.find((c) => currentTime >= c.start && currentTime < c.end)
+  const episodeKey = `${videoId}_${episode}`;
+
+  // Find active cues (support simultaneous speaker overlaps)
+  const activeCues = shouldTrackTime
+    ? effectiveCues.filter((c) => currentTime >= c.start && currentTime < c.end)
+    : [];
+  const activeCue = activeCues.length > 0
+    ? (activeCues.length === 1
+      ? activeCues[0]
+      : {
+          ...activeCues[0],
+          en: activeCues.map((c) => normalizeCueText(c.en || c.zh)).filter(Boolean).join("\n"),
+          zh: activeCues.map((c) => normalizeCueText(c.zh || c.en)).filter(Boolean).join("\n"),
+        })
     : undefined;
 
   const activeForeignSource = (() => {
@@ -310,13 +328,14 @@ export default function SubtitleOverlay({
   })();
 
   useEffect(() => {
-    if (!activeForeignSource || liveTranslated[activeForeignSource]) return;
+    if (!activeForeignSource || liveTranslatedRef.current[activeForeignSource]) return;
     if (inFlightTranslationsRef.current.has(activeForeignSource)) return;
     inFlightTranslationsRef.current.add(activeForeignSource);
     let canceled = false;
+    const reqEpisodeKey = episodeKey;
     translateDialogueToEnglish(activeForeignSource)
       .then((res) => {
-        if (!canceled && res && res !== activeForeignSource && !containsForeignLanguage(res)) {
+        if (!canceled && reqEpisodeKey === `${videoId}_${episode}` && res && res !== activeForeignSource && !containsForeignLanguage(res)) {
           setLiveTranslated((prev) => (prev[activeForeignSource] ? prev : { ...prev, [activeForeignSource]: res }));
         }
       })
@@ -327,7 +346,7 @@ export default function SubtitleOverlay({
     return () => {
       canceled = true;
     };
-  }, [activeForeignSource, liveTranslated]);
+  }, [activeForeignSource, episodeKey, videoId, episode]);
 
   if (!shouldTrackTime) {
     return null;
@@ -415,27 +434,29 @@ export default function SubtitleOverlay({
     };
   } else if (position === "top") {
     positionStyle = {
-      top: isDesktop ? "64px" : "calc(max(var(--sat, 12px), 28px) + 56px)",
+      top: isDesktop ? "64px" : rotated ? "64px" : "calc(max(var(--sat, 12px), 28px) + 88px)",
       bottom: "auto",
     };
   } else if (position === "above_title" && !clean && !fs) {
     positionStyle = {
       bottom: isDesktop
         ? "84px"
-        : `calc(var(--sab, 48px) + ${(bottomOffset !== undefined ? bottomOffset : 124) + 148}px)`,
+        : `calc(var(--sab, 24px) + ${(bottomOffset !== undefined ? bottomOffset : 84) + 178}px)`,
     };
   } else {
     if (isDesktop) {
       positionStyle = { bottom: "56px" };
     } else if (clean || fs) {
       positionStyle = {
-        bottom: videoFrameBottom !== null
-          ? `calc(max(var(--sab, 24px), ${videoFrameBottom}px) + 18px)`
-          : "calc(var(--sab, 24px) + 28px)",
+        bottom: rotated
+          ? "64px"
+          : videoFrameBottom !== null
+          ? `calc(max(var(--sab, 16px), ${videoFrameBottom}px) + 18px)`
+          : "calc(var(--sab, 16px) + 64px)",
       };
     } else {
       const baseOffset = bottomOffset !== undefined ? bottomOffset : 54;
-      const minClearance = `calc(var(--sab, 48px) + ${baseOffset + 148}px)`;
+      const minClearance = `calc(var(--sab, 24px) + ${baseOffset + 168}px)`;
       positionStyle = {
         bottom: videoFrameBottom !== null
           ? `max(${videoFrameBottom}px, ${minClearance})`

@@ -24,6 +24,76 @@ import ContinueWatchingBar from "./components/ContinueWatchingBar";
 import { tracePlayback } from "./playbackDiagnostics";
 import { IGrid, IGridF, IHome, IHomeF, ISearch, IUser, IUserF } from "./icons";
 
+function useNativeBottomInset() {
+  const { platform } = useStore();
+  const [bottom, setBottom] = useState(() => (platform === "android" ? 24 : 16));
+  useEffect(() => {
+    if (platform !== "android") {
+      setBottom(16);
+      return undefined;
+    }
+    const read = () => {
+      try {
+        const w = window as unknown as {
+          __auraNativeInsets?: { bottom?: number };
+          AuraNativeExport?: { getSystemInsets?: () => string };
+        };
+        if (typeof w.__auraNativeInsets?.bottom === "number") {
+          setBottom(Math.max(0, w.__auraNativeInsets.bottom));
+          return;
+        }
+        const raw = w.AuraNativeExport?.getSystemInsets?.();
+        if (raw) {
+          const parsed = JSON.parse(raw) as { bottom?: number };
+          if (typeof parsed.bottom === "number") {
+            setBottom(Math.max(0, parsed.bottom));
+          }
+        }
+      } catch { /* ignore */ }
+    };
+    read();
+    window.addEventListener("aurastream:insets-changed", read);
+    return () => window.removeEventListener("aurastream:insets-changed", read);
+  }, [platform]);
+  return bottom;
+}
+
+function useSoftKeyboardOpen(enabled: boolean) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined") {
+      setOpen(false);
+      document.body.classList.remove("has-keyboard");
+      return undefined;
+    }
+    const baseHeightRef = { current: window.innerHeight };
+    const check = () => {
+      const vv = window.visualViewport;
+      const vh = vv ? vv.height : window.innerHeight;
+      if (vh > baseHeightRef.current) baseHeightRef.current = vh;
+      const ae = document.activeElement;
+      const isTextInput = ae instanceof HTMLInputElement || ae instanceof HTMLTextAreaElement || (ae instanceof HTMLElement && ae.isContentEditable);
+      const next = isTextInput && baseHeightRef.current - vh > 120;
+      setOpen(next);
+      document.body.classList.toggle("has-keyboard", next);
+    };
+    const onFocusOut = () => window.setTimeout(check, 60);
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", check);
+    window.addEventListener("resize", check);
+    document.addEventListener("focusin", check, true);
+    document.addEventListener("focusout", onFocusOut, true);
+    return () => {
+      document.body.classList.remove("has-keyboard");
+      vv?.removeEventListener("resize", check);
+      window.removeEventListener("resize", check);
+      document.removeEventListener("focusin", check, true);
+      document.removeEventListener("focusout", onFocusOut, true);
+    };
+  }, [enabled]);
+  return open;
+}
+
 function TabBar() {
   const { tab, setTab, platform, t } = useStore();
   const items = [
@@ -41,7 +111,7 @@ function TabBar() {
     }
   };
   return <nav className="hg-tabbar ios-mobile-nav" aria-label="Main Navigation" data-over-video={tab === "home"}
-    style={{ paddingBottom: platform === "android" ? "max(var(--sab, 0px), 48px)" : "calc(var(--sab, 16px) * .55)" }}>
+    style={{ paddingBottom: platform === "android" ? "max(var(--sab, 16px), 10px)" : "calc(var(--sab, 16px) * .55)" }}>
       <div className="hg-glass">
       <div className="hg-drop" aria-hidden="true" style={{ transform: `translateX(${index * 100}%)` }}><LiquidIndicator /></div>
       <div className="ios-mobile-nav-items">
@@ -70,15 +140,15 @@ function StackPage({ page, onBack, wide, top, bottomInset }: {
         mode="context" active={top} bottomInset={bottomInset} onBack={onBack} />
     );
   }
-  if (page.kind === "channel") return <ChannelPage cate={page.cate} name={page.name} onBack={onBack} wide={wide} />;
+  if (page.kind === "channel") return <ChannelPage cate={page.cate} name={page.name} onBack={onBack} wide={wide} active={top} />;
   if (page.kind === "ranks") return <RankPage onBack={onBack} wide={wide} />;
   if (page.kind === "settings") return <SettingsPage onBack={onBack} wide={wide} />;
-  if (page.kind === "posts") return <PostsPage onBack={onBack} wide={wide} />;
+  if (page.kind === "posts") return <PostsPage onBack={onBack} wide={wide} active={top} />;
   if (page.kind === "post") return <PostDetail id={page.id} onBack={onBack} active={top} />;
-  if (page.kind === "topics") return <TopicsPage onBack={onBack} wide={wide} />;
-  if (page.kind === "topic") return <TopicPage slug={page.slug} name={page.name} onBack={onBack} wide={wide} />;
-  if (page.kind === "tags") return <TagsPage onBack={onBack} wide={wide} />;
-  if (page.kind === "tag") return <TagPage tag={page.tag} name={page.name} onBack={onBack} wide={wide} />;
+  if (page.kind === "topics") return <TopicsPage onBack={onBack} wide={wide} active={top} />;
+  if (page.kind === "topic") return <TopicPage slug={page.slug} name={page.name} onBack={onBack} wide={wide} active={top} />;
+  if (page.kind === "tags") return <TagsPage onBack={onBack} wide={wide} active={top} />;
+  if (page.kind === "tag") return <TagPage tag={page.tag} name={page.name} onBack={onBack} wide={wide} active={top} />;
   if (page.kind === "following") return <FollowingPage onBack={onBack} wide={wide} />;
   if (page.kind === "user") return <UserPage id={page.id} name={page.name} onBack={onBack} wide={wide} />;
   return null;
@@ -171,9 +241,11 @@ function LayerBox({
 }
 
 function AppBody() {
-  const { platform, tab, stack, pop, loginOpen, setLoginOpen, fs, clean, setClean } = useStore();
+  const { platform, tab, setTab, stack, pop, loginOpen, setLoginOpen, fs, setFs, clean, setClean } = useStore();
   const mainRef = useRef<HTMLDivElement>(null);
   const [wide, setWide] = useState(!isMobile);
+  const androidInsetBottom = useNativeBottomInset();
+  const keyboardOpen = useSoftKeyboardOpen(isMobile);
 
   useLayoutEffect(() => {
     const el = mainRef.current;
@@ -193,23 +265,26 @@ function AppBody() {
         return;
       }
       if (e.key === "Escape" && runBack()) return;
+      if (e.key === "Escape" && fs) { setFs(false); return; }
       if (loginOpen) { if (e.key === "Escape") setLoginOpen(false); return; }
       if (e.key === "Escape") {
         if (stack.length) {
           if (clean) setClean(false);
           pop();
+        } else if (tab !== "home") {
+          setTab("home");
         }
         return;
       }
     };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
-  }, [stack.length, pop, loginOpen, setLoginOpen, clean, setClean]);
+  }, [stack.length, pop, loginOpen, setLoginOpen, clean, setClean, fs, setFs, tab, setTab]);
 
   const vis = (k: Tab) => (tab === k ? `absolute inset-0 ${k === "home" ? "" : "ios-tab-active"}` : "absolute inset-0 hidden pointer-events-none");
   const pageActive = stack.length === 0 && !loginOpen;
   const cleanActive = clean && (tab === "home" || stack[stack.length - 1]?.kind === "feed");
-  const bottomInset = isMobile ? (fs || cleanActive ? 0 : (platform === "android" ? 78 : 74)) : 14;
+  const bottomInset = isMobile ? (fs || cleanActive || keyboardOpen ? 0 : (platform === "android" ? 68 + Math.max(androidInsetBottom, 10) : 74)) : 14;
   /* Stack pages (feed from search/category/profile) render without bottom nav */
   const stackInset = isMobile ? 0 : 14;
 
@@ -218,9 +293,9 @@ function AppBody() {
       <div ref={mainRef} className="relative flex-1 min-w-0 overflow-hidden win-main">
         <LayerBox hidden={stack.length > 0} inert={!pageActive} ariaHidden={!pageActive} className="absolute inset-0">
           <div className={vis("home")} inert={(!pageActive || tab !== "home") || undefined} aria-hidden={!pageActive || tab !== "home"}><Home active={pageActive && tab === "home"} bottomInset={bottomInset} /></div>
-          <div className={vis("search")} inert={(!pageActive || tab !== "search") || undefined} aria-hidden={!pageActive || tab !== "search"}><Search active={pageActive && tab === "search"} wide={wide} /></div>
-          <div className={vis("category")} inert={(!pageActive || tab !== "category") || undefined} aria-hidden={!pageActive || tab !== "category"}><Category wide={wide} active={pageActive && tab === "category"} /></div>
-          <div className={vis("profile")} inert={(!pageActive || tab !== "profile") || undefined} aria-hidden={!pageActive || tab !== "profile"}><Profile wide={wide} active={pageActive && tab === "profile"} /></div>
+          <LayerBox hidden={!pageActive || tab !== "search"} inert={!pageActive || tab !== "search"} ariaHidden={!pageActive || tab !== "search"} className="absolute inset-0 ios-tab-active"><Search active={pageActive && tab === "search"} wide={wide} /></LayerBox>
+          <LayerBox hidden={!pageActive || tab !== "category"} inert={!pageActive || tab !== "category"} ariaHidden={!pageActive || tab !== "category"} className="absolute inset-0 ios-tab-active"><Category wide={wide} active={pageActive && tab === "category"} /></LayerBox>
+          <LayerBox hidden={!pageActive || tab !== "profile"} inert={!pageActive || tab !== "profile"} ariaHidden={!pageActive || tab !== "profile"} className="absolute inset-0 ios-tab-active"><Profile wide={wide} active={pageActive && tab === "profile"} /></LayerBox>
         </LayerBox>
 
         {stack.map((p, i) => (
@@ -236,8 +311,8 @@ function AppBody() {
           </LayerBox>
         ))}
 
-        {isMobile && !fs && !cleanActive && stack.length === 0 && !loginOpen && tab !== "home" && tab !== "profile" && <ContinueWatchingBar />}
-        {isMobile && !fs && !cleanActive && stack.length === 0 && !loginOpen && <TabBar />}
+        {isMobile && !fs && !cleanActive && !keyboardOpen && stack.length === 0 && !loginOpen && tab !== "home" && tab !== "profile" && <ContinueWatchingBar />}
+        {isMobile && !fs && !cleanActive && !keyboardOpen && stack.length === 0 && !loginOpen && <TabBar />}
       </div>
     </div>
   );
@@ -337,8 +412,7 @@ function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boole
 function MobileShell() {
   const { platform } = useStore();
   return (
-    <div className={`absolute inset-0 flex flex-col bg-canvas plat-${platform}`}
-      style={{ "--sat": "max(env(safe-area-inset-top), 12px)", "--sab": platform === "android" ? "max(env(safe-area-inset-bottom), 48px)" : "max(env(safe-area-inset-bottom), 16px)" } as React.CSSProperties}>
+    <div className={`absolute inset-0 flex flex-col bg-canvas plat-${platform}`}>
       <div className="relative flex-1 min-h-0">
         <AppBody />
       </div>
@@ -348,7 +422,7 @@ function MobileShell() {
 
 /* ============ Application Entrypoint ============ */
 export default function App() {
-  const { platform, loginOpen, setLoginOpen, tab, setTab, stack, pop, fs, setFs, clean, setClean, toast } = useStore();
+  const { platform, theme, loginOpen, setLoginOpen, tab, setTab, stack, pop, fs, setFs, clean, setClean, toast } = useStore();
   const [startupUpdate, setStartupUpdate] = useState<UpdateInfo | null>(null);
   const lastBackPressRef = useRef<number>(0);
   useEffect(() => {
@@ -356,11 +430,61 @@ export default function App() {
   }, [tab, stack, loginOpen]);
 
   useEffect(() => {
+    if (platform !== "android") return undefined;
+    const isDarkSurface = theme === "dark" || fs || (stack.length > 0 ? stack[stack.length - 1]?.kind === "feed" : tab === "home");
+    try {
+      (window as unknown as { AuraNativeExport?: { setSystemBarAppearance?: (d: boolean) => void } })
+        .AuraNativeExport?.setSystemBarAppearance?.(isDarkSurface);
+    } catch { /* ignore */ }
+    return undefined;
+  }, [platform, theme, fs, tab, stack]);
+
+  useEffect(() => {
     const isAndroid = platform === "android";
-    const sab = isAndroid ? "max(env(safe-area-inset-bottom, 0px), 48px)" : "max(env(safe-area-inset-bottom, 0px), 16px)";
-    const sat = "max(env(safe-area-inset-top, 0px), 12px)";
-    document.documentElement.style.setProperty("--sab", sab);
-    document.documentElement.style.setProperty("--sat", sat);
+    const applyInsets = (detail?: { top?: number; bottom?: number; left?: number; right?: number }) => {
+      let info = detail;
+      if (!info && isAndroid) {
+        try {
+          const w = window as unknown as {
+            __auraNativeInsets?: { top?: number; bottom?: number; left?: number; right?: number };
+            AuraNativeExport?: { getSystemInsets?: () => string };
+          };
+          if (w.__auraNativeInsets) info = w.__auraNativeInsets;
+          else if (typeof w.AuraNativeExport?.getSystemInsets === "function") {
+            const raw = w.AuraNativeExport.getSystemInsets();
+            if (raw) info = JSON.parse(raw);
+          }
+        } catch { /* ignore */ }
+      }
+      if (isAndroid && info && (typeof info.top === "number" || typeof info.bottom === "number")) {
+        const t = Math.max(info.top ?? 0, 12);
+        const b = Math.max(info.bottom ?? 0, 0);
+        const l = Math.max(info.left ?? 0, 0);
+        const r = Math.max(info.right ?? 0, 0);
+        document.documentElement.style.setProperty("--sat", `${t}px`);
+        document.documentElement.style.setProperty("--sab", `${b}px`);
+        document.documentElement.style.setProperty("--sal", `${l}px`);
+        document.documentElement.style.setProperty("--sar", `${r}px`);
+      } else {
+        document.documentElement.style.setProperty("--sat", "max(env(safe-area-inset-top, 0px), 12px)");
+        document.documentElement.style.setProperty("--sab", isAndroid ? "max(env(safe-area-inset-bottom, 0px), 24px)" : "max(env(safe-area-inset-bottom, 0px), 16px)");
+        document.documentElement.style.setProperty("--sal", "env(safe-area-inset-left, 0px)");
+        document.documentElement.style.setProperty("--sar", "env(safe-area-inset-right, 0px)");
+      }
+    };
+    applyInsets();
+    const onInsets = (e: Event) => applyInsets((e as CustomEvent<{ top?: number; bottom?: number; left?: number; right?: number }>).detail);
+    const onTrim = () => {
+      if ((window as unknown as { AuraNativeExport?: { isAvailable?: () => boolean } }).AuraNativeExport?.isAvailable?.()) {
+        invoke("cache_clear").catch(() => {});
+      }
+    };
+    window.addEventListener("aurastream:insets-changed", onInsets);
+    window.addEventListener("aurastream:trim-memory", onTrim);
+    return () => {
+      window.removeEventListener("aurastream:insets-changed", onInsets);
+      window.removeEventListener("aurastream:trim-memory", onTrim);
+    };
   }, [platform]);
 
   /* iOS: Temporarily enables text interaction when focusing input elements */
@@ -400,9 +524,13 @@ export default function App() {
     }
     if (tab !== "home") { setTab("home"); return; }
     
-    // Double tap back to exit on Home tab
+    // Double tap back to exit on Home tab (minimize to background if native bridge present so downloads survive)
     const now = Date.now();
     if (now - lastBackPressRef.current < 2000) {
+      const bridge = (window as unknown as { AuraNativeExport?: { moveAppToBackground?: () => boolean } }).AuraNativeExport;
+      if (typeof bridge?.moveAppToBackground === "function" && bridge.moveAppToBackground()) {
+        return;
+      }
       invoke("app_exit", { code: 0 })
         .catch(() => invoke("plugin:app|exit", { code: 0 }))
         .catch(() => {});

@@ -1,7 +1,6 @@
 import { Button, Image, SegmentedControl, Surface } from "./ios/controls";
 import { Loader } from "./ios/effects";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { api, cover, fmt, fmtTime, isMobile, logLine, platform } from "../api";
 import type { Detail, Episode, Post, VideoCard } from "../types";
@@ -10,22 +9,25 @@ import { Avatar, Img, Sheet } from "./ui";
 import VideoSurface, { type VideoHandle } from "./VideoSurface";
 import PlayerControls from "./PlayerControls";
 import PlaybackLock from "./PlaybackLock";
+import SubtitleOverlay from "./SubtitleOverlay";
+import SubtitleSheet from "./SubtitleSheet";
 import LinePicker from "./LinePicker";
 import { ArticlePanel, CommentsPanel, EpisodesPanel } from "./Panels";
 import { RowCard } from "./cards";
 import { setBackHandler } from "../back";
 import { copyText } from "../clipboard";
+import { flushNativeStateSync } from "../storage";
 import { tracePlayback } from "../playbackDiagnostics";
 import { createPlaybackClock } from "../playbackClock";
 import ExportSheet from "./ExportSheet";
 import BatchDownloadSheet from "./BatchDownloadSheet";
 import DownloadChoiceSheet from "./DownloadChoiceSheet";
 import { formatDramaAuthor, formatDramaDesc, formatDramaTitle } from "../subtitles/dramaTranslator";
+import type { SubtitleTrackStatus } from "../subtitles/types";
 import {
   ensureOfflineSyncReady,
   isEpisodeDownloaded,
   startEpisodeDownload,
-  deleteOfflineEpisode,
   getOfflineCoverUrl,
   getOfflinePlaybackUrl,
   getOfflineEpisodes,
@@ -52,7 +54,7 @@ import {
 import { processEpisodeExport } from "../offline/exportService";
 import { useMediaSession } from "../useMediaSession";
 import {
-  IBack, IBoltF, ICheck, IChevR, IChevronDown, IChevronUp, IClock, IClose, ICommentF, ICompress, IDownload, IEye, IExpand, IFileText,
+  IBack, IBoltF, ICaptions, ICaptionsF, ICheck, IChevR, IChevronDown, IChevronUp, IClock, IClose, ICommentF, ICompress, IDownload, IEye, IExpand, IFileText,
   IFastForwardF, ILink, IList, ILockF, IMore, IPauseF, IPlayF, IRewindF, IStar, IStarF, ISun, IVertSwap, IVol, IVolMute,
 } from "../icons";
 
@@ -72,7 +74,20 @@ type Props = {
   startTime?: number;
 };
 
-const setNativeOrientation = (landscape: boolean) => {
+const setNativeFullscreenMode = (fullscreen: boolean, landscape: boolean) => {
+  try {
+    const bridge = (window as unknown as {
+      AuraNativeExport?: { setImmersiveFullscreen?: (fs: boolean, land: boolean) => void; setOrientation?: (land: boolean) => void };
+    }).AuraNativeExport;
+    if (typeof bridge?.setImmersiveFullscreen === "function") {
+      bridge.setImmersiveFullscreen(fullscreen, landscape);
+      return;
+    }
+    if (typeof bridge?.setOrientation === "function") {
+      bridge.setOrientation(landscape);
+      return;
+    }
+  } catch { /* ignore */ }
   if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
     invoke("set_orientation", { landscape }).catch(() => {});
   }
@@ -111,7 +126,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [err, setErr] = useState("");
   const [panel, setPanel] = useState<"episodes" | "comments" | "article" | "detail" | "more" | null>(null);
   const [lineOpen, setLineOpen] = useState(false);
+  const [subtitleSheetOpen, setSubtitleSheetOpen] = useState(false);
+  const [subtitleTrackInfo, setSubtitleTrackInfo] = useState<SubtitleTrackStatus | undefined>(undefined);
   const [descOpen, setDescOpen] = useState(false);
+  const [audioDuck, setAudioDuck] = useState(false);
   const [cancelAutoNext, setCancelAutoNext] = useState(false);
   const cancelAutoNextRef = useRef(false);
   const [autoSkipSec, setAutoSkipSecState] = useState<number>(() => getAutoSkipIntroSec());
@@ -165,9 +183,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     }
   }, [paused, waiting, isDesktop, active, wake]);
 
-  /* Keep Android Screen Awake while actively playing video with auto-reacquire on resume */
+  /* Keep Android Screen Awake while actively playing (or briefly buffering) with auto-reacquire on resume */
   useEffect(() => {
-    const isPlaying = active && !paused && !waiting && !err;
+    const isPlaying = active && !paused && !err;
     let sentinel: any = null;
     let disposed = false;
 
@@ -218,6 +236,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   /* --- Mobile Gestures --- */
   const [holdSpeed, setHoldSpeed] = useState(false);
   const [holdRate, setHoldRate] = useState<number>(2);
+  const holdRateRef = useRef<number>(2);
+  const [holdLockable, setHoldLockable] = useState(true);
+  const [lockedRate, setLockedRate] = useState<number>(2);
   const [speedLock, setSpeedLock] = useState(false);
   const [lockArmed, setLockArmed] = useState(false);
   const holdRef = useRef(false);
@@ -242,12 +263,15 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const barWasPlayingRef = useRef(false);
   const [barPct, setBarPct] = useState<number | null>(null);
   const gesture = useRef<{
-    x: number; y: number; left: number; startY: number; t: number; timer: number | null;
+    x: number; y: number; left: number; top: number; startY: number; t: number; timer: number | null;
     mode: "idle" | "hold" | "scrub" | "pan" | "brightness" | "volume";
-    base: number; width: number; playing: boolean; startVal: number;
+    base: number; width: number; height: number; visualWidth: number; isLeftHalf: boolean; initialRate: number;
+    playing: boolean; startVal: number;
   } | null>(null);
-  /* Single/Double Tap detection: Instant single-tap response with quick double-tap restore & seek */
+  /* Single/Double Tap detection: Debounce single-tap cleanly to eliminate double-tap HUD flash */
   const lastTapRef = useRef<{ t: number; x: number; y: number }>({ t: 0, x: 0, y: 0 });
+  const tapTimerRef = useRef<number | null>(null);
+  const manualExitAtRef = useRef(0);
   const hasSkippedIntroRef = useRef<Record<string, boolean>>({});
   const preloadedKeysRef = useRef<Set<string>>(new Set());
   const [seekRipple, setSeekRipple] = useState<{ dir: "left" | "right" | "center"; text: string; id: number } | null>(null);
@@ -587,7 +611,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   };
 
   /* Playback speed: hold (right 2x..6x, left 0.5x) / lock -> rate */
-  const effRate = holdSpeed ? holdRate : (speedLock ? 2 : rate);
+  const effRate = holdSpeed ? holdRate : (speedLock ? lockedRate : rate);
   /* Scrub bar progress percentage */
   const barProgress = barPct ?? (duration ? time / duration : 0);
   /* Fullscreen landscape orientation rotation */
@@ -614,6 +638,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const resolveSwipe = useCallback((target: number) => {
     const prev = idxRef.current;
     if (target === prev) return;
+    const s = liveRef.current;
+    if (s.id && s.dur > 0) saveHistoryRef.current(s.ep, s.t, s.dur);
     idxRef.current = target;
     setIndex(target);
   }, []);
@@ -898,13 +924,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           const h = info?.streams?.hevc || info?.video_url_hevc || "";
           if (u) setPlayUrls((m) => ({ ...m, [k]: u }));
           if (h) setHevcUrls((m) => ({ ...m, [k]: h }));
-          if (e === ep + 1 && !isEpisodeDownloaded(curId, e)) {
-            void preloadEpisode(curId, e, {
-              preferHevc,
-              title: formatDramaTitle(meta?.title),
-              maxSegments: 5,
-            });
-          }
         })
         .catch(() => { /* prefetch error ignored */ });
     }
@@ -939,7 +958,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
   /* Volume and mute state synchronization */
   useEffect(() => { videoRef.current?.mute(muted); }, [muted]);
-  useEffect(() => { videoRef.current?.volume(volume); }, [volume]);
+  useEffect(() => { videoRef.current?.volume(audioDuck ? Math.min(volume, 0.22) : volume); }, [volume, audioDuck]);
   /* Playback speed synchronization */
   useEffect(() => { videoRef.current?.rate(effRate); }, [effRate, playKey]);
   /* Voice & Audio Sync offset synchronization */
@@ -955,25 +974,32 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* Android mobile modal escape handler */
+  /* Android mobile modal escape & back handler */
   useEffect(() => {
-    if (!panel) return;
+    if (!panel && !controlsLocked && !descOpen) { setBackHandler(null); return undefined; }
+    const handleBack = () => {
+      if (panel) { setPanel(null); return true; }
+      if (descOpen) { setDescOpen(false); return true; }
+      if (controlsLocked) {
+        setControlsLocked(false);
+        wake();
+        toast("Controls unlocked", "info");
+        return true;
+      }
+      return false;
+    };
+    setBackHandler(handleBack);
     const fn = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        e.preventDefault();
-        setPanel(null);
+        if (handleBack()) e.preventDefault();
       }
     };
     window.addEventListener("keydown", fn);
-    return () => window.removeEventListener("keydown", fn);
-  }, [panel]);
-
-  /* Android back button handler */
-  useEffect(() => {
-    if (!panel) { setBackHandler(null); return undefined; }
-    setBackHandler(() => { setPanel(null); return true; });
-    return () => setBackHandler(null);
-  }, [panel]);
+    return () => {
+      setBackHandler(null);
+      window.removeEventListener("keydown", fn);
+    };
+  }, [panel, controlsLocked, descOpen, wake, toast]);
 
   useEffect(() => {
     const onFs = () => setFullscreen(!!document.fullscreenElement);
@@ -991,6 +1017,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   /* --- Long press 2.0x, scrub gesture, and single tap --- */
   const onDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (isDesktop || controlsLocked || !active) return;
+    const vw = typeof window !== "undefined" ? window.innerWidth : 360;
+    // Preserve Android edge-swipe back margin so edge swipes never trigger scrub/hold
+    if (vw > 120 && (e.clientX <= 24 || e.clientX >= vw - 24)) return;
     pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointersRef.current.size === 2) {
       const pts = [...pointersRef.current.values()];
@@ -1015,11 +1044,17 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     const el = e.currentTarget;
     const rect = el.getBoundingClientRect();
     const width = rect.width || el.clientWidth || 1;
-    try { el.setPointerCapture(e.pointerId); } catch { /* ignore */ }
-    const isLeftHalf = (e.clientX - rect.left) < width * 0.5;
+    const height = rect.height || el.clientHeight || 1;
+    const visualWidth = rotated ? height : width;
+    const visualPos = rotated ? (e.clientY - rect.top) : (e.clientX - rect.left);
+    const isLeftHalf = visualPos < visualWidth * 0.5;
+    if (fs || swipeEp) {
+      try { el.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    }
     const initialHoldRate = isLeftHalf ? 0.5 : 2;
     const g = {
-      x: e.clientX, y: e.clientY, left: rect.left, startY: e.clientY, t: Date.now(), base: time, width,
+      x: e.clientX, y: e.clientY, left: rect.left, top: rect.top, startY: e.clientY, t: Date.now(), base: time,
+      width, height, visualWidth, isLeftHalf,
       mode: "idle" as "idle" | "hold" | "scrub" | "pan" | "brightness" | "volume",
       startVal: 1,
       initialRate: initialHoldRate,
@@ -1029,8 +1064,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         if (!cur || cur.mode !== "idle") return;
         cur.mode = "hold";
         holdRef.current = true;
+        holdRateRef.current = initialHoldRate;
         setHoldSpeed(true);
         setHoldRate(initialHoldRate);
+        setHoldLockable(initialHoldRate >= 2);
         setLockArmed(false);
         lockArmedRef.current = false;
         try { (window as any).AuraNativeExport?.vibrateHaptic?.("medium"); } catch {}
@@ -1061,13 +1098,15 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     const dx = rotated ? rawDy : rawDx;
     const dy = rotated ? -rawDx : rawDy;
 
-    /* Long press: horizontal gear shift (2x, 3x, 4x, 6x) or slide up 64px to lock 2.0x speed */
+    /* Long press: horizontal gear shift (2x, 3x, 4x, 6x) or slide up 64px to lock active fast speed */
     if (g.mode === "hold") {
-      if ((g as any).initialRate >= 2) {
+      if (g.initialRate >= 2) {
         const STEPS = [2, 3, 4, 6];
         const stepIdx = Math.max(0, Math.min(STEPS.length - 1, Math.floor(dx / 68)));
-        setHoldRate(STEPS[stepIdx]);
-        const armed = (rotated ? -(e.clientX - g.x) : g.startY - e.clientY) > 64;
+        const nextR = STEPS[stepIdx];
+        holdRateRef.current = nextR;
+        setHoldRate(nextR);
+        const armed = -dy > 64;
         if (armed !== lockArmedRef.current) {
           lockArmedRef.current = armed;
           setLockArmed(armed);
@@ -1083,10 +1122,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         videoRef.current?.pause();
       } else if (Math.abs(dy) > 14) {
         if (g.timer) window.clearTimeout(g.timer);
-        const isLeft = (g.x - g.left) < g.width * 0.5;
-        if (fs || !swipeEp) {
-          g.mode = isLeft ? "brightness" : "volume";
-          g.startVal = isLeft ? brightness : (muted ? 0 : volume);
+        if (fs) {
+          g.mode = g.isLeftHalf ? "brightness" : "volume";
+          g.startVal = g.isLeftHalf ? brightness : (muted ? 0 : volume);
           try { (window as any).AuraNativeExport?.vibrateHaptic?.("light"); } catch {}
         } else {
           g.mode = "pan";
@@ -1096,7 +1134,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     }
 
     if (g.mode === "brightness") {
-      const delta = (g.startY - e.clientY) / (Math.max(window.innerHeight, 400) * 0.45);
+      const span = Math.max(rotated ? window.innerWidth : window.innerHeight, 360) * 0.45;
+      const delta = -dy / span;
       const nextB = Math.max(0.15, Math.min(1.0, g.startVal + delta));
       setBrightness(nextB);
       try { localStorage.setItem("aurastream_brightness", String(nextB)); } catch {}
@@ -1106,7 +1145,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     }
 
     if (g.mode === "volume") {
-      const delta = (g.startY - e.clientY) / (Math.max(window.innerHeight, 400) * 0.45);
+      const span = Math.max(rotated ? window.innerWidth : window.innerHeight, 360) * 0.45;
+      const delta = -dy / span;
       const nextV = Math.max(0, Math.min(1.0, g.startVal + delta));
       setVolume(nextV);
       videoRef.current?.volume(nextV);
@@ -1119,7 +1159,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     if (g.mode === "scrub") {
       const total = duration || 0;
       if (!total) return;
-      const target = Math.max(0, Math.min(total, g.base + (dx / g.width) * total));
+      const target = Math.max(0, Math.min(total, g.base + (dx / g.visualWidth) * total));
       scrubTarget.current = target;
       setScrub({ pct: (target / total) * 100, target });
     }
@@ -1155,9 +1195,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     if (g.mode === "hold") {
       holdRef.current = false;
       setHoldSpeed(false);
-      if (!cancelled && wasLockArmed) {
+      if (!cancelled && wasLockArmed && g.initialRate >= 2) {
+        const lockedVal = holdRateRef.current >= 2 ? holdRateRef.current : 2;
+        setLockedRate(lockedVal);
         setSpeedLock(true);
-        toast("Locked 2.0x playback speed · Tap top badge to unlock", "info");
+        toast(`Locked ${lockedVal}x playback speed · Tap top badge to unlock`, "info");
       }
       lockArmedRef.current = false;
       setLockArmed(false);
@@ -1181,6 +1223,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         const want = dir === 1 ? nextEpObj?.ep_num : prevEpObj?.ep_num;
         const total = episodes.length;
         if (swipeEp && kind === "video" && want) {
+          saveHistory(curEp, liveRef.current.t, liveRef.current.dur);
           setEpMap((m) => ({ ...m, [curId]: want }));
           toast(total ? `Ep. ${want} / ${total}` : `Ep. ${want}`, "info");
           try { navigator.vibrate?.(12); } catch { /* ignore */ }
@@ -1191,20 +1234,21 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     }
     if (!cancelled && g.mode === "idle" && Date.now() - g.t < 260) {
       const now = Date.now();
-      const screenWidth = g.width || (typeof window !== "undefined" ? window.innerWidth : 360);
-      const ratio = (g.x - g.left) / screenWidth;
+      const ratio = rotated
+        ? (g.y - g.top) / (g.visualWidth || 1)
+        : (g.x - g.left) / (g.visualWidth || 1);
       const prevTap = lastTapRef.current;
       const isQuickDoubleTap =
         prevTap.t > 0 &&
-        now - prevTap.t < 250 &&
-        Math.hypot(g.x - prevTap.x, g.y - prevTap.y) < 40;
+        now - prevTap.t < 240 &&
+        Math.hypot(g.x - prevTap.x, g.y - prevTap.y) < 44;
 
       if (isQuickDoubleTap) {
+        if (tapTimerRef.current) {
+          window.clearTimeout(tapTimerRef.current);
+          tapTimerRef.current = null;
+        }
         lastTapRef.current = { t: 0, x: 0, y: 0 };
-        flushSync(() => {
-          setClean(false);
-          if (!isDesktop && fs) setIdle(false);
-        });
 
         const liveVideo = videoRef.current?.el();
         const liveTime = liveVideo && Number.isFinite(liveVideo.currentTime)
@@ -1215,14 +1259,12 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           : (typeof duration === "number" && Number.isFinite(duration) && duration > 0 ? duration : Infinity);
 
         if (ratio < 0.28) {
-          // Double tap left: Seek backward 10s (works in both portrait & landscape)
           const target = Math.max(0, liveTime - 10);
           videoRef.current?.seek(target, "double-tap-back");
           setTime(target);
           playbackClock.publish(target);
           triggerSeekRipple("left", "-10s");
         } else if (ratio > 0.72) {
-          // Double tap right: Seek forward 10s (works in both portrait & landscape)
           const target = Math.max(0, Math.min(liveDur, liveTime + 10));
           if (Number.isFinite(target)) {
             videoRef.current?.seek(target, "double-tap-forward");
@@ -1231,35 +1273,38 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
             triggerSeekRipple("right", "+10s");
           }
         } else {
-          // Double tap center: Toggle play/pause on mobile
           const wasPaused = videoRef.current?.el()?.paused ?? paused;
           videoRef.current?.toggle();
           triggerSeekRipple("center", wasPaused ? "Play" : "Pause");
         }
       } else {
         lastTapRef.current = { t: now, x: g.x, y: g.y };
-        if (!isDesktop && fs) {
-          const nextIdle = !idle;
-          flushSync(() => {
+        if (tapTimerRef.current) window.clearTimeout(tapTimerRef.current);
+        tapTimerRef.current = window.setTimeout(() => {
+          tapTimerRef.current = null;
+          if (!isDesktop && fs) {
+            const nextIdle = !idle;
             setIdle(nextIdle);
             setClean((c) => !c);
-          });
-          if (nextIdle) {
-            window.clearTimeout(idleTimer.current);
+            if (nextIdle) {
+              window.clearTimeout(idleTimer.current);
+            } else {
+              wake();
+            }
           } else {
-            wake();
-          }
-        } else {
-          flushSync(() => {
             setClean((c) => !c);
-          });
-        }
+          }
+        }, 210) as unknown as number;
       }
     }
   };
 
   useEffect(() => {
     if (!active || controlsLocked) {
+      if (tapTimerRef.current) {
+        window.clearTimeout(tapTimerRef.current);
+        tapTimerRef.current = null;
+      }
       onUp(true);
       lastTapRef.current = { t: 0, x: 0, y: 0 };
     }
@@ -1269,6 +1314,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
   useEffect(() => () => {
     if (gesture.current?.timer) window.clearTimeout(gesture.current.timer);
+    if (tapTimerRef.current) window.clearTimeout(tapTimerRef.current);
     if (hudTimerRef.current) window.clearTimeout(hudTimerRef.current);
     if (seekRippleTimer.current) window.clearTimeout(seekRippleTimer.current);
     window.clearTimeout(swipeTimer.current);
@@ -1282,8 +1328,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const keepAlive = useCallback(() => {
     for (const t of keepAliveTimers.current) window.clearTimeout(t);
     keepAliveTimers.current = [];
-    for (const delay of [50, 150, 300, 500, 800, 1200]) {
+    for (const delay of [80, 240, 500]) {
       keepAliveTimers.current.push(window.setTimeout(() => {
+        if (document.visibilityState === "hidden") return;
         const v = videoRef.current?.el();
         if (v && v.paused) videoRef.current?.play();
       }, delay) as unknown as number);
@@ -1297,36 +1344,37 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     wake();
     if (wasPlaying) keepAlive();
     if (!isDesktop) {
-      setNativeOrientation(landscape);
+      setNativeFullscreenMode(true, landscape);
       if (landscape) {
         try {
           (screen.orientation as unknown as { lock?: (o: string) => Promise<void> })?.lock?.("landscape")?.catch(() => {});
         } catch { /* ignore */ }
       }
     }
-  }, [isDesktop, keepAlive, setClean, setFs]);
+  }, [isDesktop, keepAlive, setClean, setFs, wake]);
 
   const exitFs = useCallback(() => {
     const wasPlaying = videoRef.current?.el()?.paused === false;
+    manualExitAtRef.current = Date.now();
     setClean(false);
     setFs(false);
     if (wasPlaying) keepAlive();
     if (!isDesktop) {
-      setNativeOrientation(false);
+      setNativeFullscreenMode(false, false);
       try { screen.orientation?.unlock?.(); } catch { /* ignore */ }
     }
   }, [isDesktop, keepAlive, setClean, setFs]);
 
   useEffect(() => {
     if (isDesktop || fs) return;
-    setNativeOrientation(false);
+    setNativeFullscreenMode(false, false);
     try { screen.orientation?.unlock?.(); } catch { /* ignore */ }
   }, [isDesktop, fs]);
 
   /* Re-request landscape orientation if video dimensions resolve after fullscreen entry */
   useEffect(() => {
     if (isDesktop || !fs || !landscapeVideo) return;
-    setNativeOrientation(true);
+    setNativeFullscreenMode(true, true);
     try {
       (screen.orientation as unknown as { lock?: (o: string) => Promise<void> })?.lock?.("landscape")?.catch(() => {});
     } catch { /* ignore */ }
@@ -1342,9 +1390,15 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       const isLand = window.innerWidth > window.innerHeight;
       setVpLandscape((prev) => {
         if (prev !== isLand && active) {
-          const wasPlaying = videoRef.current?.el()?.paused === false;
-          setFs(isLand);
-          if (wasPlaying) keepAlive();
+          const recentlyExited = isLand && (Date.now() - manualExitAtRef.current < 1200);
+          if (!recentlyExited) {
+            const wasPlaying = videoRef.current?.el()?.paused === false;
+            if (isLand || prev) {
+              setFs(isLand);
+              setNativeFullscreenMode(isLand, isLand);
+            }
+            if (wasPlaying) keepAlive();
+          }
         }
         return isLand;
       });
@@ -1445,6 +1499,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     if (!barScrub.current) return;
     barScrub.current = false;
     e.stopPropagation();
+    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* ignore */ }
     const pct = barPctAt(e.clientX, e.clientY);
     if (pct != null && typeof duration === "number" && Number.isFinite(duration) && duration > 0) {
       const target = Math.max(0, Math.min(duration, pct * duration));
@@ -1452,6 +1507,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         videoRef.current?.trace("seek.input.up", { input: "mobile_bar", target });
         videoRef.current?.seek(target, "mobile_bar");
         setTime(target);
+        playbackClock.publish(target);
       }
     }
     setBarPct(null);
@@ -1460,11 +1516,31 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       barWasPlayingRef.current = false;
     }
   };
+  const onBarCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!barScrub.current) return;
+    barScrub.current = false;
+    e.stopPropagation();
+    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    setBarPct(null);
+    if (barWasPlayingRef.current && active) {
+      videoRef.current?.play();
+      barWasPlayingRef.current = false;
+    }
+  };
 
   useEffect(() => {
+    const flushNow = () => {
+      const s = liveRef.current;
+      if (s.id && s.dur > 0) saveHistoryRef.current(s.ep, s.t, s.dur);
+      flushNativeStateSync();
+    };
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
-        wasPlayingBeforeHiddenRef.current = !paused || waiting;
+        const el = videoRef.current?.el();
+        wasPlayingBeforeHiddenRef.current = !paused && el?.paused === false;
+        for (const t of keepAliveTimers.current) window.clearTimeout(t);
+        keepAliveTimers.current = [];
+        flushNow();
         if (videoRef.current) {
           videoRef.current.pause();
         }
@@ -1479,14 +1555,37 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           try {
             videoRef.current.play();
           } catch {}
+        } else {
+          wasPlayingBeforeHiddenRef.current = false;
         }
       }
     };
+    const onAudioPauseRequested = () => {
+      for (const t of keepAliveTimers.current) window.clearTimeout(t);
+      keepAliveTimers.current = [];
+      wasPlayingBeforeHiddenRef.current = false;
+      videoRef.current?.pause();
+    };
+    const onAudioDuck = (e: Event) => {
+      const duck = Boolean((e as CustomEvent<{ duck?: boolean }>).detail?.duck);
+      setAudioDuck(duck);
+    };
+    const onOnlineRecover = () => {
+      if (!isPlayingOffline && !playUrl) setProxyRetry((v) => v + 1);
+    };
     document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", flushNow);
+    window.addEventListener("aurastream:audio-pause-requested", onAudioPauseRequested);
+    window.addEventListener("aurastream:audio-duck", onAudioDuck);
+    window.addEventListener("online", onOnlineRecover);
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", flushNow);
+      window.removeEventListener("aurastream:audio-pause-requested", onAudioPauseRequested);
+      window.removeEventListener("aurastream:audio-duck", onAudioDuck);
+      window.removeEventListener("online", onOnlineRecover);
     };
-  }, [active, waiting, paused, muted]);
+  }, [active, paused, muted, isPlayingOffline, playUrl]);
 
   useEffect(() => {
     // Mini PiP popup on app switch / home disabled per user requirement
@@ -1525,6 +1624,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   };
 
   const pickEp = (ep: number) => {
+    const s = liveRef.current;
+    if (s.id && s.dur > 0) saveHistory(s.ep, s.t, s.dur);
     setEpMap((m) => ({ ...m, [curId]: ep }));
     setPanel(null);
   };
@@ -1560,7 +1661,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           const isActive = i === index;
           const sectionClass = `${fs && !isActive ? "hidden" : "relative w-full h-full"} snap-start snap-always overflow-hidden`;
           // Preserve scroll/snap geometry without mounting distant posters and controls.
-          if (isDesktop && Math.abs(i - index) > 1 && Math.abs(i - renderIndex) > 1) {
+          if (Math.abs(i - index) > 1 && Math.abs(i - renderIndex) > 1) {
             return <section key={vid} className={sectionClass} aria-hidden="true" />;
           }
           return (
@@ -1638,19 +1739,28 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         onSize={(w, h) => setVsize((prev) => (prev.w === w && prev.h === h ? prev : { w, h }))}
                         onPlaying={() => {
                           setPaused(false); setWaiting(false); setErr(""); setVideoStarted(true);
+                          if (!muted) {
+                            try { (window as any).AuraNativeExport?.requestPlaybackAudioFocus?.(); } catch {}
+                          }
                         }}
-                        onPause={() => setPaused(true)}
+                        onPause={() => {
+                          for (const t of keepAliveTimers.current) window.clearTimeout(t);
+                          keepAliveTimers.current = [];
+                          setPaused(true);
+                        }}
                         onWaiting={() => setWaiting(true)}
                         onEnded={() => {
                           void checkAutoDeleteFinishedEpisode(curId, curEp);
                           let sleepTriggered = false;
                           checkSleepTimerEpisodeEnd(() => {
                             sleepTriggered = true;
+                            videoRef.current?.pause();
                             setPaused(true);
                             toast("Sleep timer: Paused at end of episode", "info");
                           });
                           if (!sleepTriggered) {
                             if (cancelAutoNextRef.current) {
+                              videoRef.current?.pause();
                               setPaused(true);
                               return;
                             }
@@ -1663,6 +1773,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                           }
                         }}
                         onError={(m) => {
+                          for (const t of keepAliveTimers.current) window.clearTimeout(t);
+                          keepAliveTimers.current = [];
                           if (m.includes("bufferAppendError")) {
                             videoRef.current?.reload?.();
                             return;
@@ -1674,10 +1786,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                             return;
                           }
                           if (isPlayingOffline && (typeof navigator === "undefined" || navigator.onLine)) {
-                            toast("Offline file error, switching to online stream", "info");
-                            try {
-                              deleteOfflineEpisode(curId, curEp);
-                            } catch { /* ignore */ }
+                            toast("Offline playback issue, falling back to online stream", "info");
                             setOfflineUrls((m) => {
                               const copy = { ...m };
                               delete copy[playKey];
@@ -1701,6 +1810,24 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         }} />
                     </div>
                   </div>
+                  {active && (
+                    <SubtitleOverlay
+                      videoId={curId}
+                      episode={curEp}
+                      title={dramaTitle}
+                      streamUrl={playUrl}
+                      mode={store.subtitleMode}
+                      size={store.subtitleSize}
+                      playbackClock={playbackClock}
+                      isDesktop={isDesktop}
+                      clean={clean}
+                      fs={fs}
+                      rotated={rotated}
+                      bottomOffset={bottomInset}
+                      videoEl={videoRef.current?.el()}
+                      onTrackStatus={setSubtitleTrackInfo}
+                    />
+                  )}
 
                   {/* Double-tap Seek & Tap Play/Pause Ripple HUD */}
                   {seekRipple && (
@@ -1772,9 +1899,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     <small>{index + 1} / {videoIds.length}</small>
                   </div>
                 ) : (
-                  <div className="absolute inset-x-0 z-20 flex items-center gap-2 px-2.5" style={{ top: "calc(var(--sat, 0px) + 8px)", paddingRight: mode === "context" ? 170 : 210 }}>
-                    <Button onClick={onBack} aria-label={t("common.back")} className="hg-chip w-9 h-9 rounded-full flex items-center justify-center pressable elev-1"><IBack size={20} /></Button>
-                    <span className="text-[15px] font-semibold hg-ink hg-ov-shadow truncate max-w-[130px]">{title}</span>
+                  <div className="absolute inset-x-0 z-20 flex items-center gap-2 px-2.5" style={{ top: "calc(var(--sat, 0px) + 8px)", paddingRight: 168 }}>
+                    <Button onClick={onBack} aria-label={t("common.back")} className="hg-chip w-10 h-10 rounded-full flex items-center justify-center pressable elev-1 shrink-0"><IBack size={20} /></Button>
+                    <span className="text-[15px] font-semibold hg-ink hg-ov-shadow truncate flex-1 min-w-0">{title}</span>
                     {!panel && (
                       <span className="feed-position-pill shrink-0 px-2.5 py-0.5 rounded-full hg-chip text-[11.5px] font-semibold tabular-nums"
                         style={{ color: "rgba(255,255,255,.94)" }}>
@@ -1834,6 +1961,24 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                   >
                     <ICommentF size={25} className="hg-ink hg-ov-shadow" />
                     <span className="text-[11px] hg-ink-2 hg-ov-shadow font-medium tabular-nums">{fmt(meta.comment) || t("player.comments")}</span>
+                  </Button>
+
+                  {/* 3. Captions / Subtitles */}
+                  <Button
+                    type="button"
+                    onClick={() => setSubtitleSheetOpen(true)}
+                    style={{ touchAction: "manipulation" }}
+                    className="relative flex flex-col items-center justify-center min-w-[50px] min-h-[50px] gap-0.5 pressable cursor-pointer select-none active:scale-95 transition-transform"
+                    aria-label="Subtitles & Captions"
+                  >
+                    {store.subtitleMode !== "off" ? (
+                      <ICaptionsF size={25} className={subtitleTrackInfo?.hasTrack ? "text-amber-400 drop-shadow-[0_2px_8px_rgba(251,191,36,0.45)]" : "hg-ink hg-ov-shadow"} />
+                    ) : (
+                      <ICaptions size={25} className="hg-ink hg-ov-shadow" />
+                    )}
+                    <span className="text-[11px] hg-ink-2 hg-ov-shadow font-medium">
+                      {store.subtitleMode === "off" ? "CC Off" : "Captions"}
+                    </span>
                   </Button>
 
                   {/* 4. Offline Download */}
@@ -2025,7 +2170,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                           triggerSeekRipple("right", "+10s");
                           toast("Skipped intro (+10s)", "info");
                         }}
-                        className="flex items-center gap-1.5 h-7 px-3 rounded-full bg-black/60 backdrop-blur-md border border-amber-400/40 text-white text-[11.5px] font-semibold shadow-lg pressable a-pop transition-transform hover:scale-105 active:scale-95"
+                        className="flex items-center gap-1.5 h-9 px-3.5 rounded-full bg-black/65 backdrop-blur-md border border-amber-400/40 text-white text-[12px] font-semibold shadow-lg pressable a-pop transition-transform active:scale-95"
                       >
                         <IFastForwardF size={12} className="text-amber-400" />
                         <span>Skip Intro (+10s)</span>
@@ -2052,14 +2197,14 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                               setDismissNextEp(curEp);
                               toast("Auto-play next episode cancelled", "info");
                             }}
-                            className="h-6 px-2 rounded-lg bg-white/10 hover:bg-white/15 text-white/90 text-[11px] font-medium pressable"
+                            className="h-8 px-2.5 rounded-lg bg-white/10 hover:bg-white/15 text-white/90 text-[11.5px] font-medium pressable"
                           >
                             Cancel
                           </Button>
                           <Button
                             type="button"
                             onClick={() => pickEp(nextEpObj!.ep_num)}
-                            className="h-6 px-2.5 rounded-lg bg-primary text-on-primary font-bold text-[11px] flex items-center gap-1 shadow-md pressable"
+                            className="h-8 px-3 rounded-lg bg-primary text-on-primary font-bold text-[11.5px] flex items-center gap-1 shadow-md pressable"
                           >
                             <IPlayF size={9} />
                             <span>Play Now</span>
@@ -2083,8 +2228,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       </span>
                     )}
                   </div>
-                    <div ref={barRef} className="mx-4 mt-1 mb-2 relative pointer-events-auto" style={{ height: 26, touchAction: "none" }}
-                      onPointerDown={onBarDown} onPointerMove={onBarMove} onPointerUp={onBarUp} onPointerCancel={onBarUp}>
+                    <div ref={barRef} className="mx-4 -my-1.5 mb-0.5 relative pointer-events-auto" style={{ height: 42, touchAction: "none" }}
+                      onPointerDown={onBarDown} onPointerMove={onBarMove} onPointerUp={onBarUp} onPointerCancel={onBarCancel}>
                       {/* Scrub track */}
                       <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-[2.5px] rounded-full" style={{ background: "rgba(255,255,255,.14)" }}>
                         <div className="h-full rounded-full"
@@ -2149,7 +2294,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 </div>
               )}
               {isActive && err && (
-                <div className="absolute inset-0 z-20 flex items-center justify-center p-6">
+                <div className={`absolute inset-0 z-20 flex items-center justify-center p-6 ${!fs && !clean && !isDesktop && !panel ? "pr-16" : ""}`}>
                   <div
                     className="rounded-2xl p-6 flex flex-col items-center gap-3 text-center max-w-sm backdrop-blur-xl border border-white/10 shadow-2xl"
                     style={{ background: "rgba(18, 18, 22, 0.90)" }}
@@ -2335,24 +2480,24 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       )}
 
       {/* Mobile speed HUD / lock indicator */}
-      {!isDesktop && (holdSpeed || speedLock || rate !== 1) && (!fs || !idle) && (
+      {!isDesktop && !clean && (holdSpeed || speedLock || rate !== 1) && (!fs || !idle) && (
         <Button
           onClick={() => {
             if (speedLock) { setSpeedLock(false); toast("Speed lock released", "info"); }
             else if (rate !== 1 && !holdSpeed) setRate(1);
           }}
           className={`absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 px-3.5 h-8 rounded-full backdrop-blur-md whitespace-nowrap max-w-[calc(100vw-32px)] text-[12px] font-bold elev-2 pressable ${speedLock ? "bg-primary text-on-primary" : "hg-chip hg-gold"}`}
-          style={{ top: rotated ? 56 : (!isDesktop && zoom.s > 1.05 ? "calc(max(var(--sat, 0px), 36px) + 92px)" : "calc(max(var(--sat, 0px), 36px) + 54px)") }}>
+          style={{ top: rotated ? 56 : (!isDesktop && zoom.s > 1.05 ? "calc(var(--sat, 0px) + 92px)" : "calc(var(--sat, 0px) + 56px)") }}>
           <IBoltF size={13} />
           {effRate}x {speedLock ? "Locked · Tap to unlock" : holdSpeed ? (effRate < 1 ? "Slow-mo · Release to restore" : `${effRate}x · Release to restore`) : "Speed"}
         </Button>
       )}
-      {!isDesktop && holdSpeed && (
+      {!isDesktop && holdSpeed && holdLockable && (
         <div
           className={`absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-4 h-10 rounded-xl backdrop-blur-md elev-2 ${lockArmed ? "bg-primary text-on-primary" : "hg-chip-strong hg-ink-2"}`}
           style={{ top: "38%" }}>
           <ILockF size={16} />
-          <span className="text-[14px] font-bold">{lockArmed ? "Release to lock 2.0x" : "Swipe up to lock speed"}</span>
+          <span className="text-[14px] font-bold">{lockArmed ? `Release to lock ${holdRate}x` : "Swipe up to lock speed"}</span>
         </div>
       )}
 
@@ -2362,13 +2507,13 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           className="absolute inset-x-0 z-30 px-4"
           style={{
             bottom: rotated ? 52 : "calc(var(--sab, 0px) + 52px)",
-            paddingLeft: rotated ? "calc(var(--sat, 0px) + 16px)" : undefined,
-            paddingRight: rotated ? "calc(var(--sab, 0px) + 16px)" : undefined,
-            height: 22,
+            paddingLeft: rotated ? "calc(var(--sat, 0px) + 16px)" : "calc(var(--sal, 0px) + 16px)",
+            paddingRight: rotated ? "calc(var(--sab, 0px) + 16px)" : "calc(var(--sar, 0px) + 16px)",
+            height: 36,
           }}>
           <div ref={barRef} className="relative h-full" style={{ touchAction: "none" }}
-            onPointerDown={onBarDown} onPointerMove={onBarMove} onPointerUp={onBarUp} onPointerCancel={onBarUp}>
-            <div className="absolute inset-x-0 bottom-[8px] h-[2.5px] rounded-full" style={{ background: "rgba(255,255,255,.3)" }}>
+            onPointerDown={onBarDown} onPointerMove={onBarMove} onPointerUp={onBarUp} onPointerCancel={onBarCancel}>
+            <div className="absolute inset-x-0 bottom-[10px] h-[3px] rounded-full" style={{ background: "rgba(255,255,255,.3)" }}>
               <div className="h-full rounded-full bg-white" style={{ width: `${barProgress * 100}%` }} />
             </div>
           </div>
@@ -2379,10 +2524,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       {!isDesktop && fs && !idle && (
         <>
           <Button onClick={exitFs} aria-label="Exit Fullscreen"
-            className="hg-chip-strong absolute z-40 w-9 h-9 rounded-full backdrop-blur-md flex items-center justify-center pressable elev-1"
+            className="hg-chip-strong absolute z-40 w-10 h-10 rounded-full backdrop-blur-md flex items-center justify-center pressable elev-1"
             style={{
-              top: rotated ? 12 : "calc(var(--sat, 0px) + 6px)",
-              right: rotated ? "calc(var(--sab, 0px) + 12px)" : 12,
+              top: rotated ? 12 : "calc(var(--sat, 0px) + 8px)",
+              right: rotated ? "calc(var(--sab, 0px) + 12px)" : "calc(var(--sar, 0px) + 12px)",
               background: "rgba(12, 15, 22, 0.72)",
               border: "1px solid rgba(255, 255, 255, 0.18)",
             }}>
@@ -2391,11 +2536,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           <div className="absolute inset-x-0 z-40 flex items-center gap-2 px-3"
             style={{
               bottom: rotated ? 10 : "calc(var(--sab, 0px) + 10px)",
-              paddingLeft: rotated ? "calc(var(--sat, 0px) + 16px)" : undefined,
-              paddingRight: rotated ? "calc(var(--sab, 0px) + 16px)" : undefined,
+              paddingLeft: rotated ? "calc(var(--sat, 0px) + 16px)" : "calc(var(--sal, 0px) + 12px)",
+              paddingRight: rotated ? "calc(var(--sab, 0px) + 16px)" : "calc(var(--sar, 0px) + 12px)",
             }}>
             <Button onClick={() => videoRef.current?.toggle()}
-              className="hg-chip shrink-0 w-9 h-9 rounded-full flex items-center justify-center pressable">
+              className="hg-chip shrink-0 w-10 h-10 rounded-full flex items-center justify-center pressable">
               {paused ? <IPlayF size={18} /> : <IPauseF size={17} />}
             </Button>
             <span className="shrink-0 px-2 py-0.5 rounded-full bg-black/55 border border-white/10 text-[12px] font-semibold text-white/95 tabular-nums">{fmtTime(time)}</span>
@@ -2562,10 +2707,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 </div>
                 <Button
                   onClick={() => setPanel(null)}
-                  className="w-7 h-7 rounded-full bg-s3 hover:bg-s4/20 flex items-center justify-center text-on/70 hover:text-on pressable shrink-0"
+                  className="w-10 h-10 rounded-full bg-s3 hover:bg-s4/20 flex items-center justify-center text-on/70 hover:text-on pressable shrink-0"
                   aria-label={t("common.close")}
                 >
-                  <IClose size={14} />
+                  <IClose size={16} />
                 </Button>
               </div>
 
@@ -3005,18 +3150,27 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       {!isDesktop && !controlsLocked && active && (!fs || !idle) && !clean && !panel && (
         <div className={`absolute z-40 flex items-center gap-1.5 ${fs ? "" : "right-3"}`}
           style={{
-            top: rotated ? 12 : "calc(max(var(--sat, 0px), 36px) + 8px)",
-            right: fs ? (rotated ? "calc(var(--sab, 0px) + 56px)" : 56) : undefined,
+            top: rotated ? 12 : "calc(var(--sat, 0px) + 8px)",
+            right: fs ? (rotated ? "calc(var(--sab, 0px) + 60px)" : "calc(var(--sar, 0px) + 60px)") : undefined,
           }}>
+          {fs && (
+            <Button
+              onClick={() => setSubtitleSheetOpen(true)}
+              aria-label="Subtitles & Captions"
+              className="hg-chip w-10 h-10 rounded-full flex items-center justify-center pressable elev-1"
+            >
+              {store.subtitleMode !== "off" ? <ICaptionsF size={17} className="text-amber-400" /> : <ICaptions size={17} />}
+            </Button>
+          )}
           {!fs && !clean && <Button onClick={() => setMuted(m => !m)} aria-label={muted ? "Unmute" : "Mute"}
-            className="hg-chip w-9 h-9 rounded-full flex items-center justify-center pressable elev-1">
+            className="hg-chip w-10 h-10 rounded-full flex items-center justify-center pressable elev-1">
             {muted ? <IVolMute size={17} /> : <IVol size={17} />}
           </Button>}
           <Button onClick={lockControls} aria-label="Lock controls" title="Lock controls" aria-pressed={false}
-            className="hg-chip w-9 h-9 rounded-full flex items-center justify-center pressable elev-1"><ILockF size={17} /></Button>
+            className="hg-chip w-10 h-10 rounded-full flex items-center justify-center pressable elev-1"><ILockF size={17} /></Button>
           {!fs && !clean && (
             <Button onClick={() => enterFs(isLandscapeCurrent())} aria-label={t("player.fullscreen")}
-              className="hg-chip w-9 h-9 rounded-full flex items-center justify-center pressable elev-1">
+              className="hg-chip w-10 h-10 rounded-full flex items-center justify-center pressable elev-1">
               <IExpand size={16} />
             </Button>
           )}
@@ -3124,6 +3278,19 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         );
       })()}
       <LinePicker open={lineOpen} onClose={() => setLineOpen(false)} />
+      <SubtitleSheet
+        open={subtitleSheetOpen}
+        onClose={() => setSubtitleSheetOpen(false)}
+        mode={store.subtitleMode}
+        onModeChange={store.setSubtitleMode}
+        size={store.subtitleSize}
+        onSizeChange={store.setSubtitleSize}
+        videoId={curId}
+        episode={curEp}
+        title={dramaTitle}
+        streamUrl={playUrl}
+        trackInfo={subtitleTrackInfo}
+      />
       {controlsLocked && <PlaybackLock active={active} onUnlock={() => { setControlsLocked(false); wake(); }} />}
     </div>
   );

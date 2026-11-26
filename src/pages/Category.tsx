@@ -113,7 +113,7 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
       <div ref={scrollRef} className="ios-page-body flex-1 scroll-y pt-3 pb-[calc(var(--sab,0px)+176px)]">
         <div className={wide ? "max-w-[1200px] mx-auto w-full" : ""}>
         {/* Rankings: full-width featured card */}
-        <div className="px-4 mb-2.5">
+        <div className="mb-2.5">
           <Button
             onClick={() => push({ kind: "ranks" })}
             className="ios-collection-link w-full flex items-center justify-between p-3.5 text-left pressable group transition-all"
@@ -132,7 +132,7 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
         </div>
 
         {/* Topics + Tags side-by-side grid */}
-        <div className="px-4 mb-3">
+        <div className="mb-3">
           <CollectionLinks className="ios-category-links">
             <CollectionLink
               icon={<IGrid size={18} strokeWidth={1.8} />}
@@ -255,7 +255,7 @@ const ORIGINAL_CATES = [
 const originalSort = (cate: (typeof ORIGINAL_CATES)[number]["value"]) =>
   cate === "all" ? "new" : "latest";
 
-export function ChannelPage({ cate, name, onBack, wide }: { cate: string; name: string; onBack: () => void; wide: boolean }) {
+export function ChannelPage({ cate, name, onBack, wide, active = true }: { cate: string; name: string; onBack: () => void; wide: boolean; active?: boolean }) {
   const { push } = useStore();
   const [searching, setSearching] = useState(false);
   const [serverSort, setServerSort] = useState<(typeof CHANNEL_SORTS)[number]["value"]>("latest");
@@ -319,6 +319,9 @@ export function ChannelPage({ cate, name, onBack, wide }: { cate: string; name: 
     scrollContainer.current?.scrollTo({ top: 0 });
   };
 
+  const loadMoreRef = useRef(loadMore);
+  loadMoreRef.current = loadMore;
+
   useEffect(() => {
     void loadMore(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -328,11 +331,10 @@ export function ChannelPage({ cate, name, onBack, wide }: { cate: string; name: 
     const el = sentinel.current;
     if (!el) return;
     const io = new IntersectionObserver((es) => {
-      if (es[0].isIntersecting) void loadMore();
+      if (es[0].isIntersecting) void loadMoreRef.current();
     }, { rootMargin: "600px" });
     io.observe(el);
     return () => io.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pages]);
 
   return (
@@ -366,7 +368,7 @@ export function ChannelPage({ cate, name, onBack, wide }: { cate: string; name: 
           )}
         </div>
       </div>
-      <div ref={scrollContainer} className="flex-1 scroll-y px-4 pt-3 pb-[calc(var(--sab,0px)+140px)]">
+      <div ref={scrollContainer} className="flex-1 scroll-y px-4 pt-3 pb-[calc(var(--sab,0px)+32px)]">
         <div className={wide ? "max-w-[1200px] mx-auto w-full" : ""}>
         {items.length ? (
           <Masonry videos={items} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: items.map((x) => x.id), index: Math.max(0, items.findIndex((x) => x.id === v.id)), title: name })} />
@@ -390,7 +392,7 @@ export function ChannelPage({ cate, name, onBack, wide }: { cate: string; name: 
         )}
         </div>
       </div>
-      {searching && <InplaceSearch kind="video" scope={cate === "original" ? "original" : undefined} wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: `Search · ${name}` })} />}
+      {searching && <InplaceSearch active={active} kind="video" scope={cate === "original" ? "original" : undefined} wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: `Search · ${name}` })} />}
     </div>
   );
 }

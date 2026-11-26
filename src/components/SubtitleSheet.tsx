@@ -77,6 +77,16 @@ export default function SubtitleSheet({
     }
   }, [open]);
 
+  const activeEpKeyRef = useRef(`${videoId ?? 0}_${episode ?? 0}`);
+  activeEpKeyRef.current = `${videoId ?? 0}_${episode ?? 0}`;
+
+  useEffect(() => {
+    abortCtrlRef.current?.abort();
+    abortCtrlRef.current = null;
+    setTranscribing(false);
+    setTranscribeStatus("");
+  }, [videoId, episode]);
+
   useEffect(() => {
     return () => {
       abortCtrlRef.current?.abort();
@@ -206,6 +216,7 @@ export default function SubtitleSheet({
 
     abortCtrlRef.current?.abort();
     const ctrl = new AbortController();
+    const startEpKey = `${videoId}_${episode}`;
     abortCtrlRef.current = ctrl;
     setTranscribing(true);
     setTranscribeStatus("Preparing episode audio...");
@@ -214,20 +225,24 @@ export default function SubtitleSheet({
         videoId,
         episode,
         streamUrl || "",
-        setTranscribeStatus,
+        (msg) => { if (!ctrl.signal.aborted && activeEpKeyRef.current === startEpKey) setTranscribeStatus(msg); },
         ctrl.signal
       );
+      if (ctrl.signal.aborted || activeEpKeyRef.current !== startEpKey) return;
       if (mode === "off") onModeChange("en");
       toast(`Generated ${track.cues.length} synced subtitle lines`, "ok");
       setTranscribeStatus("");
       setAiExpanded(false);
     } catch (err) {
+      if (ctrl.signal.aborted || activeEpKeyRef.current !== startEpKey) return;
       const msg = (err as Error)?.message || "AI transcription failed";
       toast(msg, "info");
       setTranscribeStatus("");
     } finally {
-      if (abortCtrlRef.current === ctrl) abortCtrlRef.current = null;
-      setTranscribing(false);
+      if (abortCtrlRef.current === ctrl) {
+        abortCtrlRef.current = null;
+        setTranscribing(false);
+      }
     }
   };
 
@@ -700,6 +715,13 @@ export default function SubtitleSheet({
                     color: previewTextColor,
                     textShadow: previewShadow,
                     backgroundColor: previewBg,
+                    fontFamily: styleConfig.font === "rounded"
+                      ? '"SF Pro Rounded", ui-rounded, sans-serif'
+                      : styleConfig.font === "serif"
+                      ? 'Georgia, Cambria, "Times New Roman", Times, serif'
+                      : styleConfig.font === "mono"
+                      ? 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
+                      : undefined,
                   }}
                 >
                   <span className="text-[9.5px] uppercase tracking-wider font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
@@ -906,7 +928,7 @@ export default function SubtitleSheet({
             <span className="text-[11px] font-bold uppercase tracking-wider text-mut">
               Color & Style Presets
             </span>
-            <div className="grid grid-cols-5 gap-1.5">
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
               {[
                 { id: "white" as const, label: "YouTube", dot: "#FFFFFF" },
                 { id: "yellow" as const, label: "Netflix", dot: "#FFE600" },
@@ -944,7 +966,7 @@ export default function SubtitleSheet({
             <span className="text-[11px] font-bold uppercase tracking-wider text-mut">
               Background Box Opacity
             </span>
-            <div className="grid grid-cols-4 gap-1.5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
               {[
                 { label: "None (0%)", opacity: 0, bgStyle: "none" as const },
                 { label: "Subtle (50%)", opacity: 50, bgStyle: "translucent" as const },

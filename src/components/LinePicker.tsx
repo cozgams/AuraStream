@@ -180,7 +180,7 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
   const close = () => { if (!applying.current) onClose(); };
 
   const body = (
-    <div className="flex flex-col min-h-0" style={{ maxHeight: isMobile ? "74vh" : "min(72vh, 620px)" }}>
+    <div className="flex flex-col min-h-0" style={{ maxHeight: isMobile ? "min(76dvh, calc(100dvh - 24px))" : "min(72dvh, 620px)" }}>
       <div className="shrink-0 flex items-center gap-2 px-4 pt-3 pb-2">
         <span className="w-8 h-8 rounded-full bg-s3 flex items-center justify-center text-primary"><ISettings size={16} /></span>
         <div className="flex-1 min-w-0">
@@ -199,7 +199,7 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
           <form onSubmit={event => { event.preventDefault(); saveCustom(); }}>
             <label htmlFor="custom-line-address" className="block text-[14px] text-on mb-2">Endpoint URL</label>
             <Input id="custom-line-address" aria-label="Endpoint URL" value={custom} disabled={busyAll}
-              className="min-h-12 w-full min-w-0 text-[14px]" type="url" inputMode="url" autoCapitalize="none" autoComplete="off" spellCheck={false}
+              className="min-h-12 w-full min-w-0 text-[16px]" type="url" inputMode="url" autoCapitalize="none" autoComplete="off" spellCheck={false}
               placeholder="https://mirror.example.com" aria-invalid={!!customError}
               aria-describedby={`custom-line-hint${customError ? " custom-line-error" : ""}`}
               onChange={event => { setCustom(event.target.value); setCustomError(""); }} />

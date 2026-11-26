@@ -249,6 +249,10 @@ function applyTheme(theme: Theme) {
   root.dataset.theme = theme;
   const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
   if (meta) meta.content = theme === "light" ? "#eeece7" : "#121212";
+  try {
+    (window as unknown as { AuraNativeExport?: { setSystemBarAppearance?: (dark: boolean) => void } })
+      .AuraNativeExport?.setSystemBarAppearance?.(theme === "dark");
+  } catch { /* ignore */ }
 }
 
 let themeTransitionTimer = 0;

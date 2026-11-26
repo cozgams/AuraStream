@@ -70,7 +70,7 @@ class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{ position: "fixed", inset: 0, background: "#121216", color: "#f4f1eb", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center", fontFamily: "system-ui, sans-serif" }}>
+        <div style={{ position: "fixed", inset: 0, background: "var(--p-bg, #121216)", color: "var(--p-on, #f4f1eb)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", paddingTop: "calc(var(--sat, 12px) + 24px)", paddingBottom: "calc(var(--sab, 16px) + 24px)", paddingInline: 24, textAlign: "center", fontFamily: "system-ui, sans-serif" }}>
           <div style={{ width: 56, height: 56, borderRadius: 16, background: "rgba(239, 68, 68, 0.15)", color: "#ef4444", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />

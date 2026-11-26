@@ -196,16 +196,16 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
             <h1 className="ios-page-title text-on">{t("nav.search")}</h1>
           </div>
           {/* Search Bar */}
-          <div className="pb-3 flex items-center gap-2.5">
-            <Form className="ios-search-form flex-1 flex items-center gap-2"
+          <div className="pb-3 flex items-center gap-2.5 min-w-0">
+            <Form className="ios-search-form flex-1 min-w-0 flex items-center gap-2"
               onSubmit={(e) => { e.preventDefault(); submit(q); }}>
               <ISearch size={17} className="text-mut shrink-0" />
-              <Input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("search.placeholder")}
-                className="flex-1 min-w-0 bg-transparent text-[14px] text-on placeholder-dim outline-none" />
-              {q && <Button aria-label="Clear" type="button" onClick={() => { seqRef.current++; busy.current = false; setLoading(false); setErr(null); setPage(0); setPages(1); setQ(""); setSubmitted(""); setItems([]); setPosts([]); }} className="ios-icon-button ios-search-clear"><IClose size={16} /></Button>}
+              <Input ref={inputRef} size={1} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("search.placeholder")}
+                className="flex-1 min-w-0 w-full bg-transparent text-[16px] text-on placeholder-dim outline-none" />
+              {q && <Button aria-label="Clear" type="button" onClick={() => { seqRef.current++; busy.current = false; setLoading(false); setErr(null); setPage(0); setPages(1); setQ(""); setSubmitted(""); setItems([]); setPosts([]); }} className="ios-icon-button ios-search-clear shrink-0"><IClose size={16} /></Button>}
             </Form>
             <Button onClick={() => push({ kind: "ranks" })} aria-label={t("cat.rankings")}
-              className="ios-icon-button ios-search-shortcut">
+              className="ios-icon-button ios-search-shortcut shrink-0">
               <ITrophy size={19} />
             </Button>
           </div>
@@ -334,7 +334,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
                 {popularTags.map((t) => {
                   const display = formatDramaTag(t);
                   return (
-                    <Button key={t} onClick={() => { setQ(t); submit(t); }}
+                    <Button key={t} onClick={() => { inputRef.current?.blur(); setQ(t); submit(t); }}
                       className="px-3 h-7 rounded-(--r-ctl) bg-s3 border border-edge/30 hover:border-primary/40 hover:text-primary text-[13px] text-on/85 transition-colors pressable">{display}</Button>
                   );
                 })}
@@ -344,6 +344,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
             <div className="flex items-center justify-between mt-6 mb-2.5">
               <span className="text-[14px] font-bold text-on">{t("search.popular_tropes")}</span>
               <Button onClick={() => {
+                inputRef.current?.blur();
                 const picked = DISCOVERY_THEMES[Math.floor(Math.random() * DISCOVERY_THEMES.length)];
                 setQ(picked);
                 submit(picked);
@@ -352,7 +353,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
             </div>
             <div className="flex flex-wrap gap-2 mt-2">
               {DISCOVERY_THEMES.map((theme) => (
-                <Button key={theme} onClick={() => { setTab("video"); setQ(theme); submit(theme, "video"); }}
+                <Button key={theme} onClick={() => { inputRef.current?.blur(); setTab("video"); setQ(theme); submit(theme, "video"); }}
                   className="px-3 h-7 rounded-(--r-ctl) bg-primary/10 hover:bg-primary/20 text-primary text-[12.5px] font-semibold pressable transition-colors">
                   {theme}
                 </Button>
@@ -455,7 +456,7 @@ export function RankPage({ onBack, wide }: { onBack: () => void; wide: boolean }
         </div>
       </div>
 
-      <div className="flex-1 scroll-y px-3.5 pt-3 pb-[calc(var(--sab,0px)+120px)]">
+      <div className="flex-1 scroll-y px-3.5 pt-3 pb-[calc(var(--sab,0px)+32px)]">
         <div className={wide ? "max-w-[960px] mx-auto w-full" : ""}>
         {loading ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>

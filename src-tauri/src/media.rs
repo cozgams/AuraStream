@@ -11,6 +11,7 @@ use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::{atomic::{AtomicU64, Ordering}, Arc, Mutex, Weak};
+use std::time::Instant;
 use tauri::http::{Response, StatusCode};
 
 /// Platform-specific base URI for local custom protocol.
@@ -95,14 +96,16 @@ static IMG_CACHE: Lazy<Mutex<BoundedCache<Arc<Vec<u8>>>>> =
 type ImageResult = Result<(String, Arc<Vec<u8>>), String>;
 type ImageLoad = tokio::sync::OnceCell<ImageResult>;
 type CachedMediaPayload = (String, Arc<Vec<u8>>);
+type CachedPlaylist = (Arc<String>, Instant);
 type ImageLoadingMap = HashMap<(u64, String), Weak<ImageLoad>>;
 
 // Deduplicate concurrent image requests; share download and decryption.
 static IMG_LOADING: Lazy<Mutex<ImageLoadingMap>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 static IMG_GENERATION: AtomicU64 = AtomicU64::new(0);
-static PL_CACHE: Lazy<Mutex<BoundedCache<Arc<String>>>> =
+static PL_CACHE: Lazy<Mutex<BoundedCache<CachedPlaylist>>> =
     Lazy::new(|| Mutex::new(BoundedCache::new()));
+const PL_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(600);
 /// In-memory cache for AES Keys and segments to avoid duplicate downloads during seeking.
 static KEY_CACHE: Lazy<Mutex<BoundedCache<CachedMediaPayload>>> =
     Lazy::new(|| Mutex::new(BoundedCache::new()));
@@ -325,8 +328,10 @@ pub async fn load_playlist(url: &str, prefix: &str) -> Result<Arc<String>, Strin
     // Cache key includes prefix as rewritten URLs vary by scheme
     let cache_key = format!("{prefix}|{url}");
     if let Ok(mut cache) = PL_CACHE.lock() {
-        if let Some(hit) = cache.get(&cache_key) {
-            return Ok(hit);
+        if let Some((hit, issued)) = cache.get(&cache_key) {
+            if issued.elapsed() < PL_CACHE_TTL {
+                return Ok(hit);
+            }
         }
     }
     let (_, bytes) = fetch_bytes(url).await?;
@@ -337,7 +342,7 @@ pub async fn load_playlist(url: &str, prefix: &str) -> Result<Arc<String>, Strin
     let rewritten = rewrite_playlist(url, text, prefix);
     let len = rewritten.len();
     let arc = Arc::new(rewritten);
-    cache_put(&PL_CACHE, cache_key, arc.clone(), len, PL_CACHE_MAX, PL_CACHE_TOTAL_MAX_BYTES);
+    cache_put(&PL_CACHE, cache_key, (arc.clone(), Instant::now()), len, PL_CACHE_MAX, PL_CACHE_TOTAL_MAX_BYTES);
     Ok(arc)
 }
 
@@ -679,6 +684,9 @@ fn serve_offline_binary_file(
     head_only: bool,
 ) -> Response<Vec<u8>> {
     const OFFLINE_CHUNK_CAP: u64 = 4 * 1024 * 1024;
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    const UNRANGED_FULL_CAP: u64 = OFFLINE_CHUNK_CAP;
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     const UNRANGED_FULL_CAP: u64 = 64 * 1024 * 1024;
 
     let Ok(mut file) = std::fs::File::open(file_path) else {

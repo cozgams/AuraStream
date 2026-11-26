@@ -515,6 +515,11 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
   useEffect(() => {
     if (!active || view === "overview") return;
     return registerOverlayBack(() => {
+      if (downloadSearchOpen) {
+        setDownloadSearchOpen(false);
+        setDownloadSearchQuery("");
+        return true;
+      }
       if (selectMode) {
         setSelectMode(false);
         setSelectedKeys(new Set());
@@ -524,10 +529,12 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
         setView("downloads");
         return true;
       }
+      setDownloadSearchOpen(false);
+      setDownloadSearchQuery("");
       setView("overview");
       return true;
     });
-  }, [active, view, selectMode]);
+  }, [active, view, selectMode, downloadSearchOpen]);
 
   useEffect(() => {
     document.body.classList.toggle("has-selection-mode", active && selectMode);
@@ -769,6 +776,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
   useEffect(() => {
     let alive = true;
     if (view === "overview" || view === "downloads" || view === "seriesDetail" || !subviewIds.length) {
+      subviewFetchedRef.current.clear();
       setCards([]);
       return;
     }
@@ -1310,9 +1318,9 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                               removeHistory(h.id);
                               toast("Removed from watch history", "info");
                             }}
-                            className="absolute top-1 left-1 w-4 h-4 rounded-full bg-black/60 hover:bg-red-500/90 text-white/90 flex items-center justify-center shadow-xs transition-colors"
+                            className="absolute top-1 left-1 w-7 h-7 rounded-full bg-black/65 hover:bg-red-500/90 text-white/95 flex items-center justify-center shadow-xs transition-colors"
                           >
-                            <IClose size={9} />
+                            <IClose size={11} />
                           </button>
 
                           {/* Top-Right Duration Pill */}
@@ -1563,7 +1571,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                   ? `Update Ready: v${availableUpdate.latest}`
                   : "Check for Updates"}
               </button>
-              <div className="text-center text-[10.5px] text-[#94a3b8] font-medium tracking-tight">
+              <div className="text-center text-[10.5px] text-[#64748b] dark:text-neutral-400 font-medium tracking-tight">
                 AuraStream v{APP_VERSION} · This App Created by AAA. All rights reserved.
               </div>
             </div>
@@ -1575,21 +1583,21 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
           <div className="flex flex-col gap-3.5 a-rise min-w-0 w-full overflow-x-hidden pb-4">
             {/* Search Input Bar (when search is toggled in top bar) */}
             {downloadSearchOpen && (
-              <div className="relative flex items-center bg-white/95 dark:bg-neutral-900/95 border border-blue-200/90 dark:border-blue-500/30 rounded-full px-3.5 py-2 shadow-xs a-fade-in">
+              <div className="relative flex items-center bg-white/95 dark:bg-neutral-900/95 border border-blue-200/90 dark:border-blue-500/30 rounded-full px-3.5 py-2 shadow-xs a-fade">
                 <ISearch size={15} className="text-slate-400 shrink-0 mr-2" />
                 <input
                   type="text"
                   value={downloadSearchQuery}
                   onChange={(e) => setDownloadSearchQuery(e.target.value)}
                   placeholder="Search downloaded shows & episodes..."
-                  className="flex-1 bg-transparent text-[13px] text-[#0f172a] dark:text-neutral-100 placeholder:text-slate-400 outline-none"
+                  className="flex-1 bg-transparent text-[16px] text-[#0f172a] dark:text-neutral-100 placeholder:text-slate-400 outline-none"
                   autoFocus
                 />
                 {downloadSearchQuery && (
                   <button
                     type="button"
                     onClick={() => setDownloadSearchQuery("")}
-                    className="w-5 h-5 rounded-full bg-slate-200 dark:bg-neutral-800 text-slate-500 dark:text-neutral-300 flex items-center justify-center pressable"
+                    className="w-8 h-8 -mr-1 rounded-full bg-slate-200 dark:bg-neutral-800 text-slate-600 dark:text-neutral-300 flex items-center justify-center pressable shrink-0"
                     aria-label="Clear search"
                   >
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -2714,9 +2722,9 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
           <div className="flex flex-col gap-2.5 a-rise">
             {(view === "favs" || view === "watchlater") && cards.length > 1 && (
               <div className="flex flex-wrap items-center justify-between gap-2 px-1 mb-1.5">
-                <div className="flex items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <span className="text-[12px] font-semibold text-[#64748b] dark:text-neutral-400">Status:</span>
-                  <div className="inline-flex rounded-full bg-slate-200/60 dark:bg-white/10 p-0.5 text-[12px]">
+                  <div className="inline-flex flex-wrap rounded-2xl bg-slate-200/60 dark:bg-white/10 p-0.5 text-[12px] gap-0.5">
                     {([
                       { id: "all", label: `All (${statusCounts.all})` },
                       { id: "ongoing", label: `In-Progress (${statusCounts.ongoing})` },
@@ -2738,9 +2746,9 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                     ))}
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <span className="text-[12px] font-semibold text-[#64748b] dark:text-neutral-400">Sort:</span>
-                  <div className="inline-flex rounded-full bg-slate-200/60 dark:bg-white/10 p-0.5 text-[12px]">
+                  <div className="inline-flex flex-wrap rounded-2xl bg-slate-200/60 dark:bg-white/10 p-0.5 text-[12px] gap-0.5">
                     {([
                       { id: "recent", label: "Recent" },
                       { id: "finished", label: "Finished First" },
@@ -2809,9 +2817,9 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                           toast("Removed from watch history", "info");
                         }
                       }}
-                      className={`absolute ${Number(c.score) > 0 ? "top-11" : "top-2.5"} right-2.5 z-10 w-6 h-6 rounded-full bg-black/65 hover:bg-red-500/90 text-white flex items-center justify-center shadow-sm pressable transition-colors`}
+                      className={`absolute ${Number(c.score) > 0 ? "top-11" : "top-2.5"} right-2.5 z-10 w-8 h-8 rounded-full bg-black/65 hover:bg-red-500/90 text-white flex items-center justify-center shadow-sm pressable transition-colors`}
                     >
-                      <IClose size={11} />
+                      <IClose size={13} />
                     </button>
                   </div>
                 );

@@ -1,18 +1,28 @@
 package com.aurastream.app
 
+import android.content.BroadcastReceiver
+import android.content.ComponentCallbacks2
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.MediaScannerConnection
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -23,7 +33,11 @@ import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -31,6 +45,7 @@ import java.lang.ref.WeakReference
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
 
 class MainActivity : TauriActivity() {
@@ -44,6 +59,25 @@ class MainActivity : TauriActivity() {
   var activeDownloadCount: Int = 0
   @Volatile
   var isAppInForeground: Boolean = true
+  @Volatile
+  var systemBarDark: Boolean = true
+  @Volatile
+  var immersiveFullscreen: Boolean = false
+  @Volatile
+  var insetTopDp: Int = 24
+  @Volatile
+  var insetBottomDp: Int = 16
+  @Volatile
+  var insetLeftDp: Int = 0
+  @Volatile
+  var insetRightDp: Int = 0
+  private val uiHandler = Handler(Looper.getMainLooper())
+  private var unlockOrientationRunnable: Runnable? = null
+  private var networkCallback: ConnectivityManager.NetworkCallback? = null
+  private var noisyReceiver: BroadcastReceiver? = null
+  private var noisyReceiverRegistered: Boolean = false
+  private var audioFocusRequest: AudioFocusRequest? = null
+  private var audioFocusListener: AudioManager.OnAudioFocusChangeListener? = null
 
   private val stateLock = Any()
   private val stateDiskLock = Any()
@@ -239,7 +273,6 @@ class MainActivity : TauriActivity() {
   }
 
   companion object {
-    const val DOWNLOAD_CHANNEL_ID = "aurastream_downloads"
     @Volatile
     var isForegroundGlobal: Boolean = true
     @Volatile
@@ -253,21 +286,177 @@ class MainActivity : TauriActivity() {
     }
   }
 
+  private fun applySystemBarsAndInsets() {
+    try {
+      val controller = WindowInsetsControllerCompat(window, window.decorView)
+      controller.isAppearanceLightStatusBars = !systemBarDark
+      controller.isAppearanceLightNavigationBars = !systemBarDark
+      controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+      if (immersiveFullscreen) {
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+      } else {
+        controller.show(WindowInsetsCompat.Type.systemBars())
+      }
+    } catch (_: Exception) {}
+  }
+
+  private fun pushInsetsToWebView() {
+    val wv = currentWebView ?: return
+    val t = insetTopDp
+    val b = insetBottomDp
+    val l = insetLeftDp
+    val r = insetRightDp
+    val js = "window.__auraNativeInsets={top:$t,bottom:$b,left:$l,right:$r};window.dispatchEvent(new CustomEvent('aurastream:insets-changed',{detail:window.__auraNativeInsets}));"
+    wv.post { wv.evaluateJavascript(js, null) }
+  }
+
+  private fun computeCellularNow(): Boolean {
+    return try {
+      val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+      val activeNetwork = cm.activeNetwork ?: return false
+      val caps = cm.getNetworkCapabilities(activeNetwork) ?: return false
+      if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) {
+        return false
+      }
+      caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+        (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) && cm.isActiveNetworkMetered) ||
+        !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  private fun dispatchNetworkState(connected: Boolean) {
+    val cellular = if (connected) computeCellularNow() else false
+    runOnUiThread {
+      currentWebView?.evaluateJavascript(
+        "window.dispatchEvent(new CustomEvent('aurastream:network-changed',{detail:{cellular:$cellular,connected:$connected}}));",
+        null
+      )
+    }
+  }
+
+  private fun registerNetworkMonitor() {
+    if (networkCallback != null) return
+    try {
+      val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+      val cb = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+          dispatchNetworkState(true)
+        }
+        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+          val validated = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+          dispatchNetworkState(validated)
+        }
+        override fun onLost(network: Network) {
+          val stillUp = try { cm.activeNetwork != null } catch (_: Exception) { false }
+          dispatchNetworkState(stillUp)
+        }
+      }
+      cm.registerDefaultNetworkCallback(cb)
+      networkCallback = cb
+    } catch (_: Exception) {}
+  }
+
+  private fun unregisterNetworkMonitor() {
+    val cb = networkCallback ?: return
+    networkCallback = null
+    try {
+      val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+      cm?.unregisterNetworkCallback(cb)
+    } catch (_: Exception) {}
+  }
+
+  private fun registerNoisyAudioReceiver() {
+    if (noisyReceiverRegistered) return
+    try {
+      val receiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+          if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+            runOnUiThread {
+              currentWebView?.evaluateJavascript(
+                "window.dispatchEvent(new CustomEvent('aurastream:audio-pause-requested'));",
+                null
+              )
+            }
+          }
+        }
+      }
+      noisyReceiver = receiver
+      ContextCompat.registerReceiver(
+        this,
+        receiver,
+        IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY),
+        ContextCompat.RECEIVER_EXPORTED
+      )
+      noisyReceiverRegistered = true
+    } catch (_: Exception) {}
+  }
+
+  private fun unregisterNoisyAudioReceiver() {
+    val receiver = noisyReceiver ?: return
+    noisyReceiver = null
+    if (!noisyReceiverRegistered) return
+    noisyReceiverRegistered = false
+    try {
+      unregisterReceiver(receiver)
+    } catch (_: Exception) {}
+  }
+
+  private fun abandonPlaybackFocus() {
+    try {
+      val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        audioFocusRequest?.let { am.abandonAudioFocusRequest(it) }
+      } else {
+        @Suppress("DEPRECATION")
+        audioFocusListener?.let { am.abandonAudioFocus(it) }
+      }
+    } catch (_: Exception) {}
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     android.util.Log.i("AuraStream", "MainActivity.onCreate called")
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+      val lp = window.attributes
+      lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+      window.attributes = lp
+    }
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     activeActivityRef = WeakReference(this)
     isForegroundGlobal = true
-    cleanupExportsDir(0L)
+    cleanupExportsDir(30 * 60 * 1000L)
     createDownloadNotificationChannel()
-    requestNotificationPermission()
+    ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { _, insets ->
+      val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+      val density = resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
+      val t = kotlin.math.ceil((bars.top / density).toDouble()).toInt().coerceAtLeast(0)
+      val b = kotlin.math.ceil((bars.bottom / density).toDouble()).toInt().coerceAtLeast(0)
+      val l = kotlin.math.ceil((bars.left / density).toDouble()).toInt().coerceAtLeast(0)
+      val r = kotlin.math.ceil((bars.right / density).toDouble()).toInt().coerceAtLeast(0)
+      if (t != insetTopDp || b != insetBottomDp || l != insetLeftDp || r != insetRightDp) {
+        insetTopDp = t
+        insetBottomDp = b
+        insetLeftDp = l
+        insetRightDp = r
+        pushInsetsToWebView()
+      }
+      insets
+    }
+    registerNetworkMonitor()
+    registerNoisyAudioReceiver()
+    applySystemBarsAndInsets()
   }
 
   override fun onResume() {
     super.onResume()
     isAppInForeground = true
     isForegroundGlobal = true
+    applySystemBarsAndInsets()
+    try {
+      ViewCompat.requestApplyInsets(window.decorView)
+    } catch (_: Exception) {}
     AuraDownloadService.clearCompletedSummary()
     try {
       androidx.core.app.NotificationManagerCompat.from(this).cancel(AuraDownloadService.COMPLETE_NOTIFICATION_ID)
@@ -275,6 +464,7 @@ class MainActivity : TauriActivity() {
     try {
       currentWebView?.onResume()
       currentWebView?.resumeTimers()
+      pushInsetsToWebView()
       currentWebView?.post {
         currentWebView?.evaluateJavascript(
           "window.dispatchEvent(new CustomEvent('aurastream:app-resumed'));",
@@ -288,13 +478,6 @@ class MainActivity : TauriActivity() {
     super.onPause()
     isAppInForeground = false
     isForegroundGlobal = false
-    try {
-      // If downloads are in progress, keep WebView active and timers running in background
-      if (activeDownloadCount > 0) {
-        currentWebView?.onResume()
-        currentWebView?.resumeTimers()
-      }
-    } catch (_: Exception) {}
     flushAppStateAsync()
   }
 
@@ -303,14 +486,22 @@ class MainActivity : TauriActivity() {
     isAppInForeground = false
     isForegroundGlobal = false
     try {
-      // Keep WebView execution alive if background downloads are running
-      if (activeDownloadCount > 0) {
-        currentWebView?.onResume()
-        currentWebView?.resumeTimers()
-      }
       android.webkit.CookieManager.getInstance().flush()
     } catch (_: Exception) {}
-    flushAppStateAsync()
+    flushAppStateSync()
+  }
+
+  override fun onTrimMemory(level: Int) {
+    super.onTrimMemory(level)
+    if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+      cleanupExportsDir(15 * 60 * 1000L)
+      runOnUiThread {
+        currentWebView?.evaluateJavascript(
+          "window.dispatchEvent(new CustomEvent('aurastream:trim-memory',{detail:{level:$level}}));",
+          null
+        )
+      }
+    }
   }
 
   override fun onRequestPermissionsResult(
@@ -329,6 +520,11 @@ class MainActivity : TauriActivity() {
 
   override fun onDestroy() {
     super.onDestroy()
+    unlockOrientationRunnable?.let { uiHandler.removeCallbacks(it) }
+    unlockOrientationRunnable = null
+    unregisterNetworkMonitor()
+    unregisterNoisyAudioReceiver()
+    abandonPlaybackFocus()
     releaseWakeLock()
     if (activeActivityRef?.get() === this) {
       activeActivityRef = null
@@ -345,14 +541,14 @@ class MainActivity : TauriActivity() {
     AuraDownloadService.ensureSilentChannels(this)
   }
 
-  private fun requestNotificationPermission() {
+  fun maybePromptNotificationPermissionOnce() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-        getSharedPreferences("aurastream_perms", Context.MODE_PRIVATE)
-          .edit()
-          .putBoolean("asked_notif", true)
-          .apply()
-        requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
+        val prefs = getSharedPreferences("aurastream_perms", Context.MODE_PRIVATE)
+        if (!prefs.getBoolean("asked_notif", false)) {
+          prefs.edit().putBoolean("asked_notif", true).apply()
+          requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
+        }
       }
     }
   }
@@ -364,6 +560,10 @@ class MainActivity : TauriActivity() {
     webView.settings.domStorageEnabled = true
     webView.settings.mediaPlaybackRequiresUserGesture = false
     webView.addJavascriptInterface(AuraExportBridge(this), "AuraNativeExport")
+    try {
+      ViewCompat.requestApplyInsets(window.decorView)
+    } catch (_: Exception) {}
+    pushInsetsToWebView()
   }
 
   override fun onUserLeaveHint() {
@@ -390,49 +590,126 @@ class MainActivity : TauriActivity() {
 
     @JavascriptInterface
     fun isCellularNetwork(): Boolean {
+      return activity.computeCellularNow()
+    }
+
+    @JavascriptInterface
+    fun getSystemInsets(): String {
+      return JSONObject().apply {
+        put("top", activity.insetTopDp)
+        put("bottom", activity.insetBottomDp)
+        put("left", activity.insetLeftDp)
+        put("right", activity.insetRightDp)
+      }.toString()
+    }
+
+    @JavascriptInterface
+    fun setSystemBarAppearance(isDark: Boolean) {
+      activity.systemBarDark = isDark
+      activity.runOnUiThread {
+        activity.applySystemBarsAndInsets()
+      }
+    }
+
+    @JavascriptInterface
+    fun setImmersiveFullscreen(fullscreen: Boolean, landscape: Boolean) {
+      activity.immersiveFullscreen = fullscreen
+      activity.runOnUiThread {
+        activity.unlockOrientationRunnable?.let { activity.uiHandler.removeCallbacks(it) }
+        activity.unlockOrientationRunnable = null
+        activity.applySystemBarsAndInsets()
+        if (landscape) {
+          activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        } else if (!fullscreen && activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+          activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+          val r = Runnable {
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            activity.unlockOrientationRunnable = null
+          }
+          activity.unlockOrientationRunnable = r
+          activity.uiHandler.postDelayed(r, 900L)
+        } else {
+          activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+      }
+    }
+
+    @JavascriptInterface
+    fun setOrientation(landscape: Boolean) {
+      setImmersiveFullscreen(activity.immersiveFullscreen, landscape)
+    }
+
+    @JavascriptInterface
+    fun requestPlaybackAudioFocus(): Boolean {
       return try {
-        val cm = activity.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return false
-        val activeNetwork = cm.activeNetwork ?: return false
-        val caps = cm.getNetworkCapabilities(activeNetwork) ?: return false
-        caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) &&
-          !caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) &&
-          !caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)
+        val am = activity.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
+        if (activity.audioFocusListener == null) {
+          activity.audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+            when (focusChange) {
+              AudioManager.AUDIOFOCUS_LOSS,
+              AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                activity.runOnUiThread {
+                  activity.currentWebView?.evaluateJavascript(
+                    "window.dispatchEvent(new CustomEvent('aurastream:audio-pause-requested'));",
+                    null
+                  )
+                }
+              }
+              AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                activity.runOnUiThread {
+                  activity.currentWebView?.evaluateJavascript(
+                    "window.dispatchEvent(new CustomEvent('aurastream:audio-duck',{detail:{duck:true}}));",
+                    null
+                  )
+                }
+              }
+              AudioManager.AUDIOFOCUS_GAIN -> {
+                activity.runOnUiThread {
+                  activity.currentWebView?.evaluateJavascript(
+                    "window.dispatchEvent(new CustomEvent('aurastream:audio-duck',{detail:{duck:false}}));",
+                    null
+                  )
+                }
+              }
+            }
+          }
+        }
+        val listener = activity.audioFocusListener ?: return false
+        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          val req = activity.audioFocusRequest ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(
+              AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+                .build()
+            )
+            .setOnAudioFocusChangeListener(listener)
+            .build()
+            .also { activity.audioFocusRequest = it }
+          am.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        } else {
+          @Suppress("DEPRECATION")
+          am.requestAudioFocus(listener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        }
+        granted
       } catch (_: Exception) {
         false
       }
     }
 
     @JavascriptInterface
-    fun isPictureInPictureSupported(): Boolean {
-      return false
+    fun abandonPlaybackAudioFocus() {
+      activity.abandonPlaybackFocus()
     }
 
     @JavascriptInterface
-    fun enterPictureInPicture(): Boolean {
-      return false
-    }
-
-    @Suppress("UNUSED_PARAMETER")
-    @JavascriptInterface
-    fun enterPictureInPictureWithAspect(num: Int, den: Int): Boolean {
-      return false
-    }
-
-    @Suppress("UNUSED_PARAMETER")
-    @JavascriptInterface
-    fun setAutoPip(enabled: Boolean) {
-      activity.autoPipEnabled = false
-    }
-
-    @JavascriptInterface
-    fun setOrientation(landscape: Boolean) {
+    fun moveAppToBackground(): Boolean {
       activity.runOnUiThread {
-        activity.requestedOrientation = if (landscape) {
-          ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        } else {
-          ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        }
+        try {
+          activity.moveTaskToBack(true)
+        } catch (_: Exception) {}
       }
+      return true
     }
 
     @JavascriptInterface
@@ -441,14 +718,13 @@ class MainActivity : TauriActivity() {
         val prev = activity.activeDownloadCount
         activity.activeDownloadCount = maxOf(0, count)
         if (activity.activeDownloadCount > 0) {
+          activity.maybePromptNotificationPermissionOnce()
           activity.acquireWakeLock()
           if (!AuraDownloadService.isRunning && !MainActivity.serviceStartRequested) {
             activity.startDownloadService("Episode", "Downloading offline...", activity.activeDownloadCount)
           } else {
             AuraDownloadService.instance?.refreshNotification(activity.activeDownloadCount)
           }
-          activity.currentWebView?.onResume()
-          activity.currentWebView?.resumeTimers()
         } else if ((prev > 0 || AuraDownloadService.isRunning || MainActivity.serviceStartRequested) && !AuraDownloadService.hasActiveDiskDownloads(activity)) {
           AuraDownloadService.clearDownloads()
           activity.stopDownloadService()
@@ -584,6 +860,33 @@ class MainActivity : TauriActivity() {
     }
 
     @JavascriptInterface
+    fun saveAppStateNow(data: String): Boolean {
+      return try {
+        synchronized(activity.stateLock) {
+          activity.pendingAppState = data
+          activity.stateVersion += 1L
+        }
+        activity.flushAppStateAsync()
+        true
+      } catch (e: Exception) {
+        e.printStackTrace()
+        false
+      }
+    }
+
+    private fun readValidJsonText(f: File): String? {
+      if (!f.exists() || f.length() <= 0L) return null
+      return try {
+        val raw = f.readText(Charsets.UTF_8)
+        if (raw.isBlank()) return null
+        JSONObject(raw)
+        raw
+      } catch (_: Exception) {
+        null
+      }
+    }
+
+    @JavascriptInterface
     fun loadAppState(): String {
       val cached = synchronized(activity.stateLock) { activity.pendingAppState }
       if (cached != null) return cached
@@ -592,12 +895,10 @@ class MainActivity : TauriActivity() {
           val file = File(activity.filesDir, "app_state_backup.json")
           val tmpFile = File(activity.filesDir, "app_state_backup.json.tmp")
           val bakFile = File(activity.filesDir, "app_state_backup.json.bak")
-          when {
-            file.exists() && file.length() > 0 -> file.readText(Charsets.UTF_8)
-            tmpFile.exists() && tmpFile.length() > 0 -> tmpFile.readText(Charsets.UTF_8)
-            bakFile.exists() && bakFile.length() > 0 -> bakFile.readText(Charsets.UTF_8)
-            else -> ""
-          }
+          readValidJsonText(file)
+            ?: readValidJsonText(tmpFile)
+            ?: readValidJsonText(bakFile)
+            ?: ""
         } catch (e: Exception) {
           e.printStackTrace()
           ""
@@ -667,7 +968,10 @@ class MainActivity : TauriActivity() {
 
     private fun sanitizeExportFileName(raw: String, fallbackPrefix: String, fallbackExt: String): String {
       val base = File(raw).name
-      val sanitized = base.replace("[^a-zA-Z0-9._-]".toRegex(), "_").trim('_', '.')
+      val sanitized = base
+        .replace("[\\\\/:*?\"<>|\\x00-\\x1F]".toRegex(), "_")
+        .replace("\\s+".toRegex(), " ")
+        .trim('_', '.', ' ')
       if (sanitized.isEmpty() || sanitized == "." || sanitized == ".." || sanitized.contains("..")) {
         return "${fallbackPrefix}_${System.currentTimeMillis()}.$fallbackExt"
       }

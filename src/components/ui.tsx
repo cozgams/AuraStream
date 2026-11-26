@@ -87,7 +87,7 @@ export function ToastHost() {
   const { toasts, platform } = useStore();
   const isMobile = platform === "android" || platform === "ios";
   return (
-    <div role="status" aria-live="polite" aria-atomic="true" className="ios-toast-host absolute inset-x-0 z-[80] flex flex-col items-center gap-2 pointer-events-none px-6" style={{ bottom: isMobile ? "calc(max(var(--sab, 0px), 48px) + 168px)" : "32px" }}>
+    <div role="status" aria-live="polite" aria-atomic="true" className="ios-toast-host fixed inset-x-0 z-[400] flex flex-col items-center gap-2 pointer-events-none px-4 sm:px-6" style={{ bottom: isMobile ? "calc(max(var(--sab, 16px), 12px) + 148px)" : "32px" }}>
       {toasts.map((t) =>
         t.line ? (
           <div

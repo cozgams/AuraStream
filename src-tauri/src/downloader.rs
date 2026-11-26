@@ -33,7 +33,7 @@ static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
 
 static CANCEL_TOKENS: Lazy<Mutex<HashMap<String, Arc<AtomicBool>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
-static ACTIVE_ABORTS: Lazy<Mutex<HashMap<String, tokio::task::AbortHandle>>> =
+static ACTIVE_ABORTS: Lazy<Mutex<HashMap<String, (u64, tokio::task::AbortHandle)>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -260,7 +260,7 @@ fn remove_part_dir_async(root: &Path, id: &str) {
     }
 }
 
-fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
+fn atomic_write_bytes_opts(path: &Path, bytes: &[u8], sync: bool) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed creating dir: {e}"))?;
     }
@@ -274,12 +274,18 @@ fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
     {
         let mut f = File::create(&tmp).map_err(|e| format!("Failed creating temp file: {e}"))?;
         f.write_all(bytes).map_err(|e| format!("Failed writing temp file: {e}"))?;
-        let _ = f.sync_all();
+        if sync {
+            let _ = f.sync_all();
+        }
     }
     fs::rename(&tmp, path).map_err(|e| {
         let _ = fs::remove_file(&tmp);
         format!("Failed renaming temp file: {e}")
     })
+}
+
+fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    atomic_write_bytes_opts(path, bytes, true)
 }
 
 fn persist_all_locked(st: &DownloadEngineState) {
@@ -333,7 +339,7 @@ fn write_active_status_locked(st: &DownloadEngineState, root: &Path) {
         "recentCompleted": st.recent_completed,
     });
     if let Ok(bytes) = serde_json::to_vec(&status_doc) {
-        let _ = atomic_write_bytes(&root.join("active_status.json"), &bytes);
+        let _ = atomic_write_bytes_opts(&root.join("active_status.json"), &bytes, false);
     }
 }
 
@@ -512,7 +518,7 @@ fn trigger_cancel_flag(id: &str) {
     }
     {
         let mut aborts = ACTIVE_ABORTS.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(ah) = aborts.remove(id) {
+        if let Some((_, ah)) = aborts.remove(id) {
             ah.abort();
         }
     }
@@ -619,13 +625,17 @@ async fn coordinator_loop() {
             let id_cl = id.clone();
             let handle = tokio::spawn(async move {
                 run_episode_download(item, cancel).await;
-                ACTIVE_ABORTS.lock().unwrap_or_else(|e| e.into_inner()).remove(&id_cl);
+                let mut aborts = ACTIVE_ABORTS.lock().unwrap_or_else(|e| e.into_inner());
+                if aborts.get(&id_cl).is_some_and(|(t, _)| *t == run_tok) {
+                    aborts.remove(&id_cl);
+                }
+                drop(aborts);
                 ENGINE_NOTIFY.notify_one();
             });
             ACTIVE_ABORTS
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .insert(id.clone(), handle.abort_handle());
+                .insert(id.clone(), (run_tok, handle.abort_handle()));
             active_tasks.insert(id, (run_tok, handle));
         }
     }
@@ -1300,6 +1310,22 @@ async fn download_hls_to_dir(
         .map(|l| l.trim().to_string())
         .collect();
 
+    // Clear partial HLS segments when switching stream quality or container format so mixed variants cannot corrupt output.
+    let sig_marker = part_dir.join(".variant_sig");
+    let variant_is_fmp4 = lines.iter().any(|l| l.starts_with("#EXT-X-MAP:"));
+    let sig = format!("{}|{}|{}", item.quality, item.is_hevc, if variant_is_fmp4 { "m4s" } else { "ts" });
+    if fs::read_to_string(&sig_marker).ok().as_deref() != Some(sig.as_str()) {
+        if let Ok(entries) = fs::read_dir(part_dir) {
+            for ent in entries.flatten() {
+                let p = ent.path();
+                if p.is_file() {
+                    let _ = fs::remove_file(&p);
+                }
+            }
+        }
+        let _ = fs::write(&sig_marker, sig.as_bytes());
+    }
+
     let mut key_map: HashMap<String, String> = HashMap::new();
     let mut map_map: HashMap<String, String> = HashMap::new();
     let mut seg_tasks: Vec<(usize, String, String)> = Vec::new();
@@ -1713,6 +1739,9 @@ async fn download_direct_to_dir(
     if received == 0 {
         return Err("Empty download received (0 bytes)".into());
     }
+    if content_len > 0 && received < content_len {
+        return Err(format!("Incomplete stream received ({received} / {content_len} bytes)"));
+    }
     fs::rename(&tmp_path, &final_path).map_err(|e| format!("Failed finalizing MP4: {e}"))?;
     Ok(received)
 }
@@ -1930,7 +1959,8 @@ pub async fn native_download_enqueue(
             if st.completed.iter().any(|c| c.id == id) {
                 continue;
             }
-            if let Some(existing) = st.queue.iter_mut().find(|q| q.id == id) {
+            if let Some(pos) = st.queue.iter().position(|q| q.id == id) {
+                let existing = &mut st.queue[pos];
                 if existing.status == "paused" || existing.status == "error" {
                     existing.status = "queued".to_string();
                     existing.error = None;
@@ -1944,8 +1974,13 @@ pub async fn native_download_enqueue(
                         existing.stream_url = None;
                     }
                     added += 1;
+                    continue;
                 }
-                continue;
+                if existing.status == "completed" {
+                    st.queue.remove(pos);
+                } else {
+                    continue;
+                }
             }
             st.queue.push(QueueDownloadItem {
                 id,
@@ -1977,6 +2012,52 @@ pub async fn native_download_enqueue(
 
     ENGINE_NOTIFY.notify_one();
     Ok(json!({ "queued": added }))
+}
+
+#[tauri::command]
+pub fn native_download_set_cellular(cellular: bool) -> Result<(), String> {
+    CELLULAR_MODE.store(cellular, Ordering::Release);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn native_offline_set_cues(id: String, cues: Vec<Value>) -> Result<(), String> {
+    if !is_safe_segment(&id) {
+        return Err("Invalid episode ID".into());
+    }
+    if cues.is_empty() {
+        return Ok(());
+    }
+    let Some(root) = offline_root() else {
+        return Err("Offline storage unavailable".into());
+    };
+    let mut updated = false;
+    {
+        let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(comp) = st.completed.iter_mut().find(|c| c.id == id) {
+            comp.cues = cues.clone();
+            updated = true;
+        }
+        if let Some(q) = st.queue.iter_mut().find(|q| q.id == id) {
+            q.cues = cues.clone();
+            updated = true;
+        }
+        if updated {
+            persist_all_locked(&st);
+            emit_frontend_snapshot(&st);
+        }
+    }
+    if let Ok(bytes) = serde_json::to_vec_pretty(&cues) {
+        let ep_dir = root.join(&id);
+        if ep_dir.is_dir() {
+            let _ = atomic_write_bytes(&ep_dir.join("cues.json"), &bytes);
+        }
+        let part_dir = root.join(format!("{id}.part"));
+        if part_dir.is_dir() {
+            let _ = atomic_write_bytes(&part_dir.join("cues.json"), &bytes);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -2172,7 +2253,13 @@ pub async fn native_offline_prepare_export(id: String, file_name: String) -> Res
         .unwrap_or("");
     let safe_name: String = base_name
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let trimmed = safe_name.trim_matches(|c| c == '_' || c == '.');
     let safe_name = if trimmed.is_empty() || trimmed == "." || trimmed == ".." || trimmed.contains("..") {

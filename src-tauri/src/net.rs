@@ -504,34 +504,60 @@ pub async fn get_stream(
     range: Option<&str>,
     referer: Option<&str>,
 ) -> Result<reqwest::Response, String> {
-    let mut next = network_policy::parse_target(raw)?;
-    for hop in 0..=5 {
-        let (target, http) = client_for(next.as_str()).await?;
-        let mut request = http.get(target.clone()).timeout(Duration::from_secs(6 * 3600));
-        if let Some(value) = range {
-            request = request.header(reqwest::header::RANGE, value);
+    let mut use_doh = false;
+    for attempt in 0..=1 {
+        let mut next = network_policy::parse_target(raw)?;
+        let res: Result<reqwest::Response, String> = 'redirect: {
+            for hop in 0..=5 {
+                let (target, http) = match client_for_dns(next.as_str(), use_doh).await {
+                    Ok(v) => v,
+                    Err(e) => break 'redirect Err(e),
+                };
+                let mut request = http.get(target.clone()).timeout(Duration::from_secs(6 * 3600));
+                if let Some(value) = range {
+                    request = request.header(reqwest::header::RANGE, value);
+                }
+                if let Some(value) = referer {
+                    request = request.header("Referer", value);
+                }
+                let sent = tokio::time::timeout(connect_timeout, request.send())
+                    .await
+                    .map_err(|_| "Request timed out".to_string())
+                    .and_then(|r| r.map_err(|e| err_text(&e)));
+                let response = match sent {
+                    Ok(r) => r,
+                    Err(e) => break 'redirect Err(e),
+                };
+                if !matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
+                    break 'redirect Ok(response);
+                }
+                if hop == 5 {
+                    break 'redirect Err("Too many redirects".into());
+                }
+                let Some(location) = response
+                    .headers()
+                    .get(reqwest::header::LOCATION)
+                    .and_then(|h| h.to_str().ok())
+                else {
+                    break 'redirect Err("Redirect missing valid Location".into());
+                };
+                match network_policy::redirect_target(&target, location) {
+                    Ok(u) => next = u,
+                    Err(e) => break 'redirect Err(e),
+                }
+            }
+            Err("Too many redirects".into())
+        };
+        match res {
+            Ok(resp) => return Ok(resp),
+            Err(err) if attempt == 0 => {
+                heal_client(&err);
+                use_doh = true;
+            }
+            Err(err) => return Err(err),
         }
-        if let Some(value) = referer {
-            request = request.header("Referer", value);
-        }
-        let response = tokio::time::timeout(connect_timeout, request.send())
-            .await
-            .map_err(|_| "Request timed out".to_string())?
-            .map_err(|e| err_text(&e))?;
-        if !matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
-            return Ok(response);
-        }
-        if hop == 5 {
-            return Err("Too many redirects".into());
-        }
-        let location = response
-            .headers()
-            .get(reqwest::header::LOCATION)
-            .and_then(|h| h.to_str().ok())
-            .ok_or("Redirect missing valid Location")?;
-        next = network_policy::redirect_target(&target, location)?;
     }
-    Err("Too many redirects".into())
+    Err("Stream connection failed".into())
 }
 
 /// Execute HTTP GET request with DNS validation, proxy routing, custom User-Agent,
@@ -680,10 +706,16 @@ static LAST_HEAL: Lazy<std::sync::Mutex<Option<Instant>>> =
 
 /// Heal connection pool on network or tunnel errors, debounced to once every 3 seconds.
 pub fn heal_client(reason: &str) {
-    let connectish = reason.contains("Connect")
-        || reason.contains("timed out")
-        || reason.contains("refused")
-        || reason.contains("dns");
+    let lower = reason.to_ascii_lowercase();
+    let connectish = lower.contains("connect")
+        || lower.contains("timed out")
+        || lower.contains("refused")
+        || lower.contains("dns")
+        || lower.contains("reset")
+        || lower.contains("closed")
+        || lower.contains("broken pipe")
+        || lower.contains("eof")
+        || lower.contains("unreachable");
     if !is_proxy_error(reason) && !connectish {
         return;
     }

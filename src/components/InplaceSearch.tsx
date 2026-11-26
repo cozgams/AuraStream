@@ -9,10 +9,11 @@ import { IBack, IClose, ISearch } from "../icons";
 import { localizeError } from "../i18n";
 import { registerOverlayBack } from "../back";
 
-export function InplaceSearch({ kind, postLabel = "Community", scope, onOpenVideo, onOpenPost, onClose, wide }: {
+export function InplaceSearch({ kind, postLabel = "Community", scope, active = true, onOpenVideo, onOpenPost, onClose, wide }: {
   kind: "video" | "post";
   postLabel?: string;
   scope?: "original";
+  active?: boolean;
   onOpenVideo?: (v: VideoCard, list: VideoCard[]) => void;
   onOpenPost?: (p: Post) => void;
   onClose: () => void;
@@ -32,6 +33,7 @@ export function InplaceSearch({ kind, postLabel = "Community", scope, onOpenVide
   onCloseRef.current = onClose;
 
   useEffect(() => {
+    if (!active) return undefined;
     const unsub = registerOverlayBack(() => {
       onCloseRef.current();
       return true;
@@ -47,7 +49,7 @@ export function InplaceSearch({ kind, postLabel = "Community", scope, onOpenVide
       unsub();
       window.removeEventListener("keydown", onKey);
     };
-  }, []);
+  }, [active]);
 
   const run = async (keyword: string, p: number) => {
     if (p > 1 && busy.current) return;
@@ -105,18 +107,18 @@ export function InplaceSearch({ kind, postLabel = "Community", scope, onOpenVide
 
   return (
     <div className="ios-page absolute inset-0 z-20 bg-bg flex flex-col">
-      <div className="shrink-0 px-4 pb-3 flex items-center gap-2.5 bg-s1" style={{ paddingTop: "calc(var(--sat, 0px) + 12px)" }}>
-        <Button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable" aria-label="Exit search"><IBack size={19} /></Button>
+      <div className="shrink-0 px-4 pb-3 flex items-center gap-2 bg-s1" style={{ paddingTop: "calc(var(--sat, 0px) + 12px)" }}>
+        <Button onClick={onClose} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable shrink-0" aria-label="Exit search"><IBack size={20} /></Button>
         <Form className="flex-1 flex items-center gap-2 h-11 rounded-(--r-ctl) bg-s3 px-3.5 focus-within:bg-s4 transition-colors"
           onSubmit={(e) => { e.preventDefault(); submit(q); }}>
           <ISearch size={17} className="text-mut shrink-0" />
           <Input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={kind === "post" ? `Search ${postLabel}…` : `Search ${videoLabel}…`}
-            className="flex-1 min-w-0 bg-transparent text-[14px] text-on placeholder-dim outline-none" />
-          {q && <Button aria-label="Clear search" type="button" onClick={() => { seqRef.current++; busy.current = false; setLoading(false); setErr(null); setQ(""); setSubmitted(""); setItems([]); setPosts([]); }} className="w-5 h-5 rounded-full bg-s4 flex items-center justify-center text-mut pressable"><IClose size={11} /></Button>}
+            className="flex-1 min-w-0 bg-transparent text-[16px] text-on placeholder-dim outline-none" />
+          {q && <Button aria-label="Clear search" type="button" onClick={() => { seqRef.current++; busy.current = false; setLoading(false); setErr(null); setQ(""); setSubmitted(""); setItems([]); setPosts([]); }} className="w-8 h-8 -mr-1 rounded-full bg-s4/70 flex items-center justify-center text-mut pressable shrink-0"><IClose size={13} /></Button>}
         </Form>
       </div>
 
-      <div className="flex-1 scroll-y px-4 pt-3 pb-8">
+      <div className="flex-1 scroll-y px-4 pt-3 pb-[calc(var(--sab,0px)+28px)]">
         {!submitted ? (
           <div className="flex justify-center py-20"><span className="text-[13px] text-mut">{kind === "post" ? `Type keywords to search ${postLabel}` : `Type keywords to search ${videoLabel}`}</span></div>
         ) : loading && !count ? (

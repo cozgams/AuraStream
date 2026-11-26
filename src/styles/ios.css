@@ -309,6 +309,14 @@ body.has-series-detail .hg-tabbar {
 @media(max-height:480px) and (orientation:landscape) {
   .ios-overlay-sheet .ios-dialog { max-height:calc(100dvh - 16px); }
 }
+body.has-keyboard .ios-overlay-sheet .ios-dialog {
+  max-height:calc(100dvh - 12px);
+  padding-bottom:12px;
+}
+body.has-keyboard .ios-mobile-nav,
+body.has-keyboard .hg-tabbar {
+  display:none !important;
+}
 @media(prefers-reduced-motion:reduce) {
   *,*::before,*::after { animation-duration:.01ms!important; animation-iteration-count:1!important; transition-duration:.01ms!important; scroll-behavior:auto!important; }
   .ios-loader { animation:none!important; border-style:dotted; }
@@ -587,9 +595,9 @@ html.theme-light {
   .ios-setting-group>.ios-appearance-row { grid-template-columns:36px minmax(0,1fr) auto; }
   .ios-appearance-row > .ios-appearance-picker { grid-column:auto; width:228px; }
 }
-.ios-form.ios-search-form { height:52px; min-height:52px; padding-inline:16px 4px; }
-.ios-search-form>.ios-search-clear { width:40px; height:40px; background:transparent; border:0; box-shadow:none; }
-.ios-search-shortcut.ios-icon-button { width:52px; height:52px; }
+.ios-form.ios-search-form { height:52px; min-height:52px; min-width:0; padding-inline:14px 6px; }
+.ios-search-form>.ios-search-clear { width:36px; height:36px; flex-shrink:0; background:transparent; border:0; box-shadow:none; }
+.ios-search-shortcut.ios-icon-button { width:48px; height:48px; flex-shrink:0; }
 .ios-score-badge { position:absolute; z-index:1; top:9px; right:9px; display:inline-flex; align-items:center; gap:4px; min-height:26px; padding:4px 7.5px; border:1px solid rgb(255 255 255 / .24); border-radius:999px; background:rgb(16 18 24 / .84); color:#ffe08a; font-size:12px; font-weight:750; line-height:1; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .ios-score-badge svg { flex:none; }
 .ios-rank-cover .ios-score-badge { top:3px; right:3px; scale:.88; transform-origin:top right; }

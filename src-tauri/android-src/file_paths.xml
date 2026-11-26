@@ -3,4 +3,5 @@
   <cache-path name="exports" path="exports/" />
   <cache-path name="updates" path="updates/" />
   <external-files-path name="sd_exports" path="AuraStream/" />
+  <root-path name="sd_storage" path="storage/" />
 </paths>

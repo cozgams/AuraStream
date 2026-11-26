@@ -382,10 +382,10 @@ export default function ExportSheet({
   return (
     <Sheet
       open={isOpen}
-      onClose={exporting ? () => {} : onClose}
+      onClose={exporting ? () => toast("Export in progress...", "info") : onClose}
       label={isBatch ? "Export Series" : "Export Episode"}
     >
-      <div className="flex flex-col max-h-[85vh] overflow-hidden bg-s1 text-on">
+      <div className="flex flex-col max-h-[85dvh] overflow-hidden bg-s1 text-on">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-edge/30 shrink-0">
           <div className="flex items-center gap-2.5">
@@ -406,10 +406,10 @@ export default function ExportSheet({
           <Button
             disabled={exporting}
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-s3 flex items-center justify-center text-mut pressable disabled:opacity-40"
+            className="w-10 h-10 rounded-full bg-s3 flex items-center justify-center text-mut pressable disabled:opacity-40"
             aria-label="Close"
           >
-            <IClose size={14} />
+            <IClose size={16} />
           </Button>
         </div>
 
@@ -537,7 +537,7 @@ export default function ExportSheet({
                     </span>
                   )}
                 </div>
-                <div className="text-[11px] text-mut mt-0.5 truncate">{t.subtitle}</div>
+                <div className="text-[11px] text-mut mt-0.5 line-clamp-2 leading-snug">{t.subtitle}</div>
               </div>
               <div className="shrink-0 text-mut">
                 <IDownload size={16} />

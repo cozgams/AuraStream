@@ -32,7 +32,7 @@ function writePinnedTags(tags: string[]) {
 }
 
 /* ================= Topics List Page ================= */
-export function TopicsPage({ onBack, wide }: { onBack: () => void; wide: boolean }) {
+export function TopicsPage({ onBack, wide, active = true }: { onBack: () => void; wide: boolean; active?: boolean }) {
   const { push, toast, t } = useStore();
   const [searching, setSearching] = useState(false);
   const [items, setItems] = useState<TopicCard[]>([]);
@@ -69,8 +69,8 @@ export function TopicsPage({ onBack, wide }: { onBack: () => void; wide: boolean
             <div className="text-[17px] font-bold text-on truncate leading-tight">{t("cat.topics_title")}</div>
             <div className="text-[11.5px] text-mut mt-0.5 leading-tight">{items.length} {t("cat.topics").toLowerCase()}</div>
           </div>
-          <Button onClick={() => setSearching(true)} aria-label="Search dramas" className="w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable shrink-0"><ISearch size={19} /></Button>
-          <Button aria-label="Refresh" onClick={load} className="w-9 h-9 rounded-full flex items-center justify-center text-mut hover:bg-s3 pressable shrink-0"><IRefresh size={16} /></Button>
+          <Button onClick={() => setSearching(true)} aria-label="Search dramas" className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable shrink-0"><ISearch size={19} /></Button>
+          <Button aria-label="Refresh" onClick={load} className="w-10 h-10 rounded-full flex items-center justify-center text-mut hover:bg-s3 pressable shrink-0"><IRefresh size={16} /></Button>
         </div>
       </div>
 
@@ -105,13 +105,13 @@ export function TopicsPage({ onBack, wide }: { onBack: () => void; wide: boolean
         </div>
         {wide && <div className="h-2" />}
       </div>
-      {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: "Search · Topics" })} />}
+      {searching && <InplaceSearch active={active} kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: "Search · Topics" })} />}
     </div>
   );
 }
 
 /* ================= Topic Detail Page ================= */
-export function TopicPage({ slug, name, onBack, wide }: { slug: string; name: string; onBack: () => void; wide: boolean }) {
+export function TopicPage({ slug, name, onBack, wide, active = true }: { slug: string; name: string; onBack: () => void; wide: boolean; active?: boolean }) {
   const { push, toast, t } = useStore();
   const [searching, setSearching] = useState(false);
   const [topic, setTopic] = useState<TopicCard | null>(null);
@@ -196,13 +196,13 @@ export function TopicPage({ slug, name, onBack, wide }: { slug: string; name: st
         {!loading && videos.length > 0 && page >= pages && <div className="text-center text-[12px] text-dim py-3">— You've reached the end —</div>}
         {wide && <div className="h-2" />}
       </div>
-      {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: topic?.title || name })} />}
+      {searching && <InplaceSearch active={active} kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: topic?.title || name })} />}
     </div>
   );
 }
 
 /* ================= Tags Directory Page ================= */
-export function TagsPage({ onBack, wide }: { onBack: () => void; wide: boolean }) {
+export function TagsPage({ onBack, wide, active = true }: { onBack: () => void; wide: boolean; active?: boolean }) {
   const { push, toast, t } = useStore();
   const [searching, setSearching] = useState(false);
   const [groups, setGroups] = useState<TagGroup[]>([]);
@@ -316,7 +316,7 @@ export function TagsPage({ onBack, wide }: { onBack: () => void; wide: boolean }
         )}
         {wide && <div className="h-2" />}
       </div>
-      {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: "Search · Tags" })} />}
+      {searching && <InplaceSearch active={active} kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: "Search · Tags" })} />}
     </div>
   );
 }
@@ -328,7 +328,7 @@ const TAG_SORTS = [
   { id: "episodes", label: "Episodes" },
 ] as const;
 
-export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string; onBack: () => void; wide: boolean }) {
+export function TagPage({ tag, name, onBack, wide, active = true }: { tag: string; name: string; onBack: () => void; wide: boolean; active?: boolean }) {
   const { push, toast } = useStore();
   const [searching, setSearching] = useState(false);
   const [items, setItems] = useState<VideoCard[]>([]);
@@ -399,14 +399,16 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
       <div className="shrink-0 bg-s1" style={{ paddingTop: "var(--sat, 0px)" }}>
-        <div className="px-3 pt-2 pb-3 flex items-center gap-2.5">
-          <Button aria-label="Back" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={20} /></Button>
-          <span className="text-[16px] font-bold text-on">{name}</span>
-          <span className="text-[12px] text-mut">{items.length} titles</span>
-          <Button onClick={togglePin} aria-label={isPinned ? "Unpin tag" : "Pin tag"} className={`ml-auto w-9 h-9 rounded-full flex items-center justify-center pressable ${isPinned ? "text-primary bg-primary/10" : "text-mut hover:bg-s3"}`}>
+        <div className="px-3 pt-2 pb-3 flex items-center gap-2">
+          <Button aria-label="Back" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable shrink-0"><IBack size={20} /></Button>
+          <div className="flex-1 min-w-0">
+            <div className="text-[16px] font-bold text-on truncate leading-tight">{name}</div>
+            <div className="text-[11.5px] text-mut mt-0.5 leading-tight">{items.length} titles</div>
+          </div>
+          <Button onClick={togglePin} aria-label={isPinned ? "Unpin tag" : "Pin tag"} className={`w-10 h-10 rounded-full flex items-center justify-center pressable shrink-0 ${isPinned ? "text-primary bg-primary/10" : "text-mut hover:bg-s3"}`}>
             {isPinned ? <IPinF size={18} /> : <IPin size={18} />}
           </Button>
-          <Button onClick={() => setSearching(true)} aria-label="Search dramas" className="w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><ISearch size={19} /></Button>
+          <Button onClick={() => setSearching(true)} aria-label="Search dramas" className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable shrink-0"><ISearch size={19} /></Button>
         </div>
         {items.length > 1 && (
           <div className="px-4 pb-2.5 flex items-center gap-2">
@@ -432,7 +434,7 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
         )}
       </div>
 
-      <div className="flex-1 scroll-y px-4 pt-3 pb-[calc(var(--sab,48px)+24px)]">
+      <div className="flex-1 scroll-y px-4 pt-3 pb-[calc(var(--sab,0px)+28px)]">
         {loading && !items.length ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
         ) : err && !items.length ? (
@@ -447,7 +449,7 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
         {!loading && items.length > 0 && page >= pages && <div className="text-center text-[12px] text-dim py-3">— You've reached the end —</div>}
         {wide && <div className="h-2" />}
       </div>
-      {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: name })} />}
+      {searching && <InplaceSearch active={active} kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: name })} />}
     </div>
   );
 }

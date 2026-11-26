@@ -132,7 +132,7 @@ export default function ContinueWatchingBar() {
   const bottomPos = !isMobile
     ? "20px"
     : platform === "android"
-      ? "calc(max(var(--sab, 0px), 48px) + 84px)"
+      ? "calc(max(var(--sab, 16px), 10px) + 80px)"
       : "calc(var(--sab, 16px) * 0.55 + 84px)";
 
   return (
@@ -141,7 +141,7 @@ export default function ContinueWatchingBar() {
       className="fixed inset-x-3 z-40 a-rise pointer-events-auto max-w-xl mx-auto"
       style={{ bottom: bottomPos }}
     >
-      <div className="relative overflow-hidden rounded-2xl bg-s1/95 backdrop-blur-2xl border border-edge/70 shadow-[0_16px_40px_rgba(0,0,0,0.35)] p-2.5 flex items-center gap-3">
+      <div className="relative overflow-hidden rounded-2xl bg-s1/95 backdrop-blur-2xl border border-edge/70 shadow-[0_16px_40px_rgba(0,0,0,0.35)] p-2.5 flex items-center gap-2.5">
         {/* Cover / Thumbnail with mini play badge & error fallback */}
         <div
           role="button"
@@ -149,7 +149,7 @@ export default function ContinueWatchingBar() {
           aria-label={resumeLabel}
           onClick={handleResume}
           onKeyDown={handleResumeKeyDown}
-          className="relative w-12 h-14 rounded-xl overflow-hidden bg-gradient-to-br from-s2 to-s3 border border-edge/50 shrink-0 cursor-pointer elev-1 group flex items-center justify-center focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2"
+          className="relative w-11 h-14 rounded-xl overflow-hidden bg-gradient-to-br from-s2 to-s3 border border-edge/50 shrink-0 cursor-pointer elev-1 group flex items-center justify-center focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2"
         >
           {coverUrl && !imgError ? (
             <img
@@ -203,10 +203,10 @@ export default function ContinueWatchingBar() {
         </div>
 
         {/* Actions: Resume & Dismiss */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           <Button
             onClick={handleResume}
-            className="px-3 h-8 rounded-xl bg-primary text-on-primary text-[12px] font-bold flex items-center gap-1 pressable shadow-sm"
+            className="px-2.5 h-9 rounded-xl bg-primary text-on-primary text-[12px] font-bold flex items-center gap-1 pressable shadow-sm whitespace-nowrap"
           >
             <IPlayF size={12} />
             <span>{isNextEpPrompt ? (t("player.play_next") || "Play Next") : t("player.resume")}</span>
@@ -219,9 +219,9 @@ export default function ContinueWatchingBar() {
               setDismissedState({ id: recent.id, at });
             }}
             aria-label={t("player.dismiss_continue")}
-            className="w-7 h-7 rounded-full flex items-center justify-center text-mut hover:text-on hover:bg-on/10 transition-colors pressable"
+            className="w-9 h-9 rounded-full flex items-center justify-center text-mut hover:text-on hover:bg-on/10 transition-colors pressable"
           >
-            <IClose size={14} />
+            <IClose size={15} />
           </Button>
         </div>
 

@@ -123,7 +123,7 @@ export default function ProxySettings() {
   };
 
   const disabled = !ready || !!busy || loading;
-  const body = <div className="flex flex-col min-h-0" style={{ maxHeight: isMobile ? "74vh" : "min(78vh, 640px)" }}>
+  const body = <div className="flex flex-col min-h-0" style={{ maxHeight: isMobile ? "min(76dvh, calc(100dvh - 24px))" : "min(78dvh, 640px)" }}>
     <div className="shrink-0 flex items-center gap-3 px-4 pt-3 pb-2">
       <span className="ios-setting-icon" aria-hidden="true"><ILink size={16} /></span>
       <h2 className="flex-1 text-[16px] font-bold text-on">Proxy Access</h2>
@@ -145,7 +145,7 @@ export default function ProxySettings() {
         <Input id="proxy-address" aria-label="Proxy Address" type={visible ? "text" : "password"} value={url}
           disabled={disabled} autoComplete="off" autoCapitalize="none" spellCheck={false}
           placeholder="http://127.0.0.1:7890" aria-invalid={!!error} aria-describedby={`proxy-address-hint${error ? " proxy-form-error" : ""}`}
-          className="w-full min-h-12 min-w-0 text-[14px]" onChange={event => { setUrl(event.target.value); change(); }} />
+          className="w-full min-h-12 min-w-0 text-[16px]" onChange={event => { setUrl(event.target.value); change(); }} />
         <div className="flex items-start gap-2 mt-1">
           <p id="proxy-address-hint" className="flex-1 text-[12px] text-mut leading-relaxed pt-2">Supports HTTP, HTTPS, and SOCKS. For Android emulator / phone, 127.0.0.1 refers to device itself.</p>
           <Button onClick={() => setVisible(value => !value)} aria-pressed={visible} className="min-h-12 shrink-0 px-2 text-[12px] text-primary">{visible ? "Hide" : "Show"}</Button>

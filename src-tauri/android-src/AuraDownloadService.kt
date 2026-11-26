@@ -39,6 +39,7 @@ class AuraDownloadService : Service() {
   private var poller: ScheduledExecutorService? = null
   private val idleTicks = AtomicInteger(0)
   private val mainHandler = Handler(Looper.getMainLooper())
+  private var pendingStopRunnable: Runnable? = null
   @Volatile
   private var lastStartId: Int = -1
   @Volatile
@@ -612,7 +613,10 @@ class AuraDownloadService : Service() {
           }
         }
         writeControlAction("pause_all")
-        mainHandler.postDelayed({ stopServiceCleanly(startId) }, 600L)
+        pendingStopRunnable?.let { mainHandler.removeCallbacks(it) }
+        val r = Runnable { stopServiceCleanly(-1) }
+        pendingStopRunnable = r
+        mainHandler.postDelayed(r, 600L)
         return START_NOT_STICKY
       }
       ACTION_CANCEL_ALL -> {
@@ -624,10 +628,15 @@ class AuraDownloadService : Service() {
           }
         }
         writeControlAction("cancel_all")
-        mainHandler.postDelayed({ stopServiceCleanly(startId) }, 600L)
+        pendingStopRunnable?.let { mainHandler.removeCallbacks(it) }
+        val r = Runnable { stopServiceCleanly(-1) }
+        pendingStopRunnable = r
+        mainHandler.postDelayed(r, 600L)
         return START_NOT_STICKY
       }
       ACTION_START, ACTION_UPDATE -> {
+        pendingStopRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingStopRunnable = null
         idleTicks.set(0)
         val id = intent.getIntExtra(EXTRA_ID, -1)
         val title = intent.getStringExtra(EXTRA_TITLE) ?: "AuraStream"
@@ -658,6 +667,12 @@ class AuraDownloadService : Service() {
       }
     }
     return START_NOT_STICKY
+  }
+
+  @Suppress("OVERRIDE_DEPRECATION")
+  override fun onTimeout(startId: Int) {
+    writeControlAction("pause_all")
+    stopServiceCleanly(startId)
   }
 
   override fun onTimeout(startId: Int, fgsType: Int) {
@@ -875,14 +890,16 @@ class AuraDownloadService : Service() {
 
   override fun onTaskRemoved(rootIntent: Intent?) {
     super.onTaskRemoved(rootIntent)
-    // Keep Foreground Service alive if active or queued downloads are still running
+    // Keep Foreground Service alive if active or queued downloads are still running or just requested
     val hasActiveDisk = hasActiveDiskDownloads(this)
-    if (!hasActiveDisk && (nativeOwnsQueue || snapshotDownloads().isEmpty())) {
+    if (!hasActiveDisk && !MainActivity.serviceStartRequested && snapshotDownloads().isEmpty()) {
       stopServiceCleanly(lastStartId)
     }
   }
 
   override fun onDestroy() {
+    pendingStopRunnable?.let { mainHandler.removeCallbacks(it) }
+    pendingStopRunnable = null
     stopDiskPoller()
     releaseLocks()
     try {

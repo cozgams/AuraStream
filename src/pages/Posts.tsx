@@ -15,7 +15,7 @@ import { formatDramaTag, formatDramaTitle } from "../subtitles/dramaTranslator";
 import { localizeError } from "../i18n";
 
 /* ================= Community Buzz List ================= */
-export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean }) {
+export function PostsPage({ onBack, wide, active = true }: { onBack: () => void; wide: boolean; active?: boolean }) {
   const { push } = useStore();
   const [searching, setSearching] = useState(false);
   const [items, setItems] = useState<Post[]>([]);
@@ -63,13 +63,15 @@ export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean 
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
-      <div className="shrink-0 flex items-center gap-2 px-2 bg-s1" style={{ paddingTop: "var(--sat, 0px)" }}>
-        <Button aria-label="Back" onClick={onBack} className="w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={19} /></Button>
-        <span className="text-[15px] font-bold text-on">Community Buzz</span>
-        <span className="text-[12px] text-mut ml-1">Creator News · Daily Updates</span>
-        <Button onClick={() => setSearching(true)} aria-label="Search community" className="ml-auto w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><ISearch size={19} /></Button>
+      <div className="shrink-0 flex items-center gap-2 px-2 pb-2 bg-s1 border-b border-edge/20" style={{ paddingTop: "calc(var(--sat, 0px) + 6px)" }}>
+        <Button aria-label="Back" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable shrink-0"><IBack size={20} /></Button>
+        <div className="flex-1 min-w-0">
+          <div className="text-[16px] font-bold text-on truncate leading-tight">Community Buzz</div>
+          <div className="text-[11.5px] text-mut truncate leading-tight">Creator News · Daily Updates</div>
+        </div>
+        <Button onClick={() => setSearching(true)} aria-label="Search community" className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable shrink-0"><ISearch size={19} /></Button>
       </div>
-      <div className="flex-1 scroll-y px-3 pt-3 pb-36">
+      <div className="flex-1 scroll-y px-3 pt-3 pb-[calc(var(--sab,0px)+28px)]">
         {items.length ? (
           <div className={`ios-media-grid ${wide ? "is-wide" : ""}`}>
             {items.map((p) => (
@@ -86,7 +88,7 @@ export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean 
         <div ref={sentinel} className="h-10" />
         {loading && <div className="flex justify-center py-2"><Loader className="w-6 h-6 spinner" /></div>}
       </div>
-      {searching && <InplaceSearch kind="post" postLabel="Community Posts" wide={wide} onClose={() => setSearching(false)} onOpenPost={(p) => push({ kind: "post", id: p.id })} />}
+      {searching && <InplaceSearch active={active} kind="post" postLabel="Community Posts" wide={wide} onClose={() => setSearching(false)} onOpenPost={(p) => push({ kind: "post", id: p.id })} />}
     </div>
   );
 }
@@ -117,7 +119,10 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
     });
   };
 
+  const reqSeqRef = useRef(0);
   const loadPost = useCallback((isMounted: () => boolean = () => true) => {
+    const seq = ++reqSeqRef.current;
+    const isCurrent = () => isMounted() && seq === reqSeqRef.current;
     setErr(null);
     setPost(null);
     setPlay(false);
@@ -125,20 +130,20 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
     setSeg(0);
     api.post(id)
       .then((p) => {
-        if (!isMounted()) return;
+        if (!isCurrent()) return;
         setPost(p);
         if (p.video_url) { setSegs((prev) => (prev.length ? prev : [p.video_url!])); setPlay(true); }
       })
-      .catch((e) => { if (isMounted()) setErr(localizeError(e)); });
+      .catch((e) => { if (isCurrent()) setErr(localizeError(e)); });
     setResolving(true);
     api.postPlayback(id)
       .then((r) => {
-        if (!isMounted()) return;
+        if (!isCurrent()) return;
         const list = (r?.videos || []).map((v) => v?.url || "").filter(Boolean);
         if (list.length) { setSegs(list); setPlay(true); }
       })
       .catch(() => { /* No video */ })
-      .finally(() => { if (isMounted()) setResolving(false); });
+      .finally(() => { if (isCurrent()) setResolving(false); });
   }, [id]);
 
   useEffect(() => {
@@ -149,12 +154,12 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
-      <div className="shrink-0 flex items-center gap-2 px-2 bg-s1" style={{ paddingTop: isMobile ? "var(--sat, 0px)" : 0, height: isMobile ? "calc(44px + var(--sat, 0px))" : 44 }}>
-        <Button aria-label="Back" onClick={onBack} className="w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={19} /></Button>
-        <span className="text-[14px] font-semibold text-on">Post Details</span>
+      <div className="shrink-0 flex items-center gap-2 px-2 bg-s1" style={{ paddingTop: isMobile ? "var(--sat, 0px)" : 0, minHeight: isMobile ? "calc(48px + var(--sat, 0px))" : 44 }}>
+        <Button aria-label="Back" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable shrink-0"><IBack size={20} /></Button>
+        <span className="text-[14px] font-semibold text-on truncate">Post Details</span>
       </div>
 
-      <div className="flex-1 scroll-y pb-[calc(var(--sab,48px)+24px)]">
+      <div className="flex-1 scroll-y pb-[calc(var(--sab,0px)+28px)]">
         {err ? (
           <Empty icon={<IFireF size={26} />} title="Failed to load post" sub={err} action="Retry" onAction={() => loadPost()} />
         ) : !post ? (
