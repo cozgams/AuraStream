@@ -301,6 +301,32 @@ const KNOWN_TAGS: Record<string, string> = {
   "签到": "Daily Rewards",
   "种田": "Country Life",
   "年代": "Golden Era",
+  "校园": "Campus",
+  "权谋": "Palace Intrigue",
+  "历史": "Historical",
+  "犯罪": "Crime",
+  "恐怖": "Horror",
+  "完结": "Completed",
+  "热门": "Trending",
+  "推荐": "Featured",
+  "言情": "Romance Series",
+  "古代": "Ancient",
+  "民国": "Republic Era",
+  "末世": "Apocalypse",
+  "搞笑": "Comedy Series",
+  "纯爱": "Pure Love",
+  "现言": "Modern Romance",
+  "古言": "Historical Romance",
+  "脑洞": "Sci-Fi Twist",
+  "灵异": "Supernatural",
+  "奇幻": "Mythic Fantasy",
+  "惊悚": "Thriller",
+  "治愈": "Heartwarming",
+  "励志": "Inspirational",
+  "体育": "Sports",
+  "电竞": "Esports",
+  "萌系": "Cute Style",
+  "异能": "Superpowers",
 };
 
 const KNOWN_AUTHORS: Record<string, string> = {
@@ -429,7 +455,23 @@ export function formatDramaTag(rawTag: string | undefined): string {
   if (!rawTag) return "";
   const tag = rawTag.trim();
   if (KNOWN_TAGS[tag]) return KNOWN_TAGS[tag];
-  return formatDramaTitle(tag);
+  if (!/[\u4e00-\u9fff]/.test(tag)) return cleanTranslatedPunctuation(tag, true);
+
+  let translated = tag;
+  for (const [pattern, replacement] of KEYWORD_MAP) {
+    translated = translated.replace(pattern, replacement);
+  }
+  if (/[\u4e00-\u9fff]/.test(translated)) {
+    translated = translated.replace(/[\u4e00-\u9fff]/g, (char) =>
+      CHAR_MAP[char] ? ` ${CHAR_MAP[char]} ` : " "
+    );
+  }
+  const cleaned = cleanTranslatedPunctuation(translated, true);
+  if (cleaned) return cleaned;
+
+  const hash = Array.from(tag).reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) >>> 0, 0);
+  const tagWords = ["Drama", "Spotlight", "Series", "Originals", "Selection", "Anthology", "Shorts", "Picks"];
+  return tagWords[hash % tagWords.length];
 }
 
 export function formatDramaAuthor(rawAuthor: string | undefined): string {
@@ -448,12 +490,17 @@ function cleanTranslatedPunctuation(text: string, stripOuter = false): string {
     .replace(/[‘’]/g, "'")
     .replace(/[！!]+/g, "!")
     .replace(/[？?]+/g, "?")
-    .replace(/\s*[、，,]+\s*/g, ", ")
+    .replace(/(?<![0-9])\s*[、，,]+\s*(?![0-9])/g, ", ")
     .replace(/\s*[。]+\s*/g, ". ")
     .replace(/\s*[:：]+\s*/g, ": ")
     .replace(/\s*[;；]+\s*/g, "; ")
+    .replace(/([!?])\s*[,.]+/g, "$1")
+    .replace(/,\s*\./g, ". ")
+    .replace(/\.\s*,/g, ". ")
+    .replace(/:\s*[,.;]+/g, ": ")
     .replace(/(?:,\s*){2,}/g, ", ")
-    .replace(/(?:\.\s*){2,}/g, ". ")
+    .replace(/(?<!\.)\.\.(?!\.)/g, ". ")
+    .replace(/\.\s+\./g, ". ")
     .replace(/\s+/g, " ");
 
   if (stripOuter) {
@@ -462,9 +509,9 @@ function cleanTranslatedPunctuation(text: string, stripOuter = false): string {
       .replace(/\s*[（(]\s*/g, " (")
       .replace(/\s*[）)]\s*/g, ") ")
       .replace(/\s+/g, " ")
-      .replace(/^[:,\s\-#()（）]+|[:,\s\-#()（）]+$/g, "");
+      .replace(/^[:.,;\s\-#()（）]+|[:,\s\-#()（）]+$/g, "");
   } else {
-    cleaned = cleaned.replace(/^[:,;\s]+|[:,;\s]+$/g, "");
+    cleaned = cleaned.replace(/^[:.,;\s]+|[:,;\s]+$/g, "");
   }
   return cleaned.trim();
 }

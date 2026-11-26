@@ -482,7 +482,11 @@ class MainActivity : TauriActivity() {
     }
 
     private fun safeNotifId(id: Int): Int {
-      return if (id == AuraDownloadService.NOTIFICATION_ID) id + 1_000_000 else id
+      return if (id == AuraDownloadService.NOTIFICATION_ID || id == AuraDownloadService.COMPLETE_NOTIFICATION_ID) {
+        id + 1_000_000
+      } else {
+        id
+      }
     }
 
     @JvmOverloads
@@ -1424,18 +1428,25 @@ class MainActivity : TauriActivity() {
 
               val finalConn = conn ?: throw IllegalStateException("Too many redirects while fetching update")
               val responseCode = finalConn.responseCode
+              if (responseCode == 416 && resumeOffset > 0L) {
+                try { finalConn.disconnect() } catch (_: Exception) {}
+                try { partFile.delete() } catch (_: Exception) {}
+                throw IllegalStateException("Range exhausted; restarting update download")
+              }
               if (responseCode != HttpURLConnection.HTTP_OK && responseCode != HttpURLConnection.HTTP_PARTIAL) {
                 throw IllegalStateException("Update server returned HTTP $responseCode")
               }
 
-              val isPartialAppend = responseCode == HttpURLConnection.HTTP_PARTIAL && resumeOffset > 0L
+              val contentRange = finalConn.getHeaderField("Content-Range") ?: ""
+              val isPartialAppend = responseCode == HttpURLConnection.HTTP_PARTIAL &&
+                resumeOffset > 0L &&
+                contentRange.trim().startsWith("bytes $resumeOffset-")
               if (!isPartialAppend && partFile.exists()) {
                 partFile.delete()
               }
 
               var downloadedBytes = if (isPartialAppend) resumeOffset else 0L
               val contentLen = finalConn.contentLengthLong.coerceAtLeast(0L)
-              val contentRange = finalConn.getHeaderField("Content-Range") ?: ""
               val rangeTotal = contentRange.substringAfter("/", "").toLongOrNull() ?: 0L
               val totalBytes = when {
                 rangeTotal > 0L -> rangeTotal
@@ -1495,6 +1506,11 @@ class MainActivity : TauriActivity() {
                     }
                   }
                 }
+              }
+              val attemptValidationErr = validateOtaApkFile(partFile, expectedTotalBytes)
+              if (attemptValidationErr != null) {
+                try { partFile.delete() } catch (_: Exception) {}
+                throw IllegalStateException(attemptValidationErr)
               }
               lastError = null
               break

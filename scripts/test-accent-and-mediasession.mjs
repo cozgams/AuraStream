@@ -85,7 +85,7 @@ try {
   });
 
   assert.equal(accentResult.emeraldDark, "#34d399", "Emerald dark accent primary should match #34d399");
-  assert.equal(accentResult.emeraldLight, "#059669", "Emerald light accent primary should match #059669");
+  assert.equal(accentResult.emeraldLight, "#047857", "Emerald light accent primary should match #047857");
   assert.equal(accentResult.cyanDark, "#00e5ff", "Cyan dark accent primary should match #00e5ff");
   assert.equal(accentResult.roseDark, "#fb7185", "Rose dark accent primary should match #fb7185");
   assert.equal(accentResult.amberDark, "#fbbf24", "Amber dark accent primary should match #fbbf24");

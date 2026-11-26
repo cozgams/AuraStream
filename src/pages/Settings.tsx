@@ -109,13 +109,13 @@ function SettingItem({
       <span className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-2xs ${iconBg}`}>
         {icon}
       </span>
-      <div className="flex-1 min-w-0 pr-1">
+      <div className="flex-1 min-w-0">
         <div className="text-[13.5px] font-medium text-on leading-snug">{title}</div>
-        {description && <div className="text-[11px] text-mut leading-snug mt-0.5 line-clamp-2">{description}</div>}
+        {description && <div className="text-[11.5px] text-mut leading-snug mt-0.5">{description}</div>}
       </div>
       {badge && <div className="shrink-0 text-[12px] font-medium">{badge}</div>}
-      {action && <div className="shrink-0 flex items-center ml-2">{action}</div>}
-      {hasChevron && <IChevR size={14} className="shrink-0 text-mut/60 ml-1.5" />}
+      {action && <div className="shrink-0 flex items-center">{action}</div>}
+      {hasChevron && <IChevR size={14} className="shrink-0 text-mut/60" />}
     </Component>
   );
 }
@@ -291,7 +291,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 </div>
               </div>
               <SegmentedControl
-                className="ios-appearance-picker w-full"
+                className="w-full"
                 aria-label="Appearance Mode"
                 activeIndex={(["system", "light", "dark"] as const).indexOf(themePreference)}
               >
@@ -432,7 +432,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 </div>
               </div>
               <SegmentedControl
-                className="ios-appearance-picker w-full mt-1"
+                className="w-full mt-1"
                 aria-label="Download Quality"
                 activeIndex={(["auto", "hevc", "standard"] as const).indexOf(downloadQuality)}
               >
@@ -938,12 +938,12 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
       <Modal open={about} onClose={() => setAbout(false)} width={390} label={t("settings.about")}>
         <div className="p-5">
           <div className="flex items-center gap-3.5">
-            <span className="w-11 h-11 rounded-2xl brand-grad shadow-md flex items-center justify-center text-on-primary text-[17px] font-black">
+            <span className="w-11 h-11 shrink-0 rounded-2xl brand-grad shadow-md flex items-center justify-center text-on-primary text-[17px] font-black">
               A
             </span>
-            <div>
+            <div className="min-w-0 flex-1">
               <div className="text-[16px] font-bold text-on leading-tight">AuraStream</div>
-              <div className="text-[11.5px] text-mut mt-0.5">v{APP_VERSION} · This App Created by AAA. All rights reserved.</div>
+              <div className="text-[11.5px] text-mut mt-0.5 leading-snug">v{APP_VERSION} · This App Created by AAA. All rights reserved.</div>
             </div>
           </div>
 
@@ -966,14 +966,14 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
               }}
               className="w-full flex items-center gap-2.5 py-2.5 text-left pressable"
             >
-              <ILink size={15} className="text-primary" />
-              <span className="text-[12.5px] text-on/85">github.com/cozgams/AuraStream</span>
-              <span className="ml-auto text-[11.5px] text-primary font-medium">Open</span>
+              <ILink size={15} className="text-primary shrink-0" />
+              <span className="min-w-0 flex-1 truncate text-[12.5px] text-on/85">github.com/cozgams/AuraStream</span>
+              <span className="ml-auto shrink-0 text-[11.5px] text-primary font-medium whitespace-nowrap">Open</span>
             </Button>
             <div className="flex items-center gap-2.5 py-2.5">
-              <IInfo size={15} className="text-mut" />
-              <span className="text-[12.5px] text-on/85">PolyForm Noncommercial 1.0.0</span>
-              <span className="ml-auto text-[11.5px] text-mut">Noncommercial</span>
+              <IInfo size={15} className="text-mut shrink-0" />
+              <span className="min-w-0 flex-1 text-[12.5px] text-on/85 whitespace-nowrap truncate">PolyForm Noncommercial 1.0.0</span>
+              <span className="ml-auto shrink-0 text-[11.5px] text-mut whitespace-nowrap">License</span>
             </div>
           </div>
 

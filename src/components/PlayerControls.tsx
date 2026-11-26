@@ -54,10 +54,10 @@ export default function PlayerControls({
   const pct = safeDuration > 0 ? Math.max(0, Math.min(100, (seek.time / safeDuration) * 100)) : 0;
 
   useEffect(() => {
-    if (!seekEnabled) {
+    if (!seekEnabled || !visible) {
       setSpeedOpen(false);
     }
-  }, [seekEnabled]);
+  }, [seekEnabled, visible]);
 
   useEffect(() => {
     if (!speedOpen) return;

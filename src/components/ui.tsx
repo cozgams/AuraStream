@@ -84,9 +84,10 @@ export function Kbd({ children }: { children: React.ReactNode }) {
 
 /* ——— Toast ——— */
 export function ToastHost() {
-  const { toasts } = useStore();
+  const { toasts, platform } = useStore();
+  const isMobile = platform === "android" || platform === "ios";
   return (
-    <div role="status" aria-live="polite" aria-atomic="true" className="ios-toast-host absolute inset-x-0 z-[80] flex flex-col items-center gap-2 pointer-events-none px-6" style={{ bottom: "calc(var(--sab, 0px) + 96px)" }}>
+    <div role="status" aria-live="polite" aria-atomic="true" className="ios-toast-host absolute inset-x-0 z-[80] flex flex-col items-center gap-2 pointer-events-none px-6" style={{ bottom: isMobile ? "calc(max(var(--sab, 0px), 48px) + 168px)" : "32px" }}>
       {toasts.map((t) =>
         t.line ? (
           <div
@@ -130,7 +131,7 @@ export function ToastHost() {
             {t.icon === "ok" && <ICheck size={16} className="text-mint shrink-0" />}
             {(t.icon === "star" || t.icon === "heart") && <IStarF size={16} className="text-amber shrink-0" />}
             {t.icon === "info" && <ISparkF size={15} className="text-cyan shrink-0" />}
-            <span className="text-[14px] text-on truncate">{t.msg}</span>
+            <span className="text-[14px] text-on line-clamp-2">{t.msg}</span>
           </Surface>
         ),
       )}

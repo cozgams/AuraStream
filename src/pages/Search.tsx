@@ -191,33 +191,36 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
         className="shrink-0 bg-bg/95 backdrop-blur-md z-10 border-b border-edge/30 px-4"
         style={{ paddingTop: "calc(var(--sat, 0px) + 12px)" }}
       >
-        <div className="pb-2">
-          <h1 className="ios-page-title text-on">{t("nav.search")}</h1>
-        </div>
-        {/* Search Bar */}
-        <div className="pb-3 flex items-center gap-2.5">
-          <Form className="ios-search-form flex-1 flex items-center gap-2"
-            onSubmit={(e) => { e.preventDefault(); submit(q); }}>
-            <ISearch size={17} className="text-mut shrink-0" />
-            <Input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("search.placeholder")}
-              className="flex-1 min-w-0 bg-transparent text-[14px] text-on placeholder-dim outline-none" />
-            {q && <Button aria-label="Clear" type="button" onClick={() => { seqRef.current++; busy.current = false; setLoading(false); setErr(null); setPage(0); setPages(1); setQ(""); setSubmitted(""); setItems([]); setPosts([]); }} className="ios-icon-button ios-search-clear"><IClose size={16} /></Button>}
-          </Form>
-          <Button onClick={() => push({ kind: "ranks" })} aria-label={t("cat.rankings")}
-            className="ios-icon-button ios-search-shortcut">
-            <ITrophy size={19} />
-          </Button>
+        <div className={wide ? "max-w-[960px] mx-auto w-full" : ""}>
+          <div className="pb-2">
+            <h1 className="ios-page-title text-on">{t("nav.search")}</h1>
+          </div>
+          {/* Search Bar */}
+          <div className="pb-3 flex items-center gap-2.5">
+            <Form className="ios-search-form flex-1 flex items-center gap-2"
+              onSubmit={(e) => { e.preventDefault(); submit(q); }}>
+              <ISearch size={17} className="text-mut shrink-0" />
+              <Input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("search.placeholder")}
+                className="flex-1 min-w-0 bg-transparent text-[14px] text-on placeholder-dim outline-none" />
+              {q && <Button aria-label="Clear" type="button" onClick={() => { seqRef.current++; busy.current = false; setLoading(false); setErr(null); setPage(0); setPages(1); setQ(""); setSubmitted(""); setItems([]); setPosts([]); }} className="ios-icon-button ios-search-clear"><IClose size={16} /></Button>}
+            </Form>
+            <Button onClick={() => push({ kind: "ranks" })} aria-label={t("cat.rankings")}
+              className="ios-icon-button ios-search-shortcut">
+              <ITrophy size={19} />
+            </Button>
+          </div>
         </div>
       </div>
 
-      <div ref={scrollRef} className="flex-1 scroll-y px-4 pb-52">
+      <div ref={scrollRef} className="flex-1 scroll-y px-4 pb-[calc(var(--sab,0px)+176px)]">
+        <div className={wide ? "max-w-[960px] mx-auto w-full" : ""}>
         {!querying ? (
           <>
             <Surface role="region" aria-label={t("search.hot")} className="mt-3.5 rounded-(--r-md) bg-s2 p-3.5 a-rise">
               <div className="flex items-center justify-between">
                 <h2 className="flex items-center gap-1.5 text-[14px] font-semibold text-on/90"><IFireF size={15} className="text-primary" />{t("search.hot")}</h2>
                 <Button onClick={() => void refreshHot()} disabled={hotLoading} aria-label="Refresh trending searches"
-                  className="flex items-center gap-1 px-2 text-[12px] text-mut pressable">
+                  className="flex items-center gap-1 px-2.5 py-1 min-h-7 rounded-full hover:bg-s3 text-[12px] text-mut pressable">
                   {hotLoading ? <Loader className="w-3 h-3" /> : <IRefresh size={12} />}
                 </Button>
               </div>
@@ -397,6 +400,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
             )}
           </div>
         )}
+        </div>
       </div>
     </div>
   );
@@ -432,13 +436,13 @@ export function RankPage({ onBack, wide }: { onBack: () => void; wide: boolean }
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
       <div className="shrink-0 relative overflow-hidden bg-s1" style={{ paddingTop: "var(--sat, 0px)" }}>
         <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(90% 120% at 100% 0%, var(--p-pc) 0%, transparent 60%)", opacity: 0.32 }} />
-        <div className="relative px-3 pt-2 pb-4">
+        <div className={`relative px-3 pt-2 pb-4 ${wide ? "max-w-[960px] mx-auto w-full" : ""}`}>
           <Button aria-label="Back" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={20} /></Button>
           <div className="px-2 mt-1 flex items-end justify-between">
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="w-9 h-9 rounded-(--r-sm) bg-pc text-on-pc flex items-center justify-center"><ITrophy size={20} /></span>
-                <span className="text-[24px] font-bold tracking-wide text-on">AuraStream Rankings</span>
+                <span className="w-9 h-9 rounded-(--r-sm) bg-pc text-on-pc flex items-center justify-center shrink-0"><ITrophy size={20} /></span>
+                <span className="text-[22px] sm:text-[24px] font-bold tracking-wide text-on leading-tight truncate">AuraStream Rankings</span>
               </div>
               <div className="text-[12px] text-mut mt-1">{meta.desc} · Updated every 10 min</div>
             </div>
@@ -451,7 +455,8 @@ export function RankPage({ onBack, wide }: { onBack: () => void; wide: boolean }
         </div>
       </div>
 
-      <div className="flex-1 scroll-y px-3.5 pt-3 pb-36">
+      <div className="flex-1 scroll-y px-3.5 pt-3 pb-[calc(var(--sab,0px)+120px)]">
+        <div className={wide ? "max-w-[960px] mx-auto w-full" : ""}>
         {loading ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
         ) : items.length ? (
@@ -463,6 +468,7 @@ export function RankPage({ onBack, wide }: { onBack: () => void; wide: boolean }
           <Empty icon={<ITrophy size={26} />} title="Rankings are currently empty" sub="Check back shortly or explore the home feed." />
         )}
         {wide && <div className="h-2" />}
+        </div>
       </div>
     </div>
   );

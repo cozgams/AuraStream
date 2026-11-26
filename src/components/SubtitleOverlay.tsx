@@ -58,6 +58,7 @@ export default function SubtitleOverlay({
   const [styleConfig, setStyleConfig] = useState<SubtitleStyleConfig>(() => getSubtitleStyleConfig());
   const [videoFrameBottom, setVideoFrameBottom] = useState<number | null>(null);
   const prevEpisodeKeyRef = useRef<string>("");
+  const inFlightTranslationsRef = useRef<Set<string>>(new Set());
   const trackSourceRef = useRef<SubtitleTrack["source"]>(trackSource);
   trackSourceRef.current = trackSource;
   const onTrackStatusRef = useRef(onTrackStatus);
@@ -128,6 +129,8 @@ export default function SubtitleOverlay({
     if (prevEpisodeKeyRef.current !== episodeKey) {
       prevEpisodeKeyRef.current = episodeKey;
       setCues([]);
+      setLiveTranslated({});
+      inFlightTranslationsRef.current.clear();
       setTrackSource("none");
       setTrackFileName(undefined);
     }
@@ -182,10 +185,12 @@ export default function SubtitleOverlay({
       return;
     }
 
+    let disposed = false;
     const trackList = videoEl.textTracks;
     let activeTrack: TextTrack | null = null;
 
     const readNativeCues = () => {
+      if (disposed) return;
       const tracks = Array.from(trackList);
       const chosen =
         tracks.find((tr) => (tr.kind === "subtitles" || tr.kind === "captions") && /^en/i.test(tr.language || "")) ||
@@ -226,10 +231,11 @@ export default function SubtitleOverlay({
           zh: text,
         });
       }
+      if (disposed) return;
       setNativeCues(extracted);
       if (extracted.some((c) => containsForeignLanguage(c.en))) {
         translateCuesToEnglish(extracted)
-          .then((translated) => setNativeCues(translated))
+          .then((translated) => { if (!disposed) setNativeCues(translated); })
           .catch(() => {});
       }
     };
@@ -238,6 +244,7 @@ export default function SubtitleOverlay({
     trackList.addEventListener("addtrack", readNativeCues);
     trackList.addEventListener("change", readNativeCues);
     return () => {
+      disposed = true;
       trackList.removeEventListener("addtrack", readNativeCues);
       trackList.removeEventListener("change", readNativeCues);
       if (activeTrack) {
@@ -293,8 +300,34 @@ export default function SubtitleOverlay({
 
   // Find active cue
   const activeCue = shouldTrackTime
-    ? effectiveCues.find((c) => currentTime >= c.start && currentTime <= c.end)
+    ? effectiveCues.find((c) => currentTime >= c.start && currentTime < c.end)
     : undefined;
+
+  const activeForeignSource = (() => {
+    if (!shouldTrackTime || !activeCue) return "";
+    const normalized = normalizeCueText(activeCue.en || activeCue.zh);
+    return normalized && containsForeignLanguage(normalized) ? normalized : "";
+  })();
+
+  useEffect(() => {
+    if (!activeForeignSource || liveTranslated[activeForeignSource]) return;
+    if (inFlightTranslationsRef.current.has(activeForeignSource)) return;
+    inFlightTranslationsRef.current.add(activeForeignSource);
+    let canceled = false;
+    translateDialogueToEnglish(activeForeignSource)
+      .then((res) => {
+        if (!canceled && res && res !== activeForeignSource && !containsForeignLanguage(res)) {
+          setLiveTranslated((prev) => (prev[activeForeignSource] ? prev : { ...prev, [activeForeignSource]: res }));
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        inFlightTranslationsRef.current.delete(activeForeignSource);
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [activeForeignSource, liveTranslated]);
 
   if (!shouldTrackTime) {
     return null;
@@ -305,18 +338,10 @@ export default function SubtitleOverlay({
     if (liveTranslated[rawEnglish]) {
       rawEnglish = liveTranslated[rawEnglish];
     } else {
-      const originalForeign = rawEnglish;
-      const syncTr = translateDialogueSync(originalForeign);
+      const syncTr = translateDialogueSync(rawEnglish);
       if (syncTr && !containsForeignLanguage(syncTr)) {
         rawEnglish = syncTr;
       }
-      translateDialogueToEnglish(originalForeign)
-        .then((res) => {
-          if (res && res !== originalForeign && !containsForeignLanguage(res)) {
-            setLiveTranslated((prev) => ({ ...prev, [originalForeign]: res }));
-          }
-        })
-        .catch(() => {});
     }
   }
   const balancedCaption = rawEnglish ? formatBalancedCaptionLines(rawEnglish, 42) : "";
@@ -393,7 +418,7 @@ export default function SubtitleOverlay({
       top: isDesktop ? "64px" : "calc(max(var(--sat, 12px), 28px) + 56px)",
       bottom: "auto",
     };
-  } else if (position === "above_title") {
+  } else if (position === "above_title" && !clean && !fs) {
     positionStyle = {
       bottom: isDesktop
         ? "84px"

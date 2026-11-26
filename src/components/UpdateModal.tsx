@@ -61,6 +61,7 @@ export default function UpdateModal({
   const [cachedSize, setCachedSize] = useState(0);
   const prevStageRef = useRef<OtaDownloadStage>(runtime.stage);
   const autoTriggeredForPathRef = useRef<string>("");
+  const triggeredRef = useRef(false);
 
   const matchesCurrentAsset = Boolean(
     expectedFile && (!runtime.fileName || runtime.fileName === expectedFile)
@@ -131,12 +132,12 @@ export default function UpdateModal({
   }, [info?.has_update, effectiveStage, activeApkPath]);
 
   useEffect(() => {
-    if (!info?.has_update || effectiveStage !== "need_permission" || !activeApkPath) return;
-    let triggered = false;
+    if (!info?.has_update || !activeApkPath || (effectiveStage !== "need_permission" && effectiveStage !== "ready")) return;
+    if (triggeredRef.current) return;
     const checkAndResumeInstall = () => {
-      if (triggered) return;
+      if (triggeredRef.current) return;
       if (canInstallOtaPackages()) {
-        triggered = true;
+        triggeredRef.current = true;
         const res = installOtaApk(activeApkPath);
         markOtaInstallResult(res);
         if (res === "STARTED") {
@@ -272,12 +273,12 @@ export default function UpdateModal({
           </Surface>
         )}
 
-        <div className="flex gap-2 mt-4">
+        <div className="flex flex-wrap gap-2 mt-4">
           {effectiveStage === "downloading" ? (
             <>
               <Button
                 onClick={onClose}
-                className="flex-1 h-9 rounded-(--r-ctl) bg-s3 text-[13.5px] text-on/80 pressable"
+                className="flex-1 h-9 rounded-(--r-ctl) bg-s3 text-[13.5px] text-on/80 pressable whitespace-nowrap"
               >
                 Hide
               </Button>
@@ -285,7 +286,7 @@ export default function UpdateModal({
                 onClick={() => {
                   cancelOtaUpdateDownload();
                 }}
-                className="flex-1 h-9 rounded-(--r-ctl) bg-red-500/15 text-[13.5px] font-semibold text-red-600 dark:text-red-400 pressable"
+                className="flex-1 h-9 rounded-(--r-ctl) bg-red-500/15 text-[13.5px] font-semibold text-red-600 dark:text-red-400 pressable whitespace-nowrap"
               >
                 Cancel
               </Button>
@@ -294,7 +295,7 @@ export default function UpdateModal({
             <>
               <Button
                 onClick={onClose}
-                className="flex-1 h-9 rounded-(--r-ctl) bg-s3 text-[13.5px] text-on/80 pressable"
+                className="flex-1 min-w-[84px] h-9 rounded-(--r-ctl) bg-s3 text-[13.5px] text-on/80 pressable whitespace-nowrap"
               >
                 Later
               </Button>
@@ -304,14 +305,14 @@ export default function UpdateModal({
                     setSkippedUpdateVersion(info.latest);
                     onClose();
                   }}
-                  className="px-3 h-9 rounded-(--r-ctl) bg-s3 text-[12.5px] text-mut pressable"
+                  className="px-3 h-9 rounded-(--r-ctl) bg-s3 text-[12.5px] text-mut pressable whitespace-nowrap"
                 >
                   Skip v{info.latest}
                 </Button>
               )}
               <Button
                 onClick={() => void handlePrimaryAction()}
-                className="flex-1 h-9 rounded-(--r-ctl) bg-primary text-[13.5px] font-semibold text-on-primary pressable"
+                className="flex-[1.4] min-w-[148px] h-9 px-3 rounded-(--r-ctl) bg-primary text-[13.5px] font-semibold text-on-primary pressable whitespace-nowrap"
               >
                 {effectiveStage === "ready"
                   ? "Install Update Now"
@@ -336,7 +337,7 @@ export default function UpdateModal({
           </Button>
         )}
 
-        <div className="text-[11px] text-dim mt-2.5 break-all">{asset?.url || info.url}</div>
+        <div className="text-[11px] text-dim mt-2.5 truncate" title={asset?.url || info.url}>{asset?.url || info.url}</div>
       </div>
     </Modal>
   );

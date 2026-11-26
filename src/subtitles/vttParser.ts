@@ -217,11 +217,11 @@ export function parseVtt(content: string): SubtitleCue[] {
     while (i < rawLines.length) {
       const cur = rawLines[i].trim();
       // If we encounter a timestamp line, this cue has ended and the next has started
-      if (cur.includes("-->")) {
+      if (/^\s*(?:\d+:)?\d+(?::\d{1,2})?(?:[.,]\d+)?\s*-->/.test(cur)) {
         break;
       }
       // If we encounter a lone number followed by a timestamp line on the next line, next cue started
-      if (/^\d+$/.test(cur) && i + 1 < rawLines.length && rawLines[i + 1].includes("-->")) {
+      if (/^\d+$/.test(cur) && i + 1 < rawLines.length && /^\s*(?:\d+:)?\d+(?::\d{1,2})?(?:[.,]\d+)?\s*-->/.test(rawLines[i + 1].trim())) {
         break;
       }
       if (cur) {

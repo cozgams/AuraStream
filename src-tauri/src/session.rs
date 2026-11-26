@@ -18,96 +18,6 @@ pub struct Session {
     pub revision: u64,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn credentials_are_bound_to_origin() {
-        let store = SessionStore::new();
-        store.set(
-            "https://huangguoai.com",
-            "secret-token".into(),
-            json!({"id": 1}),
-        );
-        assert_eq!(
-            store.token("https://huangguoai.com").as_deref(),
-            Some("secret-token")
-        );
-        assert_eq!(store.token("https://huangguoai.ai"), None);
-        assert_eq!(store.token("https://evil.example"), None);
-        assert!(store.user("https://evil.example").is_null());
-        store.clear();
-        assert_eq!(store.token("https://huangguoai.com"), None);
-    }
-
-    #[test]
-    fn legacy_sessions_are_not_assigned_to_current_line() {
-        let store = SessionStore::new();
-        *store.lock_current() =
-            serde_json::from_str(r#"{"token":"legacy","user":{"id":1}}"#).unwrap();
-        assert_eq!(store.token("https://huangguoai.com"), None);
-        assert!(store.user("https://huangguoai.com").is_null());
-    }
-
-    #[test]
-    fn late_profile_and_logout_cannot_replace_a_new_session() {
-        let store = SessionStore::new();
-        let origin = "https://example.com";
-        store.set(origin, "first".into(), json!({"id": 1}));
-        let first = store.snapshot(origin).unwrap();
-        store.set(origin, "second".into(), json!({"id": 2}));
-        assert!(!store.update_user_if_current(&first, json!({"id": 1, "nickname": "late"})));
-        assert!(!store.clear_if_current(&first));
-        assert_eq!(store.user(origin)["id"], 2);
-        let second = store.snapshot(origin).unwrap();
-        assert!(!store.update_user_if_current(&second, json!({"id": 1})));
-        assert!(store.update_user_if_current(&second, json!({"id": 2, "nickname": "fresh"})));
-    }
-
-    #[test]
-    fn relogin_with_same_token_still_invalidates_old_requests() {
-        let store = SessionStore::new();
-        let origin = "https://example.com";
-        store.set(origin, "same".into(), json!({"id": 1}));
-        let old = store.snapshot(origin).unwrap();
-        store.clear();
-        store.set(origin, "same".into(), json!({"id": 1}));
-        assert!(!store.is_current(&old));
-        assert!(!store.clear_if_current(&old));
-        assert!(serde_json::to_value(store.snapshot(origin).unwrap()).unwrap().get("revision").is_none());
-    }
-
-    #[test]
-    fn late_login_cannot_replace_a_newer_account() {
-        let store = SessionStore::new();
-        let origin = "https://example.com";
-        let revision = store.revision();
-        assert!(store.set_if_revision(revision, origin, "new".into(), json!({"id": 2})));
-        assert!(!store.set_if_revision(revision, origin, "late".into(), json!({"id": 1})));
-        assert_eq!(store.user(origin)["id"], 2);
-    }
-
-    #[test]
-    fn poisoned_mutex_recovers_without_panicking() {
-        let store = std::sync::Arc::new(SessionStore::new());
-        let poisoned = store.clone();
-        let _ = std::thread::spawn(move || {
-            let _guard = poisoned.current.lock().unwrap();
-            panic!("intentional poison for recovery test");
-        })
-        .join();
-        assert!(store.current.is_poisoned());
-        let origin = "https://huangguoai.com";
-        store.set(origin, "recovered".into(), json!({"id": 9}));
-        assert_eq!(store.token(origin).as_deref(), Some("recovered"));
-        assert_eq!(store.user(origin)["id"], 9);
-        store.clear();
-        assert_eq!(store.token(origin), None);
-    }
-}
-
 pub struct SessionStore {
     pub file: Mutex<Option<PathBuf>>,
     pub current: Mutex<Session>,
@@ -267,5 +177,95 @@ impl SessionStore {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn credentials_are_bound_to_origin() {
+        let store = SessionStore::new();
+        store.set(
+            "https://huangguoai.com",
+            "secret-token".into(),
+            json!({"id": 1}),
+        );
+        assert_eq!(
+            store.token("https://huangguoai.com").as_deref(),
+            Some("secret-token")
+        );
+        assert_eq!(store.token("https://huangguoai.ai"), None);
+        assert_eq!(store.token("https://evil.example"), None);
+        assert!(store.user("https://evil.example").is_null());
+        store.clear();
+        assert_eq!(store.token("https://huangguoai.com"), None);
+    }
+
+    #[test]
+    fn legacy_sessions_are_not_assigned_to_current_line() {
+        let store = SessionStore::new();
+        *store.lock_current() =
+            serde_json::from_str(r#"{"token":"legacy","user":{"id":1}}"#).unwrap();
+        assert_eq!(store.token("https://huangguoai.com"), None);
+        assert!(store.user("https://huangguoai.com").is_null());
+    }
+
+    #[test]
+    fn late_profile_and_logout_cannot_replace_a_new_session() {
+        let store = SessionStore::new();
+        let origin = "https://example.com";
+        store.set(origin, "first".into(), json!({"id": 1}));
+        let first = store.snapshot(origin).unwrap();
+        store.set(origin, "second".into(), json!({"id": 2}));
+        assert!(!store.update_user_if_current(&first, json!({"id": 1, "nickname": "late"})));
+        assert!(!store.clear_if_current(&first));
+        assert_eq!(store.user(origin)["id"], 2);
+        let second = store.snapshot(origin).unwrap();
+        assert!(!store.update_user_if_current(&second, json!({"id": 1})));
+        assert!(store.update_user_if_current(&second, json!({"id": 2, "nickname": "fresh"})));
+    }
+
+    #[test]
+    fn relogin_with_same_token_still_invalidates_old_requests() {
+        let store = SessionStore::new();
+        let origin = "https://example.com";
+        store.set(origin, "same".into(), json!({"id": 1}));
+        let old = store.snapshot(origin).unwrap();
+        store.clear();
+        store.set(origin, "same".into(), json!({"id": 1}));
+        assert!(!store.is_current(&old));
+        assert!(!store.clear_if_current(&old));
+        assert!(serde_json::to_value(store.snapshot(origin).unwrap()).unwrap().get("revision").is_none());
+    }
+
+    #[test]
+    fn late_login_cannot_replace_a_newer_account() {
+        let store = SessionStore::new();
+        let origin = "https://example.com";
+        let revision = store.revision();
+        assert!(store.set_if_revision(revision, origin, "new".into(), json!({"id": 2})));
+        assert!(!store.set_if_revision(revision, origin, "late".into(), json!({"id": 1})));
+        assert_eq!(store.user(origin)["id"], 2);
+    }
+
+    #[test]
+    fn poisoned_mutex_recovers_without_panicking() {
+        let store = std::sync::Arc::new(SessionStore::new());
+        let poisoned = store.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoned.current.lock().unwrap();
+            panic!("intentional poison for recovery test");
+        })
+        .join();
+        assert!(store.current.is_poisoned());
+        let origin = "https://huangguoai.com";
+        store.set(origin, "recovered".into(), json!({"id": 9}));
+        assert_eq!(store.token(origin).as_deref(), Some("recovered"));
+        assert_eq!(store.user(origin)["id"], 9);
+        store.clear();
+        assert_eq!(store.token(origin), None);
     }
 }

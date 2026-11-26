@@ -144,11 +144,11 @@ function normalizeAbiFromDevice(rawAbi?: string, arch?: string): "arm64" | "arm"
   const candidate = (rawAbi || "").toLowerCase();
   if (candidate === "arm64" || candidate.includes("arm64") || candidate.includes("aarch64")) return "arm64";
   if (candidate === "x86_64" || candidate.includes("x86_64")) return "x86_64";
-  if (candidate === "arm" || candidate.includes("armeabi")) return "arm";
+  if (candidate === "arm" || candidate === "arm32" || candidate.includes("armeabi") || candidate.includes("armv7")) return "arm";
 
   const a = (arch || "").toLowerCase();
   if (a.includes("x86_64")) return "x86_64";
-  if (a === "arm" || a.includes("armv7")) return "arm";
+  if (a === "arm" || a === "arm32" || a.includes("armv7")) return "arm";
   return "arm64";
 }
 
@@ -157,7 +157,7 @@ function assetMatchesAbi(assetName: string, abi: "arm64" | "arm" | "x86_64"): bo
   if (!lower.endsWith(".apk")) return false;
   if (abi === "arm64") return lower.includes("arm64") || lower.includes("aarch64");
   if (abi === "x86_64") return lower.includes("x86_64");
-  return lower.includes("_arm.") || lower.includes("armeabi") || lower.includes("armv7");
+  return lower.includes("_arm.") || lower.includes("-arm.") || lower.includes("armeabi") || lower.includes("armv7");
 }
 
 /**
@@ -307,6 +307,7 @@ if (typeof window !== "undefined") {
       return;
     }
     if (detail.status === "downloading") {
+      if (otaRuntimeState.stage !== "downloading") return;
       otaRuntimeState = {
         ...otaRuntimeState,
         stage: "downloading",
@@ -339,9 +340,11 @@ if (typeof window !== "undefined") {
       }
       emitOtaRuntimeState();
     } else if (detail.status === "cancelled") {
+      if (otaRuntimeState.stage !== "downloading") return;
       otaRuntimeState = { ...DEFAULT_RUNTIME_STATE };
       emitOtaRuntimeState();
     } else if (detail.status === "error") {
+      if (otaRuntimeState.stage !== "downloading") return;
       otaRuntimeState = {
         ...otaRuntimeState,
         stage: "error",

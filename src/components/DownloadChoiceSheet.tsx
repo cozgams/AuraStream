@@ -82,6 +82,7 @@ export default function DownloadChoiceSheet({
   const [usedPercent, setUsedPercent] = useState<number | null>(null);
   const [targetEpisode, setTargetEpisode] = useState<number>(currentEpisode);
   const [activeMap, setActiveMap] = useState<Map<string, ActiveDownloadProgress>>(() => new Map());
+  const [imgError, setImgError] = useState(false);
 
   const isCellular = isCellularConnection();
   const wifiOnly = isWifiOnlyDownloadEnabled();
@@ -99,6 +100,7 @@ export default function DownloadChoiceSheet({
     if (!isOpen) return;
     let alive = true;
     setTargetEpisode(currentEpisode);
+    setImgError(false);
     void getDetailedStorageStats().then((stats) => {
       if (!alive) return;
       setFreeSpaceFormatted(stats.freeFormatted || "Available");
@@ -173,12 +175,12 @@ export default function DownloadChoiceSheet({
         {/* Hero Header with Artwork & Metadata */}
         <div className="flex items-center justify-between pb-3.5 border-b border-border/80">
           <div className="flex items-center gap-3.5 min-w-0">
-            {resolvedCover ? (
+            {resolvedCover && !imgError ? (
               <img
                 src={resolvedCover}
                 alt={title}
                 className="w-13 h-17 object-cover rounded-2xl shadow-md border border-border shrink-0"
-                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                onError={() => setImgError(true)}
               />
             ) : (
               <div className="w-13 h-17 rounded-2xl bg-primary/15 text-primary flex items-center justify-center shrink-0 border border-primary/20">

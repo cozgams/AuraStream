@@ -73,8 +73,6 @@ export default function SubtitleSheet({
       setStyleConfig(getSubtitleStyleConfig());
       setAiConfig(getAICaptionConfig());
     } else {
-      abortCtrlRef.current?.abort();
-      abortCtrlRef.current = null;
       setPasteExpanded(false);
     }
   }, [open]);

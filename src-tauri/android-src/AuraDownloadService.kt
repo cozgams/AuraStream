@@ -506,15 +506,20 @@ class AuraDownloadService : Service() {
         val compAt = comp.optLong("completedAt", 0L)
         if (compId.isEmpty() || compAt <= 0L) continue
         val dedupeKey = "$compId:$compAt"
-        if (notifiedCompleted.contains(dedupeKey)) continue
-        if (System.currentTimeMillis() - compAt > 15_000L) {
-          notifiedCompleted.add(dedupeKey)
-          continue
+        val alreadyNotified = synchronized(notifiedCompleted) {
+          if (notifiedCompleted.contains(dedupeKey)) {
+            true
+          } else {
+            notifiedCompleted.add(dedupeKey)
+            if (notifiedCompleted.size > 100) {
+              val first = notifiedCompleted.firstOrNull()
+              if (first != null) notifiedCompleted.remove(first)
+            }
+            false
+          }
         }
-        notifiedCompleted.add(dedupeKey)
-        if (notifiedCompleted.size > 100) {
-          val first = notifiedCompleted.firstOrNull()
-          if (first != null) notifiedCompleted.remove(first)
+        if (alreadyNotified || System.currentTimeMillis() - compAt > 15_000L) {
+          continue
         }
         if (!MainActivity.isForegroundGlobal) {
           showSilentCompletionBanner(
@@ -702,18 +707,38 @@ class AuraDownloadService : Service() {
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 
-    val pauseIntent = PendingIntent.getService(
-      this,
-      101,
-      Intent(this, AuraDownloadService::class.java).apply { action = ACTION_PAUSE_ALL },
-      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
-    val cancelIntent = PendingIntent.getService(
-      this,
-      102,
-      Intent(this, AuraDownloadService::class.java).apply { action = ACTION_CANCEL_ALL },
-      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
+    val pauseActionIntent = Intent(this, AuraDownloadService::class.java).apply { action = ACTION_PAUSE_ALL }
+    val pauseIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      PendingIntent.getForegroundService(
+        this,
+        101,
+        pauseActionIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+      )
+    } else {
+      PendingIntent.getService(
+        this,
+        101,
+        pauseActionIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+      )
+    }
+    val cancelActionIntent = Intent(this, AuraDownloadService::class.java).apply { action = ACTION_CANCEL_ALL }
+    val cancelIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      PendingIntent.getForegroundService(
+        this,
+        102,
+        cancelActionIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+      )
+    } else {
+      PendingIntent.getService(
+        this,
+        102,
+        cancelActionIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+      )
+    }
 
     val items = snapshotDownloads()
     val activeItems = items.filter { it.status == "downloading" }

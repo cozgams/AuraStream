@@ -133,6 +133,21 @@ fn write_response(
     stream.flush()
 }
 
+fn write_plain(stream: &mut TcpStream, status: u16, message: &str) -> std::io::Result<()> {
+    let reason = tauri::http::StatusCode::from_u16(status)
+        .ok()
+        .and_then(|code| code.canonical_reason())
+        .unwrap_or("Error");
+    let body = message.as_bytes();
+    let head = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(head.as_bytes())?;
+    stream.write_all(body)?;
+    stream.flush()
+}
+
 #[cfg(test)]
 mod tests {
     use super::write_response;
@@ -180,19 +195,4 @@ mod tests {
         assert!(wire.contains("content-range: bytes 0-3/20\r\n"));
         assert!(wire.ends_with("\r\n\r\n"));
     }
-}
-
-fn write_plain(stream: &mut TcpStream, status: u16, message: &str) -> std::io::Result<()> {
-    let reason = tauri::http::StatusCode::from_u16(status)
-        .ok()
-        .and_then(|code| code.canonical_reason())
-        .unwrap_or("Error");
-    let body = message.as_bytes();
-    let head = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
-    stream.write_all(head.as_bytes())?;
-    stream.write_all(body)?;
-    stream.flush()
 }

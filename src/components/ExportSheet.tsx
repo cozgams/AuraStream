@@ -493,22 +493,24 @@ export default function ExportSheet({
         {/* Export Destinations */}
         <div className="p-4 flex-1 min-h-0 flex flex-col gap-2.5 overflow-y-auto">
           {/* Subtitle Bundle Toggle */}
-          <div className="p-3 rounded-2xl bg-s2/70 border border-edge/60 flex items-center justify-between">
-            <div className="pr-3 flex-1 min-w-0">
-              <div className="text-[13px] font-bold text-on flex items-center gap-1.5">
+          <div className="p-3 rounded-2xl bg-s2/70 border border-edge/60 flex items-center justify-between gap-2.5">
+            <div className="pr-1 flex-1 min-w-0">
+              <div className="text-[13px] font-bold text-on flex flex-wrap items-center gap-1.5">
                 <IMessageSquare size={15} className="text-primary shrink-0" />
                 <span>Bundle Subtitles (.SRT)</span>
-                <span className="px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[10px] font-bold">Auto-Sync</span>
+                <span className="px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-bold whitespace-nowrap">Auto-Sync</span>
               </div>
-              <div className="text-[11px] text-mut truncate mt-0.5">
+              <div className="text-[11px] text-mut line-clamp-2 leading-snug mt-0.5">
                 Saves matching .srt file alongside MP4 for auto-loading in VLC/Gallery
               </div>
             </div>
-            <Toggle
-              label="Bundle Subtitles (.SRT)"
-              on={includeSubtitles}
-              onChange={setIncludeSubtitles}
-            />
+            <div className="shrink-0">
+              <Toggle
+                label="Bundle Subtitles (.SRT)"
+                on={includeSubtitles}
+                onChange={setIncludeSubtitles}
+              />
+            </div>
           </div>
 
           <div className="text-[11px] font-bold uppercase tracking-wider text-mut px-1 mt-1">

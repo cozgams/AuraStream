@@ -309,7 +309,6 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
                 hls.recoverMediaError();
                 hls.startLoad(video.currentTime || -1);
               } else if (isBufferAppend) {
-                try { hls.swapAudioCodec(); } catch { /* ignore */ }
                 hls.recoverMediaError();
                 activity.play("error_recover", true);
               } else {
@@ -466,6 +465,8 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
           stalledDuration,
           readyState: video.readyState,
         });
+        try { hlsRef.current?.destroy(); hlsRef.current = null; } catch { /* ignore */ }
+        try { video.pause(); } catch { /* ignore */ }
         onErrorRef.current?.("Video playback stalled. Please retry.");
       }
     }, 1000);

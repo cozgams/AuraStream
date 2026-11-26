@@ -264,11 +264,13 @@ fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed creating dir: {e}"))?;
     }
+    static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
     let file_name = path
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("tmp");
-    let tmp = path.with_file_name(format!(".{file_name}.{}.tmp", now_ms()));
+    let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = path.with_file_name(format!(".{file_name}.{}.{}.tmp", now_ms(), seq));
     {
         let mut f = File::create(&tmp).map_err(|e| format!("Failed creating temp file: {e}"))?;
         f.write_all(bytes).map_err(|e| format!("Failed writing temp file: {e}"))?;
@@ -657,6 +659,13 @@ impl SpeedTracker {
         };
         s.samples.push((start_time, start_bytes));
         s
+    }
+
+    fn advance_cached(&mut self, cached_bytes: u64) {
+        self.start_bytes = self.start_bytes.saturating_add(cached_bytes);
+        for (_, b) in &mut self.samples {
+            *b = b.saturating_add(cached_bytes);
+        }
     }
 
     fn sample(&mut self, bytes_now: u64, total_bytes: u64) -> (f64, String, u64, String) {
@@ -1048,9 +1057,10 @@ async fn run_episode_download(mut item: QueueDownloadItem, cancel: Arc<AtomicBoo
         let total_bytes = match first_attempt {
             Ok(b) => b,
             Err(err)
-                if ((used_cached_url && is_stale_cdn_error(&err)) || is_transient_network_error(&err))
+                if (is_stale_cdn_error(&err) || is_transient_network_error(&err))
                     && is_owner_active(&id, token, &cancel) =>
             {
+                let _ = used_cached_url;
                 tokio::time::sleep(Duration::from_millis(1500)).await;
                 if !is_owner_active(&id, token, &cancel) {
                     return Err("__cancelled__".to_string());
@@ -1347,7 +1357,9 @@ async fn download_hls_to_dir(
                 } else {
                     let local_name = format!("init_{}.mp4", map_map.len());
                     let init_path = part_dir.join(&local_name);
-                    if init_path.is_file() && init_path.metadata().map(|m| m.len() > 0).unwrap_or(false) {
+                    let url_marker = part_dir.join(format!("{local_name}.url"));
+                    let same_url = fs::read_to_string(&url_marker).ok().as_deref() == Some(abs_uri.as_str());
+                    if same_url && init_path.is_file() && init_path.metadata().map(|m| m.len() > 0).unwrap_or(false) {
                         received_bytes += init_path.metadata().map(|m| m.len()).unwrap_or(0);
                     } else {
                         let (_, init_bytes) = crate::net::fetch_bytes(&abs_uri).await?;
@@ -1359,6 +1371,7 @@ async fn download_hls_to_dir(
                         }
                         received_bytes += init_bytes.len() as u64;
                         atomic_write_bytes(&init_path, &init_bytes)?;
+                        let _ = fs::write(&url_marker, abs_uri.as_bytes());
                     }
                     map_map.insert(abs_uri.clone(), local_name.clone());
                     local_name
@@ -1493,8 +1506,8 @@ async fn download_hls_to_dir(
                 None
             };
 
-            let len = match seg_len {
-                Some(existing_len) => existing_len,
+            let (len, from_disk) = match seg_len {
+                Some(existing_len) => (existing_len, true),
                 None => {
                     let backoffs_ms = [600u64, 1500u64, 3000u64];
                     let mut attempt = 0usize;
@@ -1523,7 +1536,7 @@ async fn download_hls_to_dir(
                     }
                     let l = data.len() as u64;
                     atomic_write_bytes(&seg_path, &data)?;
-                    l
+                    (l, false)
                 }
             };
 
@@ -1534,6 +1547,9 @@ async fn download_hls_to_dir(
             let pct = (((done as f64 / total_segments as f64) * 100.0).round() as u8).clamp(1, 99);
             let (speed_bps, speed_fmt, eta_sec, eta_fmt) = {
                 let mut tr = tracker_cl.lock().unwrap_or_else(|e| e.into_inner());
+                if from_disk {
+                    tr.advance_cached(len);
+                }
                 tr.sample(new_bytes, est_total)
             };
             update_item_progress(ProgressUpdate {
@@ -1607,21 +1623,44 @@ async fn download_direct_to_dir(
     let mut file: File;
 
     if resp.status() == reqwest::StatusCode::PARTIAL_CONTENT && existing_len > 0 {
-        let range_total = parse_content_range_total(
-            resp.headers()
-                .get(reqwest::header::CONTENT_RANGE)
-                .and_then(|v| v.to_str().ok()),
-        );
-        received = existing_len;
-        content_len = range_total
-            .unwrap_or_else(|| existing_len.saturating_add(resp.content_length().unwrap_or(0)));
-        file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&tmp_path)
-            .map_err(|e| format!("Failed opening MP4 part file: {e}"))?;
+        let cr_str = resp
+            .headers()
+            .get(reqwest::header::CONTENT_RANGE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        let starts_at_existing = cr_str.trim().starts_with(&format!("bytes {existing_len}-"));
+        if starts_at_existing {
+            let range_total = parse_content_range_total(Some(cr_str));
+            received = existing_len;
+            content_len = range_total
+                .unwrap_or_else(|| existing_len.saturating_add(resp.content_length().unwrap_or(0)));
+            file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&tmp_path)
+                .map_err(|e| format!("Failed opening MP4 part file: {e}"))?;
+        } else {
+            drop(resp);
+            resp = crate::net::get_stream(&clean_url, Duration::from_secs(30), None, Some(&referer)).await?;
+            if !resp.status().is_success() {
+                return Err(format!("Failed to download stream: HTTP {}", resp.status()));
+            }
+            received = 0;
+            content_len = resp.content_length().unwrap_or(0);
+            file = File::create(&tmp_path).map_err(|e| format!("Failed creating MP4 file: {e}"))?;
+        }
     } else {
         if resp.status().as_u16() == 416 && existing_len > 0 {
+            let range_total = parse_content_range_total(
+                resp.headers()
+                    .get(reqwest::header::CONTENT_RANGE)
+                    .and_then(|v| v.to_str().ok()),
+            );
+            if range_total == Some(existing_len) {
+                fs::rename(&tmp_path, &final_path)
+                    .map_err(|e| format!("Failed finalizing MP4: {e}"))?;
+                return Ok(existing_len);
+            }
             drop(resp);
             resp = crate::net::get_stream(&clean_url, Duration::from_secs(30), None, Some(&referer)).await?;
         }
@@ -1896,6 +1935,8 @@ pub async fn native_download_enqueue(
                     existing.status = "queued".to_string();
                     existing.error = None;
                     existing.auto_resume = true;
+                    existing.quality = req.quality.clone();
+                    existing.is_hevc = req.is_hevc;
                     existing.speed_formatted = "Queued".to_string();
                     if req.stream_url.as_ref().is_some_and(|s| !s.is_empty()) {
                         existing.stream_url = req.stream_url;
@@ -2191,7 +2232,7 @@ mod tests {
         let cipher = Aes128::new_from_slice(key).unwrap();
         let mut encrypted = Vec::new();
         let mut prev = iv;
-        for chunk in padded.chunks_exact(16) {
+        for chunk in padded.as_chunks::<16>().0 {
             let mut block = [0u8; 16];
             for i in 0..16 {
                 block[i] = chunk[i] ^ prev[i];

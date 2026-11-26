@@ -372,7 +372,7 @@ fn rewrite_playlist(url: &str, text: &str, prefix: &str) -> String {
                 }
                 continue;
             }
-            if line.contains("URI=\"") {
+            if line.to_ascii_lowercase().contains("uri=\"") {
                 // All URIs (KEY, MAP, MEDIA, SESSION-KEY, PART, PRELOAD-HINT) must pass target checks.
                 let absolute = absolutize_uri_in_attr(url, line);
                 out.push_str(&rewrite_uri_attr(&absolute, prefix));

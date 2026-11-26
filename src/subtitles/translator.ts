@@ -315,7 +315,7 @@ export function translateDialogueSync(text: string): string {
   }
 
   let fallback = trimmed;
-  for (const [zh, en] of Object.entries(DIALOGUE_DICTIONARY)) {
+  for (const [zh, en] of SORTED_DICTIONARY_ENTRIES) {
     if (fallback.includes(zh)) {
       fallback = fallback.split(zh).join(` ${en} `);
     }

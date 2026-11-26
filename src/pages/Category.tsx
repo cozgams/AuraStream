@@ -8,7 +8,7 @@ import { MediaCard, Masonry, RowCard } from "../components/cards";
 import { CollectionLink, CollectionLinks } from "../components/CollectionLink";
 import { InplaceSearch } from "../components/InplaceSearch";
 import { Empty } from "../components/ui";
-import { IBack, IChevR, IGlobe, IGrid, ISearch, ITrophy } from "../icons";
+import { IBack, IChevR, IGlobe, IGrid, IMessageSquare, ISearch, ITrophy } from "../icons";
 import { localizeError } from "../i18n";
 
 export const CHANNELS = [
@@ -104,11 +104,14 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
       <div className="shrink-0 bg-bg/95 backdrop-blur-md z-10 border-b border-edge/30 px-4 pb-3" style={{ paddingTop: "calc(var(--sat, 0px) + 12px)" }}>
-        <h1 className="ios-page-title text-on">{t("cat.title")}</h1>
-        <p className="text-[13px] text-mut mt-1">{t("cat.subtitle")}</p>
+        <div className={wide ? "max-w-[1200px] mx-auto w-full" : ""}>
+          <h1 className="ios-page-title text-on">{t("cat.title")}</h1>
+          <p className="text-[13px] text-mut mt-1">{t("cat.subtitle")}</p>
+        </div>
       </div>
 
-      <div ref={scrollRef} className={`ios-page-body flex-1 scroll-y pt-3 pb-52 ${wide ? "max-w-[1200px] mx-auto" : ""}`}>
+      <div ref={scrollRef} className="ios-page-body flex-1 scroll-y pt-3 pb-[calc(var(--sab,0px)+176px)]">
+        <div className={wide ? "max-w-[1200px] mx-auto w-full" : ""}>
         {/* Rankings: full-width featured card */}
         <div className="px-4 mb-2.5">
           <Button
@@ -180,7 +183,7 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
         <section aria-label="Community" className="mb-6 a-rise">
           <Button onClick={() => push({ kind: "posts" })} className="w-full flex items-center gap-3 px-4 py-2.5 text-left group pressable">
             <span className="w-9 h-9 rounded-(--r-sm) bg-pc text-on-pc flex items-center justify-center shrink-0">
-              <IGrid size={18} strokeWidth={1.8} />
+              <IMessageSquare size={18} strokeWidth={1.8} />
             </span>
             <span className="flex-1 min-w-0">
               <span className="block text-[15.5px] font-semibold text-on leading-tight">{t("cat.posts")}</span>
@@ -200,6 +203,7 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
         </section>
 
         <div className="px-4 text-center text-[12px] text-dim pt-1">— All Channels Displayed —</div>
+        </div>
       </div>
     </div>
   );
@@ -334,33 +338,36 @@ export function ChannelPage({ cate, name, onBack, wide }: { cate: string; name: 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
       <div className="shrink-0 bg-s1" style={{ paddingTop: "var(--sat, 0px)" }}>
-        <div className="px-3 pt-2 pb-3 flex items-center gap-2.5">
-          <Button aria-label="Back" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={20} /></Button>
-          <span className="w-[40px] h-[40px] rounded-(--r-sm) bg-pc text-on-pc flex items-center justify-center"><IGrid size={21} strokeWidth={1.9} /></span>
-          <div className="flex-1 min-w-0">
-            <div className="text-[17px] font-bold text-on leading-tight">{name}</div>
-            <div className="text-[12px] text-mut">{items.length} titles · {page}/{Math.max(pages, 1)} pages</div>
+        <div className={wide ? "max-w-[1200px] mx-auto w-full" : ""}>
+          <div className="px-3 pt-2 pb-3 flex items-center gap-2.5">
+            <Button aria-label="Back" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={20} /></Button>
+            <span className="w-[40px] h-[40px] rounded-(--r-sm) bg-pc text-on-pc flex items-center justify-center shrink-0"><IGrid size={21} strokeWidth={1.9} /></span>
+            <div className="flex-1 min-w-0">
+              <div className="text-[17px] font-bold text-on leading-tight truncate">{name}</div>
+              <div className="text-[12px] text-mut">{items.length} titles · {page}/{Math.max(pages, 1)} pages</div>
+            </div>
+            <Button onClick={() => setSearching(true)} aria-label={cate === "original" ? "Search originals" : "Search dramas"} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><ISearch size={19} /></Button>
           </div>
-          <Button onClick={() => setSearching(true)} aria-label={cate === "original" ? "Search originals" : "Search dramas"} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><ISearch size={19} /></Button>
+          {cate === "original" && (
+            <div className="px-4 pb-2 flex flex-wrap gap-2">
+              {ORIGINAL_CATES.map((s) => (
+                <Button aria-pressed={originalCate === s.value} key={s.value} onClick={() => changeOriginalCate(s.value)}
+                  className="ios-filter-pill">{s.label}</Button>
+              ))}
+            </div>
+          )}
+          {cate !== "original" && (
+            <div className="px-4 pb-3 flex flex-wrap gap-2">
+              {CHANNEL_SORTS.map((s) => (
+                <Button aria-pressed={serverSort === s.value} key={s.value} onClick={() => changeServerSort(s.value)}
+                  className="ios-filter-pill">{s.label}</Button>
+              ))}
+            </div>
+          )}
         </div>
-        {cate === "original" && (
-          <div className="px-4 pb-2 flex flex-wrap gap-2">
-            {ORIGINAL_CATES.map((s) => (
-              <Button aria-pressed={originalCate === s.value} key={s.value} onClick={() => changeOriginalCate(s.value)}
-                className="ios-filter-pill">{s.label}</Button>
-            ))}
-          </div>
-        )}
-        {cate !== "original" && (
-          <div className="px-4 pb-3 flex flex-wrap gap-2">
-            {CHANNEL_SORTS.map((s) => (
-              <Button aria-pressed={serverSort === s.value} key={s.value} onClick={() => changeServerSort(s.value)}
-                className="ios-filter-pill">{s.label}</Button>
-            ))}
-          </div>
-        )}
       </div>
-      <div ref={scrollContainer} className="flex-1 scroll-y px-4 pt-3 pb-36">
+      <div ref={scrollContainer} className="flex-1 scroll-y px-4 pt-3 pb-[calc(var(--sab,0px)+140px)]">
+        <div className={wide ? "max-w-[1200px] mx-auto w-full" : ""}>
         {items.length ? (
           <Masonry videos={items} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: items.map((x) => x.id), index: Math.max(0, items.findIndex((x) => x.id === v.id)), title: name })} />
         ) : err ? (
@@ -381,6 +388,7 @@ export function ChannelPage({ cate, name, onBack, wide }: { cate: string; name: 
         {!loading && page >= pages && items.length > 0 && (
           <div className="text-center text-[12px] text-dim py-3">— You've reached the end —</div>
         )}
+        </div>
       </div>
       {searching && <InplaceSearch kind="video" scope={cate === "original" ? "original" : undefined} wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: `Search · ${name}` })} />}
     </div>

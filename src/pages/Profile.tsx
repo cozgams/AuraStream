@@ -71,12 +71,12 @@ function FolderDownloadIcon({ size = 44, className = "" }: { size?: number; clas
     <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true">
       <defs>
         <linearGradient id="fdBack" x1="6" y1="10" x2="42" y2="39" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#1a73e8" />
+          <stop offset="0%" style={{ stopColor: "var(--p-primary, #1a73e8)" }} />
           <stop offset="100%" stopColor="#3b82f6" />
         </linearGradient>
         <linearGradient id="fdFront" x1="6" y1="15" x2="42" y2="39" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#2563eb" />
-          <stop offset="100%" stopColor="#60a5fa" />
+          <stop offset="0%" style={{ stopColor: "var(--p-primary, #2563eb)" }} />
+          <stop offset="100%" style={{ stopColor: "var(--p-pc, #60a5fa)" }} />
         </linearGradient>
       </defs>
       {/* Back tab */}
@@ -855,9 +855,10 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
           Top App Bar
           ========================================================================= */}
       <div
-        className="shrink-0 px-4 flex items-center justify-between z-10"
+        className="shrink-0 px-4 z-10"
         style={{ paddingTop: "calc(var(--sat, 0px) + 8px)", paddingBottom: "6px" }}
       >
+        <div className={`flex items-center justify-between gap-2 ${wide ? "max-w-[960px] mx-auto w-full" : "w-full"}`}>
         {view === "overview" ? (
           <>
             <h1 className="text-[24px] font-black tracking-tight text-[#0f172a] dark:text-neutral-100">
@@ -1068,6 +1069,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
             </div>
           </>
         )}
+        </div>
       </div>
 
       {/* =========================================================================
@@ -1076,7 +1078,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
       <div
         ref={scrollRef}
         className="ios-page-body flex-1 scroll-y overflow-x-hidden px-4 pt-0"
-        style={{ paddingBottom: "calc(var(--sab, 48px) + 140px)" }}
+        style={{ paddingBottom: view === "seriesDetail" ? "calc(var(--sab, 0px) + 28px)" : "calc(var(--sab, 0px) + 104px)" }}
         onKeyDown={(e) => {
           if (
             (e.key === "Enter" || e.key === " ") &&
@@ -1089,6 +1091,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
           }
         }}
       >
+        <div className={wide ? "max-w-[960px] mx-auto w-full" : "w-full"}>
         {/* =====================================================================
             1. Overview Page (AuraStream Profile / You Tab)
             ===================================================================== */}
@@ -2018,8 +2021,8 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                         </div>
 
                         {/* Legend */}
-                        <div className="flex items-center justify-between text-[10.5px] text-[#64748b] dark:text-neutral-400 font-medium px-0.5">
-                          <div className="flex items-center gap-3">
+                        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[10.5px] text-[#64748b] dark:text-neutral-400 font-medium px-0.5">
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
                             <span className="flex items-center gap-1">
                               <span className="w-2 h-2 rounded-full bg-[#1a73e8]" />
                               <span>AuraStream ({formatBytes(totalDownloadsBytes)})</span>
@@ -2144,7 +2147,8 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                           <button
                             type="button"
                             onClick={() => toggleDramaCollapse(group.videoId)}
-                            className="text-slate-400 hover:text-slate-600 dark:hover:text-neutral-200 pressable p-1 shrink-0"
+                            className="w-7 h-7 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-neutral-200 hover:bg-slate-200/50 dark:hover:bg-white/10 flex items-center justify-center pressable shrink-0"
+                            aria-label={isExpanded ? "Collapse episodes" : "Expand episodes"}
                           >
                             {isExpanded ? <IChevronUp size={16} /> : <IChevronDown size={16} />}
                           </button>
@@ -2275,7 +2279,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                               setSelectedSeriesGroup(group);
                               setSeriesMenuOpen(true);
                             }}
-                            className="w-6 h-6 flex items-center justify-center text-slate-400 hover:text-slate-600 pressable"
+                            className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-neutral-200 hover:bg-slate-200/50 dark:hover:bg-white/10 pressable"
                             aria-label="Series options"
                           >
                             <IMore size={14} className="rotate-90" />
@@ -2458,7 +2462,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
           /* =====================================================================
               3. Series Detail View (Image 3 Screen 2)
               ===================================================================== */
-          <div className="flex flex-col gap-4 a-rise pb-[calc(var(--sab,0px)+96px)]">
+          <div className="flex flex-col gap-4 a-rise">
             {/* Top Showcase Hero */}
             <div className="flex items-center gap-3.5 px-0.5">
               <div className="w-16 h-16 rounded-2xl overflow-hidden shrink-0 shadow-md border border-black/5 dark:border-white/10 bg-slate-100 dark:bg-neutral-800">
@@ -2676,7 +2680,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                           e.stopPropagation();
                           setConfirmDeleteEp({ videoId: item.videoId, episode: item.episode });
                         }}
-                        className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-red-500 pressable transition-colors"
+                        className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-500/10 pressable transition-colors"
                         aria-label="Delete Episode"
                         title="Delete Episode"
                       >
@@ -2688,7 +2692,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                           e.stopPropagation();
                           openSingleExport(item.videoId, item.episode, item.title);
                         }}
-                        className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-slate-600 pressable"
+                        className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-neutral-200 hover:bg-slate-200/50 dark:hover:bg-white/10 pressable"
                         aria-label="Episode options"
                       >
                         <IMore size={14} className="rotate-90" />
@@ -2853,6 +2857,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
             onAction={() => push({ kind: "ranks" })}
           />
         )}
+        </div>
       </div>
 
       {/* =========================================================================

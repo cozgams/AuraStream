@@ -33,8 +33,13 @@ function completedEpisodeLabel(v: VideoCard): string {
   return total > 0 ? `All ${total} Eps` : "Completed";
 }
 
+function formatUniqueTags(tags?: string[], limit = 2): string {
+  if (!tags?.length) return "";
+  return Array.from(new Set(tags.map(formatDramaTag).filter(Boolean))).slice(0, limit).join(" · ");
+}
+
 export function WaterfallCard({ v, onOpen, priority = false }: { v: VideoCard; onOpen: () => void; priority?: boolean }) {
-  const tagsStr = v.tags?.slice(0, 2).map(formatDramaTag).join(" · ");
+  const tagsStr = formatUniqueTags(v.tags, 2);
   const authorStr = v.author?.name ? formatDramaAuthor(v.author.name) : "AAA";
   return <MediaCard title={v.title} cover={v.cover} onOpen={onOpen} priority={priority} score={v.score}
     badge={v.is_finished ? completedEpisodeLabel(v) : `Ep. ${v.episode_count}`}
@@ -53,7 +58,7 @@ export function Masonry({ videos, onOpen, wide = false }: {
 
 export function RowCard({ v, onOpen }: { v: VideoCard; onOpen: () => void }) {
   const tag0 = v.tags?.[0] ? formatDramaTag(v.tags[0]) : "Drama";
-  const tagsStr = v.tags?.slice(0, 2).map(formatDramaTag).join(" · ");
+  const tagsStr = formatUniqueTags(v.tags, 2);
   return <div className="ios-row-card"><MediaCard title={v.title} cover={v.cover} score={v.score} onOpen={onOpen}
     badge={v.is_finished ? completedEpisodeLabel(v) : `${v.episode_count} Eps`}
     isFinished={v.is_finished}
@@ -65,13 +70,13 @@ export function RankRow({ item, onOpen, metricMax }: {
   item: { rank: number; video_id: number; title: string; cover: string; tags: string[]; score: number; metric_value: number; metric_label: string };
   onOpen: () => void; metricMax: number;
 }) {
-  const tagsStr = item.tags?.slice(0, 2).map(formatDramaTag).join(" · ") || "Trending · Drama";
+  const tagsStr = formatUniqueTags(item.tags, 2) || "Trending · Drama";
   return <Button className="ios-rank-row" onClick={onOpen}>
     <span className={`ios-rank-number ${item.rank < 4 ? "is-top" : ""}`}>{String(item.rank).padStart(2, "0")}</span>
     <span className="ios-rank-cover"><Img src={item.cover} eager={item.rank <= 6} />{typeof item.score === "number" && <ScoreBadge score={item.score} />}</span>
-    <span className="ios-rank-copy"><strong>{formatDramaTitle(item.title)}</strong><span>{tagsStr}</span>
+    <span className="ios-rank-copy"><strong>{formatDramaTitle(item.title)}</strong><span className="truncate">{tagsStr}</span>
       <span className="ios-rank-meter" aria-hidden="true"><span style={{ width: `${Math.max(6, item.metric_value / Math.max(1, metricMax) * 100)}%` }} /></span>
     </span>
-    <span className="ios-rank-metric"><IStarF size={13} className="text-amber-400" />{fmt(item.metric_value)}</span>
+    <span className="ios-rank-metric"><IStarF size={13} className="text-(--p-star)" />{fmt(item.metric_value)}</span>
   </Button>;
 }

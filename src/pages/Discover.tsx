@@ -62,23 +62,26 @@ export function TopicsPage({ onBack, wide }: { onBack: () => void; wide: boolean
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
-      <div className="shrink-0 bg-s1" style={{ paddingTop: "var(--sat, 0px)" }}>
-        <div className="px-3 pt-2 pb-3 flex items-center gap-2">
+      <div className="shrink-0 bg-s1 border-b border-edge/20" style={{ paddingTop: "var(--sat, 0px)" }}>
+        <div className="pt-2 pb-3 flex items-center gap-2.5 max-w-[1040px] mx-auto w-full">
           <Button aria-label="Back" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable shrink-0"><IBack size={20} /></Button>
-          <span className="text-[17px] font-bold text-on truncate">{t("cat.topics_title")}</span>
-          <span className="text-[12px] text-mut whitespace-nowrap shrink-0">{items.length} {t("cat.topics").toLowerCase()}</span>
-          <Button onClick={() => setSearching(true)} aria-label="Search dramas" className="ml-auto w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable shrink-0"><ISearch size={19} /></Button>
+          <div className="flex-1 min-w-0">
+            <div className="text-[17px] font-bold text-on truncate leading-tight">{t("cat.topics_title")}</div>
+            <div className="text-[11.5px] text-mut mt-0.5 leading-tight">{items.length} {t("cat.topics").toLowerCase()}</div>
+          </div>
+          <Button onClick={() => setSearching(true)} aria-label="Search dramas" className="w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable shrink-0"><ISearch size={19} /></Button>
           <Button aria-label="Refresh" onClick={load} className="w-9 h-9 rounded-full flex items-center justify-center text-mut hover:bg-s3 pressable shrink-0"><IRefresh size={16} /></Button>
         </div>
       </div>
 
-      <div className="flex-1 scroll-y px-4 pt-3 pb-[calc(var(--sab,48px)+24px)]">
+      <div className="flex-1 scroll-y pt-3 pb-[calc(var(--sab,0px)+28px)]">
+        <div className="max-w-[1040px] mx-auto w-full">
         {loading ? (
-          <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
+          <div className="flex justify-center py-12"><Loader className="w-8 h-8" /></div>
         ) : err && !items.length ? (
           <Empty icon={<TopicIcon size={26} />} title="Failed to load topics" sub={err} action="Retry" onAction={load} />
         ) : items.length ? (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             {items.map((t, index) => (
               <Button key={t.id} onClick={() => push({ kind: "topic", slug: t.slug, name: formatDramaTitle(t.title) })}
                 className="ios-topic-card text-left overflow-hidden bg-s1 elev-1 pressable a-rise">
@@ -99,6 +102,7 @@ export function TopicsPage({ onBack, wide }: { onBack: () => void; wide: boolean
         ) : (
           <Empty icon={<TopicIcon size={26} />} title="No topics available" />
         )}
+        </div>
         {wide && <div className="h-2" />}
       </div>
       {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: "Search · Topics" })} />}

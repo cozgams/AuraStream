@@ -149,6 +149,7 @@ pub async fn line_set(state: State<'_, Api>, url: String) -> Result<String, Stri
     let applied = crate::net::set_base(&url)?;
     crate::net::refresh_client();
     if previous != applied {
+        crate::media::clear_caches();
         state.session.clear();
     }
     Ok(applied)
@@ -161,7 +162,10 @@ pub async fn line_custom_set(state: State<'_, Api>, url: String) -> Result<Value
     let previous = base();
     let applied = crate::net::set_custom_base(&url)?;
     crate::net::refresh_client();
-    if previous != applied { state.session.clear(); }
+    if previous != applied {
+        crate::media::clear_caches();
+        state.session.clear();
+    }
     Ok(json!({ "base": applied, "custom": crate::net::is_custom_line() }))
 }
 
@@ -184,6 +188,7 @@ pub async fn proxy_set(mode: String, url: String) -> Result<Value, String> {
     crate::proxy::set(&mode, &url)?;
     *generation = generation.wrapping_add(1);
     crate::net::refresh_client();
+    crate::media::clear_caches();
     let state = crate::net::proxy_state();
     crate::playback_log::record("proxy.changed", json!({
         "mode": state.get("mode"), "proxy": state.get("effective"),
@@ -215,7 +220,7 @@ pub async fn line_probe(urls: Vec<String>) -> Result<Value, String> {
 ///
 /// Auto line selection: probe primary site and verified publisher mirrors.
 #[tauri::command]
-pub async fn line_auto() -> Result<Value, String> {
+pub async fn line_auto(state: State<'_, Api>) -> Result<Value, String> {
     let selection = begin_line_selection()?;
     crate::net::refresh_client();
     let pick = crate::lines::auto_pick().await;
@@ -232,6 +237,11 @@ pub async fn line_auto() -> Result<Value, String> {
         && !chosen.is_empty() && chosen != previous {
         let next = crate::net::set_base(&chosen)?;
         switched = next != previous;
+        if switched {
+            crate::net::refresh_client();
+            crate::media::clear_caches();
+            state.session.clear();
+        }
     }
     Ok(json!({
         "previous": previous,
@@ -244,7 +254,7 @@ pub async fn line_auto() -> Result<Value, String> {
 
 /// Probe primary site and restore if healthy.
 #[tauri::command]
-pub async fn line_try_main() -> Result<Value, String> {
+pub async fn line_try_main(state: State<'_, Api>) -> Result<Value, String> {
     let selection = begin_line_selection()?;
     crate::net::refresh_client();
     let probe = crate::lines::try_main().await;
@@ -256,6 +266,11 @@ pub async fn line_try_main() -> Result<Value, String> {
         if !chosen.is_empty() && chosen != previous {
             let next = crate::net::set_base(chosen)?;
             switched = next != previous;
+            if switched {
+                crate::net::refresh_client();
+                crate::media::clear_caches();
+                state.session.clear();
+            }
         }
     }
     Ok(json!({
@@ -519,17 +534,23 @@ fn asset_rank(name: &str) -> u8 {
         } else if cfg!(target_arch = "aarch64") {
             if n.contains("arm64") || n.contains("aarch64") {
                 3
+            } else if n.contains("universal") {
+                2
             } else {
-                1
+                0
             }
         } else if cfg!(target_arch = "x86_64") {
-            if n.contains("x86_64") {
+            if n.contains("x86_64") || n.contains("amd64") {
                 3
+            } else if n.contains("universal") {
+                2
             } else {
-                1
+                0
             }
-        } else if n.contains("x86") || n.contains("arm64") {
-            1
+        } else if n.contains("x86_64") || n.contains("arm64") || n.contains("aarch64") {
+            0
+        } else if n.contains("_arm.") || n.contains("-arm.") || n.contains("armeabi") || n.contains("armv7") {
+            3
         } else {
             2
         }
@@ -729,6 +750,7 @@ pub async fn app_boot(state: State<'_, Api>) -> Result<Value, String> {
 pub async fn security_set(strict: bool) -> Result<bool, String> {
     crate::network_policy::set_strict_security(strict)?;
     crate::net::refresh_client();
+    crate::media::clear_caches();
     crate::playback_log::record(
         "security.mode_changed",
         json!({"strict": crate::network_policy::strict_security()}),

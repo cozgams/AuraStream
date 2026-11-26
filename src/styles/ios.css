@@ -79,14 +79,14 @@ html.theme-light[data-accent="blue"] {
   --p-glow:rgb(0 122 255 / .18); --p-tint:rgb(0 122 255 / .10);
 }
 html.theme-light[data-accent="cyan"] {
-  --p-primary:#0097a7; --p-on-primary:#fff; --p-pc:#e0f7fa; --p-on-pc:#006064;
-  --p-sec:#e0f7fa; --p-on-sec:#006064;
-  --p-glow:rgb(0 151 167 / .18); --p-tint:rgb(0 151 167 / .10);
+  --p-primary:#007684; --p-on-primary:#fff; --p-pc:#e0f7fa; --p-on-pc:#005a60;
+  --p-sec:#e0f7fa; --p-on-sec:#005a60;
+  --p-glow:rgb(0 118 132 / .18); --p-tint:rgb(0 118 132 / .10);
 }
 html.theme-light[data-accent="emerald"] {
-  --p-primary:#059669; --p-on-primary:#fff; --p-pc:#d1fae5; --p-on-pc:#047857;
-  --p-sec:#d1fae5; --p-on-sec:#047857;
-  --p-glow:rgb(5 150 105 / .18); --p-tint:rgb(5 150 105 / .10);
+  --p-primary:#047857; --p-on-primary:#fff; --p-pc:#d1fae5; --p-on-pc:#065f46;
+  --p-sec:#d1fae5; --p-on-sec:#065f46;
+  --p-glow:rgb(4 120 87 / .18); --p-tint:rgb(4 120 87 / .10);
 }
 html.theme-light[data-accent="rose"] {
   --p-primary:#e11d48; --p-on-primary:#fff; --p-pc:#ffe4e6; --p-on-pc:#be123c;
@@ -94,9 +94,9 @@ html.theme-light[data-accent="rose"] {
   --p-glow:rgb(225 29 72 / .18); --p-tint:rgb(225 29 72 / .10);
 }
 html.theme-light[data-accent="amber"] {
-  --p-primary:#d97706; --p-on-primary:#fff; --p-pc:#fef3c7; --p-on-pc:#92400e;
-  --p-sec:#fef3c7; --p-on-sec:#92400e;
-  --p-glow:rgb(217 119 6 / .18); --p-tint:rgb(217 119 6 / .10);
+  --p-primary:#b45309; --p-on-primary:#fff; --p-pc:#fef3c7; --p-on-pc:#78350f;
+  --p-sec:#fef3c7; --p-on-sec:#78350f;
+  --p-glow:rgb(180 83 9 / .18); --p-tint:rgb(180 83 9 / .10);
 }
 html.theme-light[data-accent="violet"] {
   --p-primary:#7c3aed; --p-on-primary:#fff; --p-pc:#ede9fe; --p-on-pc:#5b21b6;
@@ -160,7 +160,9 @@ html.theme-light[data-accent="violet"] {
 .ios-poster { display:flex; flex-direction:column; align-items:stretch; text-align:left; padding:0; width:100%; min-width:0; background:none; border:0; border-radius:18px; }
 .ios-poster-art { position:relative; display:block; width:100%; aspect-ratio:3/4; border-radius:18px; overflow:hidden; background:var(--p-s3); box-shadow:0 6px 18px rgb(0 0 0 / .10); isolation:isolate; }
 .ios-poster-art::after { content:""; position:absolute; inset:0; pointer-events:none; border-radius:inherit; box-shadow:inset 0 0 0 1px var(--ios-edge); }
+.win-root { --sab: 0px; }
 .ios-poster-badge { position:absolute; top:9px; left:9px; max-width:calc(100% - 18px); padding:5px 9px; background:rgb(16 18 24 / .80); color:#fff; border:1px solid rgb(255 255 255 / .22); border-radius:999px; font-size:11.5px; line-height:1.25; font-weight:650; letter-spacing:.01em; }
+.ios-poster-art.has-score-badge .ios-poster-badge { max-width:calc(100% - 68px); }
 .ios-poster-badge.is-finished { background:linear-gradient(135deg,#059669,#10b981); border-color:transparent; color:#fff; }
 .ios-poster-flag.is-finished { background:#059669; color:#fff; }
 .ios-poster-progress { position:absolute; inset:auto 0 0; display:flex; align-items:center; gap:5px; padding:26px 12px 10px; background:linear-gradient(transparent,rgb(0 0 0 / .45) 42%,rgb(0 0 0 / .86)); color:#fff; font-size:12px; font-weight:500; }
@@ -347,7 +349,7 @@ body.has-series-detail .hg-tabbar {
    elastic transitions. The layout and semantic tokens stay shared across
    desktop, iOS, and Android; this layer only changes how the interface feels. */
 :root {
-  --motion-ink:#1a73e8;
+  --motion-ink:var(--p-primary);
   --motion-on-ink:#fff;
   --motion-paper:#12141a;
   --motion-paper-2:#1a1d24;
@@ -356,9 +358,9 @@ body.has-series-detail .hg-tabbar {
   --motion-spring-soft:cubic-bezier(.22,1.28,.36,1);
   --ios-spring:var(--motion-spring);
   --p-canvas:#0c0e13; --p-bg:#12141a; --p-s1:#1a1d24; --p-s2:#21252e;
-  --p-s3:#292e3a; --p-s4:#353b4a; --p-on:#f4f4f6; --p-mut:#a3aab8; --p-dim:#7e8696;
+  --p-s3:#292e3a; --p-s4:#353b4a; --p-on:#f4f4f6; --p-mut:#a3aab8; --p-dim:#858d9e;
   --p-primary:#f4f1eb; --p-on-primary:#191919; --p-pc:#193c60; --p-on-pc:#d4e8ff;
-  --p-sec:#2a313d; --p-on-sec:#dcecff; --p-like:var(--motion-accent); --p-star:#f5b841;
+  --p-sec:#2a313d; --p-on-sec:#dcecff; --p-like:#ff5e7e; --p-star:#f5b841;
   --p-success:#4cc38a; --p-danger:#ff6b72; --p-on-danger:#fff; --p-glow:rgb(116 183 255 / .24);
   --p-hover:rgb(255 255 255 / .07); --p-tint:rgb(116 183 255 / .14); --p-shadow:0 18px 42px rgb(0 0 0 / .42);
   --ios-edge:rgb(255 255 255 / .12); --ios-highlight:rgb(255 255 255 / .08);
@@ -366,15 +368,15 @@ body.has-series-detail .hg-tabbar {
   --ios-shadow:0 16px 40px rgb(0 0 0 / .5),inset 0 1px 0 rgb(255 255 255 / .08),inset 0 -1px 0 rgb(0 0 0 / .24);
 }
 html.theme-light {
-  --motion-ink:#1a73e8;
+  --motion-ink:var(--p-primary);
   --motion-on-ink:#fff;
   --motion-paper:#eeece7;
   --motion-paper-2:#e5e2db;
   --p-canvas:#e8e6e0; --p-bg:var(--motion-paper); --p-s1:#f8f7f3; --p-s2:#f4f2ed;
-  --p-s3:#e7e5df; --p-s4:#d2cfc7; --p-on:#25241f; --p-mut:#625f58; --p-dim:#706d65;
+  --p-s3:#e7e5df; --p-s4:#d2cfc7; --p-on:#181714; --p-mut:#4e4b44; --p-dim:#5e5b54;
   --p-primary:#0065d5; --p-on-primary:#fff; --p-pc:#e0edff; --p-on-pc:#0052af;
-  --p-sec:#e3edfb; --p-on-sec:#0054ad; --p-like:var(--motion-accent); --p-star:#b57528;
-  --p-success:#4f8d65; --p-danger:#c64942; --p-on-danger:#fff; --p-glow:rgb(0 101 213 / .18);
+  --p-sec:#e3edfb; --p-on-sec:#0054ad; --p-like:#bd2851; --p-star:#886200;
+  --p-success:#247542; --p-danger:#c52b35; --p-on-danger:#fff; --p-glow:rgb(0 101 213 / .18);
   --p-hover:rgb(25 25 25 / .06); --p-tint:rgb(0 101 213 / .12); --p-shadow:0 18px 42px rgb(36 32 28 / .10);
   --ios-edge:rgb(60 56 48 / .14); --ios-highlight:rgb(255 255 255 / .92);
   --ios-glass:rgb(248 247 243 / .88); --ios-glass-solid:#f8f7f3; --ios-selected:rgb(255 255 255 / .92); --ios-scrim:rgb(0 0 0 / .40);
@@ -553,7 +555,7 @@ html.theme-light {
 .ios-toast-host>div>* ,
 .win-search-launch>* { position:relative; z-index:1; }
 
-.ios-setting-group,.ios-account-card,.ios-rank-row,.ios-surface,.ios-collection-link {
+.ios-setting-group,.ios-account-card,.ios-rank-row,:where(.ios-surface),.ios-collection-link {
   background:var(--glass-card-bg);
   border-radius:28px;
   border-color:var(--glass-edge);
@@ -583,7 +585,7 @@ html.theme-light {
 .ios-appearance-picker>.ios-segmented-items>.ios-button { padding-inline:8px; }
 @container (min-width:560px) {
   .ios-setting-group>.ios-appearance-row { grid-template-columns:36px minmax(0,1fr) auto; }
-  .ios-appearance-picker { grid-column:auto; width:228px; }
+  .ios-appearance-row > .ios-appearance-picker { grid-column:auto; width:228px; }
 }
 .ios-form.ios-search-form { height:52px; min-height:52px; padding-inline:16px 4px; }
 .ios-search-form>.ios-search-clear { width:40px; height:40px; background:transparent; border:0; box-shadow:none; }
@@ -597,7 +599,7 @@ html.theme-light {
 /* Narrow category shortcuts give the subtitle a full row instead of squeezing
    it between the icon and arrow. Large text can still reflow without clipping. */
 @container (max-width:559px) {
-  .ios-category-links>.ios-collection-link { display:grid; grid-template-columns:36px minmax(0,1fr) 14px; column-gap:8px; row-gap:8px; align-content:start; }
+  .ios-category-links>.ios-collection-link { display:grid; grid-template-columns:34px minmax(0,1fr) auto; column-gap:8px; row-gap:8px; align-content:start; }
   .ios-category-links .ios-collection-copy { display:contents; }
   .ios-category-links .ios-collection-icon { grid-column:1; grid-row:1; }
   .ios-category-links .ios-collection-title { grid-column:2; grid-row:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -700,6 +702,12 @@ html[data-platform="android"] .video-surface-overlay .backdrop-blur-xl {
   .ios-collection-links .ios-collection-chevron { display: none; }
   .ios-settings-row { padding: 14px 14px; }
   .ios-segmented-items > .ios-button { padding: 8px 5px; font-size: 12.5px; white-space: nowrap; }
+}
+.playback-unlock {
+  background: rgb(12 15 22 / .72);
+  color: #fff;
+  border: 1px solid rgb(255 255 255 / .24);
+  box-shadow: 0 8px 24px rgb(0 0 0 / .45);
 }
 @media (max-width: 359px) {
   .ios-collection-links > .ios-collection-link { gap: 6px; padding: 10px 8px; }

@@ -536,14 +536,16 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       if (isDesktop) playbackClock.publish(r.t);
       else setTime(r.t);
     } else if (!alreadySkipped) {
-      resumeRef.current = null;
-      hasSkippedIntroRef.current[playKey] = true;
+      if (r && r.key === playKey && d > 0) resumeRef.current = null;
       const cur = videoRef.current?.el()?.currentTime || 0;
       // Auto-skip intro if starting from the beginning (< 1.5s)
       if (skipSec > 0 && cur < 1.5 && d > skipSec + 5) {
+        hasSkippedIntroRef.current[playKey] = true;
         videoRef.current?.seek(skipSec, "auto_skip_intro");
         if (isDesktop) playbackClock.publish(skipSec);
         else setTime(skipSec);
+      } else if (skipSec <= 0 && cur >= 14) {
+        hasSkippedIntroRef.current[playKey] = true;
       }
     }
   };
@@ -574,8 +576,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     if (isEpisodeDownloaded(curId, curEp)) {
       toast("Preparing episode for share...", "info");
       try {
-        await processEpisodeExport(curId, curEp, "share");
-        return;
+        const res = await processEpisodeExport(curId, curEp, "share");
+        if (res.success || res.cancelled) return;
       } catch {
         // fallback to link copy
       }
@@ -630,11 +632,17 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   }, [videoIds.length, onNearEnd, resolveSwipe, fs]);
 
   const go = useCallback((delta: number) => {
+    const next = Math.max(0, Math.min(videoIds.length - 1, index + delta));
+    if (next === index) return;
+    if (fs) {
+      idxRef.current = next;
+      setIndex(next);
+      return;
+    }
     const el = boxRef.current;
     if (!el) return;
-    const next = Math.max(0, Math.min(videoIds.length - 1, index + delta));
     el.scrollTo({ top: next * el.clientHeight, behavior: "smooth" });
-  }, [index, videoIds.length]);
+  }, [fs, index, videoIds.length]);
 
   /* Unified episode navigation: switches episodes if multi-episode series.
      Desktop arrow keys and side controls mirror mobile swipe behavior. */
@@ -790,7 +798,23 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         return;
       }
 
-      if (playUrls[playKey]) return;
+      const stalePlay = playUrls[playKey];
+      if (stalePlay?.includes("/offline/") || offlineUrls[playKey]) {
+        setOfflineUrls((m) => {
+          if (!m[playKey]) return m;
+          const next = { ...m };
+          delete next[playKey];
+          return next;
+        });
+        setPlayUrls((m) => {
+          if (!m[playKey]?.includes("/offline/")) return m;
+          const next = { ...m };
+          delete next[playKey];
+          return next;
+        });
+      } else if (stalePlay) {
+        return;
+      }
       if (offlineOnly) {
         setErr("This episode has not been downloaded for offline playback.");
         return;
@@ -1032,20 +1056,22 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     }
     const g = gesture.current;
     if (!g || isDesktop) return;
-    const dx = e.clientX - g.x;
-    const dy = e.clientY - g.y;
+    const rawDx = e.clientX - g.x;
+    const rawDy = e.clientY - g.y;
+    const dx = rotated ? rawDy : rawDx;
+    const dy = rotated ? -rawDx : rawDy;
 
     /* Long press: horizontal gear shift (2x, 3x, 4x, 6x) or slide up 64px to lock 2.0x speed */
     if (g.mode === "hold") {
       if ((g as any).initialRate >= 2) {
         const STEPS = [2, 3, 4, 6];
-        const stepIdx = Math.max(0, Math.min(STEPS.length - 1, Math.floor((e.clientX - g.x) / 68)));
+        const stepIdx = Math.max(0, Math.min(STEPS.length - 1, Math.floor(dx / 68)));
         setHoldRate(STEPS[stepIdx]);
-      }
-      const armed = g.startY - e.clientY > 64;
-      if (armed !== lockArmedRef.current) {
-        lockArmedRef.current = armed;
-        setLockArmed(armed);
+        const armed = (rotated ? -(e.clientX - g.x) : g.startY - e.clientY) > 64;
+        if (armed !== lockArmedRef.current) {
+          lockArmedRef.current = armed;
+          setLockArmed(armed);
+        }
       }
       return;
     }
@@ -1057,7 +1083,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         videoRef.current?.pause();
       } else if (Math.abs(dy) > 14) {
         if (g.timer) window.clearTimeout(g.timer);
-        const isLeft = g.x < g.width * 0.5;
+        const isLeft = (g.x - g.left) < g.width * 0.5;
         if (fs || !swipeEp) {
           g.mode = isLeft ? "brightness" : "volume";
           g.startVal = isLeft ? brightness : (muted ? 0 : volume);
@@ -1335,11 +1361,18 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
      - Aligns active video item to top of viewport
      - Restores scrollTop to index * clientHeight upon exiting fullscreen
        Prevents viewport misplacement. */
+  const prevFsLandRef = useRef({ fs, vpLandscape });
   useEffect(() => {
     const el = boxRef.current;
     if (!el) return undefined;
     if (fs) {
+      prevFsLandRef.current = { fs, vpLandscape };
       el.scrollTop = 0;
+      return undefined;
+    }
+    const prev = prevFsLandRef.current;
+    prevFsLandRef.current = { fs, vpLandscape };
+    if (prev.fs === fs && prev.vpLandscape === vpLandscape) {
       return undefined;
     }
     const syncScroll = () => {
@@ -2355,7 +2388,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
             }}>
             <ICompress size={18} />
           </Button>
-          <div className="absolute inset-x-0 z-40 flex items-center gap-3 px-4"
+          <div className="absolute inset-x-0 z-40 flex items-center gap-2 px-3"
             style={{
               bottom: rotated ? 10 : "calc(var(--sab, 0px) + 10px)",
               paddingLeft: rotated ? "calc(var(--sat, 0px) + 16px)" : undefined,
@@ -2366,7 +2399,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               {paused ? <IPlayF size={18} /> : <IPauseF size={17} />}
             </Button>
             <span className="shrink-0 px-2 py-0.5 rounded-full bg-black/55 border border-white/10 text-[12px] font-semibold text-white/95 tabular-nums">{fmtTime(time)}</span>
-            {paused && episodes.length > 1 && (
+            {paused && episodes.length > 1 && rotated && (
               <span className="shrink-0 px-2 py-0.5 rounded-full bg-white/15 text-white/90 text-[11px] font-bold tracking-tight">
                 {`Ep. ${curEp} / ${episodes.length}`}
               </span>
@@ -2385,7 +2418,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               <Button onClick={() => pickEp(nextEpObj.ep_num)}
                 className="shrink-0 flex items-center gap-1 px-2.5 h-8 rounded-full text-[13px] font-semibold hg-chip hg-ink-2 pressable"
                 aria-label={`${t("player.next_ep")} ${t("player.episode_num", { num: nextEpObj.ep_num })}`}>
-                <IVertSwap size={12} />{t("player.next_ep")}
+                <IVertSwap size={12} />{rotated ? t("player.next_ep") : "Next"}
               </Button>
             )}
             <span className="shrink-0 px-2 py-0.5 rounded-full bg-black/55 border border-white/10 text-[12px] font-medium text-white/90 tabular-nums">{fmtTime(duration)}</span>
