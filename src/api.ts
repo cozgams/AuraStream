@@ -157,7 +157,7 @@ async function callNetwork<T>(cmd: string, args?: Record<string, unknown>): Prom
     logLine(`[api] ${cmd} → ${msg}`);
     tracePlayback("api.fail", { cmd, err: msg, status: status ?? null, networkish, isTransientServer });
     notifyNet({ ok: false, cmd, msg, networkish: networkish || isTransientServer });
-    // Retry read-only request once on transient network failure or upstream 50x/429
+    // Retry read-only request once on transient link failure (5xx/429 goes straight to auto-line / explicit Retry)
     if (retryable) {
       logLine(`[api] ${cmd} link unstable (${status ? `HTTP ${status}` : "network"}), retrying in 1.2s`);
       tracePlayback("api.retry", { cmd, err: msg, status: status ?? null });

@@ -454,14 +454,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Cloud sync to Firestore / Account Vault for authenticated users
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingCloudSyncRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     const uid = getCurrentAuthUid();
     const isFirebase = user?.user_type === "firebase" || hasActiveFirebaseSession();
     if (!uid || !isFirebase || cloudHydratedUid !== uid) {
+      pendingCloudSyncRef.current = null;
       return;
     }
-    syncTimeoutRef.current = setTimeout(() => {
+    const flushCloudSync = () => {
+      pendingCloudSyncRef.current = null;
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current);
+        syncTimeoutRef.current = null;
+      }
       try {
         const activeUid = getCurrentAuthUid();
         const activeFb = userRef.current?.user_type === "firebase" || hasActiveFirebaseSession();
@@ -484,11 +491,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // ignore background sync error
       }
-    }, 2000);
+    };
+    pendingCloudSyncRef.current = flushCloudSync;
+    syncTimeoutRef.current = setTimeout(flushCloudSync, 2000);
     return () => {
-      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current);
+        syncTimeoutRef.current = null;
+      }
     };
   }, [p.favs, p.likes, p.watchLater, p.history, user, cloudHydratedUid]);
+
+  useEffect(() => {
+    const flushNow = () => {
+      if (document.visibilityState === "hidden") pendingCloudSyncRef.current?.();
+    };
+    const flushPageHide = () => { pendingCloudSyncRef.current?.(); };
+    document.addEventListener("visibilitychange", flushNow);
+    window.addEventListener("pagehide", flushPageHide);
+    return () => {
+      document.removeEventListener("visibilitychange", flushNow);
+      window.removeEventListener("pagehide", flushPageHide);
+    };
+  }, []);
 
   useEffect(() => {
     let request = 0;

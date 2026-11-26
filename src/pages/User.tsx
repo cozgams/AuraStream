@@ -22,6 +22,7 @@ export function FollowingPage({ onBack, wide }: { onBack: () => void; wide: bool
   const [err, setErr] = useState("");
   const busy = useRef(false);
   const sentinel = useRef<HTMLDivElement>(null);
+  const loadMoreRef = useRef<() => void>(() => {});
 
   const loadMore = useCallback(async () => {
     if (busy.current || page >= pages) return;
@@ -46,6 +47,7 @@ export function FollowingPage({ onBack, wide }: { onBack: () => void; wide: bool
       setLoading(false);
     }
   }, [page, pages, toast]);
+  loadMoreRef.current = () => { void loadMore(); };
 
   useEffect(() => {
     if (!user) {
@@ -55,18 +57,17 @@ export function FollowingPage({ onBack, wide }: { onBack: () => void; wide: bool
       setErr("");
       return;
     }
-    loadMore();
+    void loadMore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   useEffect(() => {
     const el = sentinel.current;
     if (!el) return;
-    const io = new IntersectionObserver((es) => { if (es[0].isIntersecting) loadMore(); }, { rootMargin: "600px" });
+    const io = new IntersectionObserver((es) => { if (es[0].isIntersecting) loadMoreRef.current(); }, { rootMargin: "600px" });
     io.observe(el);
     return () => io.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pages]);
+  }, []);
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
@@ -75,7 +76,7 @@ export function FollowingPage({ onBack, wide }: { onBack: () => void; wide: bool
           <Button aria-label="Back" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={20} /></Button>
           <span className="text-[17px] font-bold text-on">Following</span>
           <span className="text-[12px] text-mut">{items.length} titles</span>
-          <Button onClick={() => setSearching(true)} aria-label="Search dramas" className="ml-auto w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><ISearch size={19} /></Button>
+          <Button onClick={() => setSearching(true)} aria-label="Search dramas" className="ml-auto w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><ISearch size={19} /></Button>
         </div>
       </div>
 
@@ -114,6 +115,9 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
   const [err, setErr] = useState("");
   const busy = useRef(false);
   const sentinel = useRef<HTMLDivElement>(null);
+  const loadMoreRef = useRef<() => void>(() => {});
+  const idRef = useRef(id);
+  idRef.current = id;
 
   useEffect(() => {
     let alive = true;
@@ -122,21 +126,25 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
     return () => { alive = false; };
   }, [id]);
 
-  const loadMore = useCallback(async () => {
-    if (busy.current || page >= pages) return;
+  const loadMore = useCallback(async (forcePage?: number) => {
+    if (busy.current || (forcePage === undefined && page >= pages)) return;
+    const targetId = id;
     busy.current = true;
     setLoading(true);
     try {
-      const next = page + 1;
-      const res = await api.userVideos(id, next, 20);
+      const next = forcePage ?? page + 1;
+      const res = await api.userVideos(targetId, next, 20);
+      if (idRef.current !== targetId) return;
       setItems((prev) => {
-        const seen = new Set(prev.map((x) => x.id));
-        return [...prev, ...(res?.items || []).filter((x) => !seen.has(x.id))];
+        const base = next === 1 ? [] : prev;
+        const seen = new Set(base.map((x) => x.id));
+        return [...base, ...(res?.items || []).filter((x) => !seen.has(x.id))];
       });
       setPage(next);
       setPages(res?.pagination?.pages || next);
       setErr("");
     } catch (e) {
+      if (idRef.current !== targetId) return;
       const msg = localizeError(e);
       setErr(msg);
       toast(msg, "info");
@@ -145,16 +153,24 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
       setLoading(false);
     }
   }, [id, page, pages, toast]);
+  loadMoreRef.current = () => { void loadMore(); };
 
-  useEffect(() => { loadMore(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => {
+    setItems([]);
+    setPage(0);
+    setPages(1);
+    setErr("");
+    void loadMore(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
   useEffect(() => {
     const el = sentinel.current;
     if (!el) return;
-    const io = new IntersectionObserver((es) => { if (es[0].isIntersecting) loadMore(); }, { rootMargin: "600px" });
+    const io = new IntersectionObserver((es) => { if (es[0].isIntersecting) loadMoreRef.current(); }, { rootMargin: "600px" });
     io.observe(el);
     return () => io.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pages]);
+  }, []);
 
   const following = follows.includes(id);
   const onFollow = () => {
@@ -173,7 +189,7 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
         <div className="px-3 pt-2 pb-3 flex items-center gap-2.5">
           <Button aria-label="Back" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={20} /></Button>
           <span className="text-[16px] font-bold text-on truncate">{creatorName || "Creator Profile"}</span>
-          <Button onClick={() => setSearching(true)} aria-label="Search dramas" className="ml-auto w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><ISearch size={19} /></Button>
+          <Button onClick={() => setSearching(true)} aria-label="Search dramas" className="ml-auto w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><ISearch size={19} /></Button>
         </div>
       </div>
 
@@ -183,15 +199,15 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
           <Avatar size={56} src={profile?.avatar} name={creatorName || "U"} hue={220} ring />
           <div className="flex-1 min-w-0">
             <div className="text-[16px] font-bold text-on truncate">{creatorName || "Creator"}</div>
-            {profile?.username && <div className="text-[12px] text-mut mt-0.5">@{profile.username} · ID {id}</div>}
-            <div className="flex gap-3 mt-2 text-[12px] text-mut">
+            {profile?.username && <div className="text-[12px] text-mut mt-0.5 truncate">@{profile.username} · ID {id}</div>}
+            <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-[12px] text-mut">
               <span>Dramas <b className="text-on">{fmt(stats.video_count)}</b></span>
               <span>Followers <b className="text-on">{fmt(stats.followers)}</b></span>
               <span>Likes <b className="text-on">{fmt(stats.like_count)}</b></span>
             </div>
           </div>
           <Button onClick={onFollow}
-            className={`h-8 px-3.5 rounded-full text-[12px] font-semibold pressable shrink-0 ${following ? "bg-s3 text-mut" : "bg-primary text-on-primary"}`}>
+            className={`h-9 px-3.5 rounded-full text-[12.5px] font-semibold pressable shrink-0 ${following ? "bg-s3 text-mut" : "bg-primary text-on-primary"}`}>
             {following ? "Following" : "+ Follow"}
           </Button>
         </Surface>

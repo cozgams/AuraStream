@@ -10,6 +10,7 @@ import { useProxyPlaybackRecovery } from "../useProxyPlaybackRecovery";
 import { isFullEpisodePreCacheEnabled } from "../playbackFeatures";
 import { useSeekInput } from "../useSeekInput";
 import { useMediaSession } from "../useMediaSession";
+import { registerOverlayBack } from "../back";
 import PlaybackLock from "./PlaybackLock";
 import { ICompress, IExpand, ILockF, IPauseF, IPlayF, IVol, IVolMute } from "../icons";
 
@@ -48,6 +49,7 @@ export default function Player({
   const [full, setFull] = useState(false);
   const [rate, setRate] = useState(1);
   const [errMsg, setErrMsg] = useState<string>("");
+  const [reloadNonce, setReloadNonce] = useState(0);
   const [controlsLocked, setControlsLocked] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(false);
   const controlsTimerRef = useRef<number | null>(null);
@@ -269,7 +271,7 @@ export default function Player({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [src, proxyRecovery.revision]);
+  }, [src, proxyRecovery.revision, reloadNonce]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -285,10 +287,38 @@ export default function Player({
   }, []);
 
   useEffect(() => {
-    const onFs = () => setFull(!!document.fullscreenElement);
+    const onFs = () => setFull(Boolean(document.fullscreenElement));
     document.addEventListener("fullscreenchange", onFs);
     return () => document.removeEventListener("fullscreenchange", onFs);
   }, []);
+
+  useEffect(() => {
+    const bridge = (window as unknown as { AuraNativeExport?: { setImmersiveFullscreen?: (fs: boolean, landscape: boolean) => void } }).AuraNativeExport;
+    if (isMobile && typeof bridge?.setImmersiveFullscreen === "function") {
+      bridge.setImmersiveFullscreen(full, full);
+      return () => {
+        if (full) bridge.setImmersiveFullscreen?.(false, false);
+      };
+    }
+  }, [full]);
+
+  useEffect(() => {
+    if (!active || (!controlsLocked && !full)) return;
+    return registerOverlayBack(() => {
+      if (controlsLocked) {
+        setControlsLocked(false);
+        return true;
+      }
+      if (full) {
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        }
+        setFull(false);
+        return true;
+      }
+      return false;
+    });
+  }, [active, controlsLocked, full]);
 
   const toggle = () => {
     const video = videoRef.current;
@@ -308,15 +338,22 @@ export default function Player({
 
   const toggleFull = () => {
     const el = wrapRef.current;
-    if (!el) return;
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-    else el.requestFullscreen().catch(() => {});
+    const bridge = (window as unknown as { AuraNativeExport?: { setImmersiveFullscreen?: (fs: boolean, landscape: boolean) => void } }).AuraNativeExport;
+    if (full) {
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      setFull(false);
+      return;
+    }
+    if (el && (!isMobile || typeof bridge?.setImmersiveFullscreen !== "function")) {
+      el.requestFullscreen().catch(() => {});
+    }
+    setFull(true);
   };
 
   const pct = duration > 0 ? Math.max(0, Math.min(100, (seek.time / duration) * 100)) : 0;
 
   return (
-    <div ref={wrapRef} className={`relative bg-black overflow-hidden group ${className}`}>
+    <div ref={wrapRef} className={`relative bg-black overflow-hidden group ${full && isMobile && !document.fullscreenElement ? "fs-immersive" : className}`}>
       <div className="absolute inset-0" inert={controlsLocked || undefined}>
       {poster && (
         <div
@@ -401,8 +438,18 @@ export default function Player({
       />
 
       {errMsg && (
-        <div className="absolute left-2 top-2 z-30 max-w-[80%] rounded bg-black/70 px-2 py-1 text-[12px] leading-tight text-red-300 break-all">
-          {errMsg}
+        <div className="absolute left-3 top-3 z-30 max-w-[85%] rounded-xl bg-black/80 px-3 py-2 text-[12px] leading-snug text-red-200 flex items-center gap-2.5 border border-white/15">
+          <span className="break-words min-w-0 flex-1">{errMsg}</span>
+          <Button
+            onClick={(e) => {
+              e.stopPropagation();
+              setErrMsg("");
+              setReloadNonce((n) => n + 1);
+            }}
+            className="px-2.5 h-8 rounded-lg bg-primary text-on-primary text-[11.5px] font-semibold shrink-0 pressable"
+          >
+            Retry
+          </Button>
         </div>
       )}
 

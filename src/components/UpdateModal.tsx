@@ -132,7 +132,7 @@ export default function UpdateModal({
   }, [info?.has_update, effectiveStage, activeApkPath]);
 
   useEffect(() => {
-    if (!info?.has_update || !activeApkPath || (effectiveStage !== "need_permission" && effectiveStage !== "ready")) return;
+    if (!info?.has_update || !activeApkPath || effectiveStage !== "need_permission") return;
     if (triggeredRef.current) return;
     const checkAndResumeInstall = () => {
       if (triggeredRef.current) return;
@@ -278,7 +278,7 @@ export default function UpdateModal({
             <>
               <Button
                 onClick={onClose}
-                className="flex-1 h-9 rounded-(--r-ctl) bg-s3 text-[13.5px] text-on/80 pressable whitespace-nowrap"
+                className="flex-1 h-10 rounded-(--r-ctl) bg-s3 text-[13.5px] text-on/80 pressable whitespace-nowrap"
               >
                 Hide
               </Button>
@@ -286,7 +286,7 @@ export default function UpdateModal({
                 onClick={() => {
                   cancelOtaUpdateDownload();
                 }}
-                className="flex-1 h-9 rounded-(--r-ctl) bg-red-500/15 text-[13.5px] font-semibold text-red-600 dark:text-red-400 pressable whitespace-nowrap"
+                className="flex-1 h-10 rounded-(--r-ctl) bg-red-500/15 text-[13.5px] font-semibold text-red-600 dark:text-red-400 pressable whitespace-nowrap"
               >
                 Cancel
               </Button>
@@ -295,7 +295,7 @@ export default function UpdateModal({
             <>
               <Button
                 onClick={onClose}
-                className="flex-1 min-w-[84px] h-9 rounded-(--r-ctl) bg-s3 text-[13.5px] text-on/80 pressable whitespace-nowrap"
+                className="flex-1 min-w-[84px] h-10 rounded-(--r-ctl) bg-s3 text-[13.5px] text-on/80 pressable whitespace-nowrap"
               >
                 Later
               </Button>
@@ -305,14 +305,14 @@ export default function UpdateModal({
                     setSkippedUpdateVersion(info.latest);
                     onClose();
                   }}
-                  className="px-3 h-9 rounded-(--r-ctl) bg-s3 text-[12.5px] text-mut pressable whitespace-nowrap"
+                  className="px-3 h-10 rounded-(--r-ctl) bg-s3 text-[12.5px] text-mut pressable whitespace-nowrap"
                 >
                   Skip v{info.latest}
                 </Button>
               )}
               <Button
                 onClick={() => void handlePrimaryAction()}
-                className="flex-[1.4] min-w-[148px] h-9 px-3 rounded-(--r-ctl) bg-primary text-[13.5px] font-semibold text-on-primary pressable whitespace-nowrap"
+                className="flex-[1.4] min-w-[148px] h-10 px-3 rounded-(--r-ctl) bg-primary text-[13.5px] font-semibold text-on-primary pressable whitespace-nowrap"
               >
                 {effectiveStage === "ready"
                   ? "Install Update Now"

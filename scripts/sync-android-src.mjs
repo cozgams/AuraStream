@@ -61,7 +61,19 @@ try {
   mkdirSync(xmlDest, { recursive: true });
   cpSync(join(src, "file_paths.xml"), join(xmlDest, "file_paths.xml"), { force: true });
 
-  console.log(`[android-src] Synchronized ${ktFiles.length} Kotlin file(s) + manifest/xml -> ${genApp}`);
+  // 4. Copy theme resources if present so CI builds preserve cold-launch windowBackground
+  if (existsSync(join(src, "themes.xml"))) {
+    const valDest = join(genApp, "res", "values");
+    mkdirSync(valDest, { recursive: true });
+    cpSync(join(src, "themes.xml"), join(valDest, "themes.xml"), { force: true });
+  }
+  if (existsSync(join(src, "themes-night.xml"))) {
+    const valNightDest = join(genApp, "res", "values-night");
+    mkdirSync(valNightDest, { recursive: true });
+    cpSync(join(src, "themes-night.xml"), join(valNightDest, "themes.xml"), { force: true });
+  }
+
+  console.log(`[android-src] Synchronized ${ktFiles.length} Kotlin file(s) + manifest/xml/themes -> ${genApp}`);
 } catch (err) {
   console.error("[android-src] Synchronization failed:", err instanceof Error ? err.message : err);
   process.exitCode = 1;

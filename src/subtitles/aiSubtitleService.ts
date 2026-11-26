@@ -146,11 +146,43 @@ try {
   // ignore
 }
 
+const MAX_STORED_SUBTITLE_TRACKS = 30;
+
 function persistTrack(track: SubtitleTrack): void {
   const cacheKey = `${track.videoId}_${track.episode}`;
   setCachedTrack(cacheKey, track);
   try {
-    localStorage.setItem(`${STORAGE_KEYS.PREFIX}${cacheKey}`, JSON.stringify(track));
+    const targetStorageKey = `${STORAGE_KEYS.PREFIX}${cacheKey}`;
+    localStorage.setItem(targetStorageKey, JSON.stringify(track));
+
+    // Bound stored subtitle tracks to keep localStorage headroom safe for library state
+    const entries: Array<{ key: string; ts: number; isImport: boolean }> = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith(STORAGE_KEYS.PREFIX) || k === targetStorageKey) continue;
+      let ts = 0;
+      let isImport = false;
+      try {
+        const parsed = JSON.parse(localStorage.getItem(k) || "{}") as Partial<SubtitleTrack>;
+        ts = Number(parsed?.generatedAt) || 0;
+        isImport = parsed?.source === "local_import";
+      } catch {
+        // corrupt entries sort oldest (ts = 0)
+      }
+      entries.push({ key: k, ts, isImport });
+    }
+    const maxOthers = Math.max(0, MAX_STORED_SUBTITLE_TRACKS - 1);
+    if (entries.length > maxOthers) {
+      // Evict non-imported oldest tracks first, then oldest imported tracks if still over cap
+      entries.sort((a, b) => {
+        if (a.isImport !== b.isImport) return a.isImport ? 1 : -1;
+        return a.ts - b.ts;
+      });
+      const excess = entries.length - maxOthers;
+      for (let i = 0; i < excess; i++) {
+        localStorage.removeItem(entries[i].key);
+      }
+    }
   } catch {
     // ignore quota limits
   }

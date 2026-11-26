@@ -1,7 +1,7 @@
 {
   "name": "aurastream",
   "private": true,
-  "version": "0.1.65",
+  "version": "0.1.66",
   "author": "AAA",
   "type": "module",
   "scripts": {

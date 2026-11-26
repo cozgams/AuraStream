@@ -9,7 +9,7 @@
  * 5. Device storage meter with high-speed turbo engine status.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sheet } from "./ui";
 import { Button } from "./ios/controls";
 import { Loader } from "./ios/effects";
@@ -83,6 +83,7 @@ export default function DownloadChoiceSheet({
   const [targetEpisode, setTargetEpisode] = useState<number>(currentEpisode);
   const [activeMap, setActiveMap] = useState<Map<string, ActiveDownloadProgress>>(() => new Map());
   const [imgError, setImgError] = useState(false);
+  const activeChipRef = useRef<HTMLButtonElement | null>(null);
 
   const isCellular = isCellularConnection();
   const wifiOnly = isWifiOnlyDownloadEnabled();
@@ -101,6 +102,9 @@ export default function DownloadChoiceSheet({
     let alive = true;
     setTargetEpisode(currentEpisode);
     setImgError(false);
+    const scrollTimer = window.setTimeout(() => {
+      activeChipRef.current?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+    }, 120);
     void getDetailedStorageStats().then((stats) => {
       if (!alive) return;
       setFreeSpaceFormatted(stats.freeFormatted || "Available");
@@ -112,6 +116,7 @@ export default function DownloadChoiceSheet({
     });
     return () => {
       alive = false;
+      window.clearTimeout(scrollTimer);
     };
   }, [isOpen, currentEpisode]);
 
@@ -208,7 +213,7 @@ export default function DownloadChoiceSheet({
           </div>
           <Button
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-s3 hover:bg-s4/20 flex items-center justify-center text-on/70 hover:text-on pressable shrink-0 ml-2"
+            className="w-10 h-10 rounded-full bg-s3 hover:bg-s4/20 flex items-center justify-center text-on/70 hover:text-on pressable shrink-0 ml-2"
             aria-label={t("common.close")}
           >
             <IClose size={16} />
@@ -228,9 +233,10 @@ export default function DownloadChoiceSheet({
               return (
                 <button
                   key={ep}
+                  ref={active ? activeChipRef : undefined}
                   type="button"
                   onClick={() => setTargetEpisode(ep)}
-                  className={`min-w-[44px] h-8 rounded-xl text-[12.5px] font-bold flex items-center justify-center gap-1 shrink-0 transition-all pressable ${
+                  className={`min-w-[44px] h-10 px-2 rounded-xl text-[13px] font-bold flex items-center justify-center gap-1 shrink-0 transition-all pressable ${
                     active
                       ? "bg-amber-500 text-white shadow-xs scale-105"
                       : saved
@@ -327,7 +333,7 @@ export default function DownloadChoiceSheet({
               </div>
             </div>
 
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2.5">
               <div className="min-w-0 flex-1 text-[12px] text-mut leading-snug">
                 {isTargetDownloaded
                   ? "Saved permanently · Tap to export MP4 to gallery"
@@ -369,9 +375,9 @@ export default function DownloadChoiceSheet({
                       e.stopPropagation();
                       pauseDownload(targetKey);
                     }}
-                    className="w-8 h-8 rounded-xl bg-s3 hover:bg-s4/30 text-on flex items-center justify-center pressable"
+                    className="w-10 h-10 rounded-xl bg-s3 hover:bg-s4/30 text-on flex items-center justify-center pressable"
                   >
-                    <IPauseF size={13} />
+                    <IPauseF size={14} />
                   </button>
                   <button
                     type="button"
@@ -380,9 +386,9 @@ export default function DownloadChoiceSheet({
                       e.stopPropagation();
                       cancelDownload(targetKey);
                     }}
-                    className="w-8 h-8 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-red-500 flex items-center justify-center pressable"
+                    className="w-10 h-10 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-red-500 flex items-center justify-center pressable"
                   >
-                    <IClose size={13} />
+                    <IClose size={14} />
                   </button>
                 </>
               ) : isTargetPaused ? (
@@ -394,7 +400,7 @@ export default function DownloadChoiceSheet({
                       e.stopPropagation();
                       handleSingleAction();
                     }}
-                    className="px-3 py-1.5 rounded-xl bg-amber-500 text-white text-[12px] font-bold flex items-center gap-1 pressable"
+                    className="px-3.5 h-10 rounded-xl bg-amber-500 text-white text-[12.5px] font-bold flex items-center gap-1.5 pressable"
                   >
                     <IPlayF size={12} /> Resume
                   </button>
@@ -405,9 +411,9 @@ export default function DownloadChoiceSheet({
                       e.stopPropagation();
                       cancelDownload(targetKey);
                     }}
-                    className="w-8 h-8 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-red-500 flex items-center justify-center pressable"
+                    className="w-10 h-10 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-red-500 flex items-center justify-center pressable"
                   >
-                    <IClose size={13} />
+                    <IClose size={14} />
                   </button>
                 </>
               ) : isTargetError ? (
@@ -454,7 +460,7 @@ export default function DownloadChoiceSheet({
               </div>
             </div>
 
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2.5">
               <div className="min-w-0 flex-1 text-[12px] text-mut leading-snug">
                 All {totalEps} episodes (~{estimatedBatchFormatted}) · Background sequential queue
               </div>

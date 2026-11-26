@@ -85,8 +85,8 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bar
             <IVertSwap size={12} className="text-mut" />
             <span>{asc ? "1-N" : "N-1"}</span>
           </Button>
-          <Button onClick={onClose} aria-label={t("common.close")} className="w-7 h-7 rounded-full bg-s3 flex items-center justify-center text-mut pressable">
-            <IClose size={13} />
+          <Button onClick={onClose} aria-label={t("common.close")} className="w-9 h-9 rounded-full bg-s3 flex items-center justify-center text-mut pressable">
+            <IClose size={15} />
           </Button>
         </div>
       )}
@@ -110,7 +110,7 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bar
         {!(episodes?.length || 0) && <div className="text-center text-[12px] text-dim py-8">No episodes available</div>}
       </div>
       {!bare && (
-        <div className="shrink-0 px-4 py-2.5 text-[12px] text-dim bg-s2/60 truncate">
+        <div className="shrink-0 px-4 pt-2.5 text-[12px] text-dim bg-s2/60 truncate" style={{ paddingBottom: "calc(max(var(--sab, 0px), 10px))" }}>
           {title ? `${formatDramaTitle(title)} · Tap to play` : `Series #${videoId} · Tap to play`}
         </div>
       )}
@@ -330,8 +330,8 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
             Sign in
           </button>
         )}
-        <Button onClick={onClose} aria-label={t("common.close")} className={`${user ? "ml-auto" : ""} w-7 h-7 rounded-full bg-s3 flex items-center justify-center text-mut pressable`}>
-          <IClose size={13} />
+        <Button onClick={onClose} aria-label={t("common.close")} className={`${user ? "ml-auto" : ""} w-9 h-9 rounded-full bg-s3 flex items-center justify-center text-mut pressable`}>
+          <IClose size={15} />
         </Button>
       </div>
 
@@ -350,9 +350,9 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
                       type="button"
                       onClick={() => deleteLocalComment(c.id)}
                       aria-label="Delete comment"
-                      className="ml-auto text-dim hover:text-red-500 p-1 pressable"
+                      className="ml-auto text-dim hover:text-red-500 w-8 h-8 rounded-full flex items-center justify-center pressable"
                     >
-                      <ITrash size={12} />
+                      <ITrash size={13} />
                     </button>
                   )}
                 </div>
@@ -361,13 +361,13 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
                   <button
                     type="button"
                     onClick={() => toggleCommentLike(c.id)}
-                    className={`flex items-center gap-1 pressable transition-colors ${
+                    className={`min-h-8 px-1.5 -ml-1.5 rounded-lg flex items-center gap-1 pressable transition-colors ${
                       likedComments[c.id] ? "text-amber-400 font-semibold" : "text-dim hover:text-on"
                     }`}
                     aria-label="Star comment"
                     aria-pressed={Boolean(likedComments[c.id])}
                   >
-                    {likedComments[c.id] ? <IStarF size={12} className="text-amber-400" /> : <IStar size={12} />}
+                    {likedComments[c.id] ? <IStarF size={13} className="text-amber-400" /> : <IStar size={13} />}
                     <span>{c.like_count || 0}</span>
                   </button>
                   {c.reply_count > 0 && <span>{c.reply_count} replies</span>}
@@ -384,20 +384,20 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
           <div className="flex justify-center py-4">
             {loading ? <Loader className="w-5 h-5 spinner" />
               : page < pages ? (
-                <Button onClick={() => load(page + 1)} className="px-4 h-8 rounded-(--r-ctl) bg-s3 text-[12px] text-on/80 pressable">Load More</Button>
+                <Button onClick={() => load(page + 1)} className="px-4 h-9 rounded-(--r-ctl) bg-s3 text-[12.5px] text-on/80 pressable">Load More</Button>
               ) : <span className="text-[12px] text-dim">— End of comments —</span>}
           </div>
         )}
       </div>
 
-      <Form className="ios-comment-form shrink-0 flex items-center gap-2.5 px-3.5 pt-2.5 pb-3 bg-s2/90 border-t border-edge/40" onSubmit={(e) => { e.preventDefault(); void send(); }}>
+      <Form className="ios-comment-form shrink-0 flex items-center gap-2.5 px-3.5 pt-2.5 bg-s2/90 border-t border-edge/40" style={{ paddingBottom: "calc(max(var(--sab, 0px), 12px))" }} onSubmit={(e) => { e.preventDefault(); void send(); }}>
         <Avatar size={32} src={user?.avatar} name={user?.nickname || "My Library"} hue={322} />
         <Input ref={inputRef} value={text} onChange={(e) => setText(e.target.value)}
           placeholder={user ? `Comment as ${user.nickname || user.username}...` : "Add a comment..."}
-          className="flex-1 min-w-0 !min-h-0 h-10 !py-0 !px-3.5 !rounded-full bg-s3 border border-edge/60 text-[13.5px] text-on placeholder-dim outline-none focus:border-primary transition-colors" />
+          className="flex-1 min-w-0 !min-h-0 h-10 !py-0 !px-3.5 !rounded-full bg-s3 border border-edge/60 text-[16px] text-on placeholder-dim outline-none focus:border-primary transition-colors" />
         <Button type="submit" disabled={!text.trim() || sending}
           aria-label="Send comment"
-          className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 pressable ${text.trim() ? "brand-grad glow-neon" : "bg-s3 text-dim"}`}>
+          className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 pressable ${text.trim() ? "brand-grad glow-neon" : "bg-s3 text-dim"}`}>
           {sending ? <Loader className="w-4 h-4 spinner" /> : <ISendF size={16} />}
         </Button>
       </Form>
@@ -425,8 +425,8 @@ export function ArticlePanel({ title, html, cover, hot, onClose }: {
       <div className="shrink-0 flex items-center gap-2 px-4 h-12">
         <span className="text-[14px] font-bold text-on">Article Details</span>
         {hot ? <span className="text-[12px] text-mut">{fmt(hot)} views</span> : null}
-        <Button onClick={onClose} aria-label="Close" className="ml-auto w-7 h-7 rounded-full bg-s3 flex items-center justify-center text-mut pressable">
-          <IClose size={13} />
+        <Button onClick={onClose} aria-label="Close" className="ml-auto w-9 h-9 rounded-full bg-s3 flex items-center justify-center text-mut pressable">
+          <IClose size={15} />
         </Button>
       </div>
       <div className="flex-1 scroll-y px-4 pb-[calc(var(--sab,48px)+24px)]">

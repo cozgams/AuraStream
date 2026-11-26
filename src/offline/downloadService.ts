@@ -86,6 +86,7 @@ let runTokenSeq = 0;
 
 const progressListeners = new Set<(progress: Map<string, ActiveDownloadProgress>) => void>();
 const triggeringSmartDownloads = new Set<string>();
+const nativeEnqueueInFlight = new Map<string, Promise<void>>();
 
 let lastPersistTime = 0;
 let lastNativeActiveState: boolean | null = null;
@@ -1818,45 +1819,62 @@ export async function startEpisodeDownload(
     }
   }
 
-    // Native Rust background downloader path (survives app switch / backgrounding cleanly)
+  // Native Rust background downloader path (survives app switch / backgrounding cleanly)
   if (isNativeRustDownloaderAvailable()) {
-    let cues: SubtitleCue[] = [];
-    try {
-      const track = await getSubtitlesForEpisode(videoId, episode, title, undefined, streamUrl);
-      if (track && track.source !== "none" && track.cues.length > 0) {
-        const translated = await translateTrackToEnglish(track);
-        cues = translated.cues;
-      } else if (streamUrl) {
-        const aiConfig = getAICaptionConfig();
-        if (aiConfig.provider !== "none" || aiConfig.geminiKey || aiConfig.groqKey) {
-          try {
-            const aiTrack = await transcribeEpisodeWithAI(videoId, episode, streamUrl);
-            if (aiTrack?.cues?.length) cues = aiTrack.cues;
-          } catch {
-            // ignore AI generation error
+    const existingEnqueue = nativeEnqueueInFlight.get(id);
+    if (existingEnqueue) return existingEnqueue;
+
+    const enqueuePromise = (async () => {
+      await invoke("native_download_enqueue", {
+        items: [
+          {
+            videoId,
+            episode,
+            title: title || `Episode ${episode}`,
+            cover: cover || "",
+            streamUrl: streamUrl || null,
+            quality,
+            isHevc,
+            cues: [],
+          },
+        ],
+        cellular: isCellularConnection(),
+      });
+      syncNativeDownloadCount();
+      await syncNativeDownloadState();
+
+      // Prefetch/translate/AI-transcribe subtitles asynchronously so download starts immediately
+      void (async () => {
+        try {
+          let cues: SubtitleCue[] = [];
+          const track = await getSubtitlesForEpisode(videoId, episode, title, undefined, streamUrl);
+          if (track && track.source !== "none" && track.cues.length > 0) {
+            const translated = await translateTrackToEnglish(track);
+            cues = translated.cues;
+          } else if (streamUrl) {
+            const aiConfig = getAICaptionConfig();
+            if (aiConfig.provider !== "none" || aiConfig.geminiKey || aiConfig.groqKey) {
+              const aiTrack = await transcribeEpisodeWithAI(videoId, episode, streamUrl);
+              if (aiTrack?.cues?.length) cues = aiTrack.cues;
+            }
           }
+          if (cues.length > 0) {
+            await invoke("native_offline_set_cues", { id, cues }).catch(() => {});
+          }
+        } catch {
+          // ignore background subtitle prefetch error
         }
+      })();
+    })();
+
+    nativeEnqueueInFlight.set(id, enqueuePromise);
+    try {
+      await enqueuePromise;
+    } finally {
+      if (nativeEnqueueInFlight.get(id) === enqueuePromise) {
+        nativeEnqueueInFlight.delete(id);
       }
-    } catch {
-      // ignore subtitle fetch error
     }
-    await invoke("native_download_enqueue", {
-      items: [
-        {
-          videoId,
-          episode,
-          title: title || `Episode ${episode}`,
-          cover: cover || "",
-          streamUrl: streamUrl || null,
-          quality,
-          isHevc,
-          cues,
-        },
-      ],
-      cellular: isCellularConnection(),
-    });
-    syncNativeDownloadCount();
-    await syncNativeDownloadState();
     return;
   }
 
