@@ -189,7 +189,7 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
                 <div className="absolute top-2 right-2 z-30 flex items-center gap-1 max-w-[70%] overflow-x-auto no-bar">
                   {segs.map((_, i) => (
                     <Button key={i} onClick={() => { setSeg(i); setPlay(true); }}
-                      className="shrink-0 h-6 px-2 rounded-full text-[12px] font-semibold pressable"
+                      className="shrink-0 h-8 px-2.5 rounded-full text-[12px] font-semibold pressable"
                       style={i === seg
                         ? { background: "var(--p-primary)", color: "var(--p-on-primary)" }
                         : { background: "rgba(0,0,0,.55)", color: "rgba(255,255,255,.85)" }}>

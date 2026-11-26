@@ -1634,17 +1634,17 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                         }
                         window.setTimeout(() => setAndroidPerms(getAndroidPermissionsStatus()), 400);
                       }}
-                      className="px-3 py-1.5 rounded-xl bg-[#1a73e8] text-white text-[11.5px] font-bold pressable"
+                      className="px-3.5 h-9 rounded-xl bg-[#1a73e8] text-white text-[12px] font-bold pressable"
                     >
                       Allow Now
                     </button>
                     <button
                       type="button"
                       onClick={() => setPermBannerDismissed(true)}
-                      className="w-7 h-7 rounded-full bg-black/5 dark:bg-white/10 text-slate-500 dark:text-neutral-300 flex items-center justify-center pressable"
+                      className="w-9 h-9 rounded-full bg-black/5 dark:bg-white/10 text-slate-500 dark:text-neutral-300 flex items-center justify-center pressable"
                       aria-label="Dismiss permission reminder"
                     >
-                      <IClose size={11} />
+                      <IClose size={13} />
                     </button>
                   </div>
                 </div>
@@ -2137,7 +2137,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                                 return next;
                               });
                             }}
-                            className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 pressable mr-0.5"
+                            className="w-9 h-9 -ml-1.5 rounded-full flex items-center justify-center shrink-0 pressable"
                           >
                             {allSelected ? (
                               <div className="w-5 h-5 rounded-full bg-[#1a73e8] text-white flex items-center justify-center shadow-xs">
@@ -2155,10 +2155,10 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                           <button
                             type="button"
                             onClick={() => toggleDramaCollapse(group.videoId)}
-                            className="w-7 h-7 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-neutral-200 hover:bg-slate-200/50 dark:hover:bg-white/10 flex items-center justify-center pressable shrink-0"
+                            className="w-9 h-9 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-neutral-200 hover:bg-slate-200/50 dark:hover:bg-white/10 flex items-center justify-center pressable shrink-0"
                             aria-label={isExpanded ? "Collapse episodes" : "Expand episodes"}
                           >
-                            {isExpanded ? <IChevronUp size={16} /> : <IChevronDown size={16} />}
+                            {isExpanded ? <IChevronUp size={17} /> : <IChevronDown size={17} />}
                           </button>
                         )}
 

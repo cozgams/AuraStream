@@ -383,7 +383,7 @@ export function ChannelPage({ cate, name, onBack, wide, active = true }: { cate:
         {err && items.length > 0 && !loading && (
           <div className="flex items-center justify-center gap-3 py-3 text-[12px] text-mut">
             <span>{err}</span>
-            <Button onClick={() => void loadMore()} className="px-3 py-1 rounded-full bg-s3 text-on font-semibold pressable">Retry</Button>
+            <Button onClick={() => void loadMore()} className="px-4 h-9 rounded-full bg-s3 text-on font-semibold pressable">Retry</Button>
           </div>
         )}
         {loading && <div className="flex justify-center py-3"><Loader className="w-6 h-6 spinner" /></div>}

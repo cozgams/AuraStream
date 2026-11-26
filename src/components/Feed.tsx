@@ -2361,10 +2361,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     </Button>
                     <Button
                       onClick={() => setDismissNextEp(curEp)}
-                      className="w-6 h-6 rounded-full hover:bg-white/10 text-white/60 hover:text-white flex items-center justify-center pressable ml-0.5"
+                      className="w-8 h-8 rounded-full hover:bg-white/10 text-white/60 hover:text-white flex items-center justify-center pressable ml-0.5"
                       aria-label="Dismiss"
                     >
-                      <IClose size={11} />
+                      <IClose size={13} />
                     </Button>
                   </div>
                 </div>
@@ -2656,7 +2656,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       </Button>
                       {meta.authorId > 0 && (
                         <Button onClick={onFollow}
-                          className={`h-7 px-3 rounded-full text-[12px] font-semibold pressable shrink-0 ${store.follows.includes(meta.authorId) ? "bg-s3 text-mut" : "bg-primary text-on-primary"}`}>
+                          className={`h-9 px-3.5 rounded-full text-[12.5px] font-semibold pressable shrink-0 ${store.follows.includes(meta.authorId) ? "bg-s3 text-mut" : "bg-primary text-on-primary"}`}>
                           {store.follows.includes(meta.authorId) ? t("common.following") : t("common.follow")}
                         </Button>
                       )}

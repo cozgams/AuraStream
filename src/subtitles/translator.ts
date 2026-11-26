@@ -8,7 +8,19 @@ import type { SubtitleCue, SubtitleTrack } from "./types";
 import { formatDramaDesc, formatDramaTitle } from "./dramaTranslator";
 
 const MEMORY_CACHE = new Map<string, string>();
+const MAX_TR_MEMORY_CACHE = 1500;
+const inFlightTranslations = new Map<string, Promise<string>>();
 const STORAGE_KEY = "aurastream_dialogue_tr_v1";
+
+function setMemoryCache(key: string, value: string): void {
+  if (MEMORY_CACHE.has(key)) {
+    MEMORY_CACHE.delete(key);
+  } else if (MEMORY_CACHE.size >= MAX_TR_MEMORY_CACHE) {
+    const oldest = MEMORY_CACHE.keys().next().value;
+    if (oldest !== undefined) MEMORY_CACHE.delete(oldest);
+  }
+  MEMORY_CACHE.set(key, value);
+}
 
 // Seed common drama dialogue patterns for instant, offline English translation
 const DIALOGUE_DICTIONARY: Record<string, string> = {
@@ -233,68 +245,80 @@ export async function translateDialogueToEnglish(text: string): Promise<string> 
   // 2. Check exact dictionary match
   if (DIALOGUE_DICTIONARY[trimmed]) {
     const res = DIALOGUE_DICTIONARY[trimmed];
-    MEMORY_CACHE.set(trimmed, res);
+    setMemoryCache(trimmed, res);
     return res;
   }
 
-  // 3. Query fast, free public translation endpoints only when online
-  const pair = detectLangPair(trimmed);
-  const isOffline = typeof navigator !== "undefined" && navigator.onLine === false;
-  if (!isOffline) {
+  const pending = inFlightTranslations.get(trimmed);
+  if (pending) return pending;
+
+  const task = (async () => {
     try {
-      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(trimmed)}&langpair=${pair.myMemoryPair}`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
-      if (res.ok) {
-        const data = await res.json();
-        const trText = data?.responseData?.translatedText;
-        if (trText && typeof trText === "string" && trText.trim() && !trText.includes("MYMEMORY WARNING")) {
-          const clean = trText.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
-          if (!containsForeignLanguage(clean)) {
-            MEMORY_CACHE.set(trimmed, clean);
-            persistCache();
-            return clean;
+      // 3. Query fast, free public translation endpoints only when online
+      const pair = detectLangPair(trimmed);
+      const isOffline = typeof navigator !== "undefined" && navigator.onLine === false;
+      if (!isOffline) {
+        try {
+          const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(trimmed)}&langpair=${pair.myMemoryPair}`;
+          const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+          if (res.ok) {
+            const data = await res.json();
+            const trText = data?.responseData?.translatedText;
+            if (trText && typeof trText === "string" && trText.trim() && !trText.includes("MYMEMORY WARNING")) {
+              const clean = trText.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
+              if (!containsForeignLanguage(clean)) {
+                setMemoryCache(trimmed, clean);
+                persistCache();
+                return clean;
+              }
+            }
           }
+        } catch {
+          // network timeout or failure, proceed to fallback
+        }
+
+        // 3b. Fallback public translation endpoint
+        try {
+          const url = `https://lingva.ml/api/v1/${pair.lingvaSrc}/en/${encodeURIComponent(trimmed)}`;
+          const res = await fetch(url, { signal: AbortSignal.timeout(3500) });
+          if (res.ok) {
+            const data = await res.json();
+            const trText = data?.translation;
+            if (trText && typeof trText === "string" && trText.trim()) {
+              const clean = trText.trim();
+              if (!containsForeignLanguage(clean)) {
+                setMemoryCache(trimmed, clean);
+                persistCache();
+                return clean;
+              }
+            }
+          }
+        } catch {
+          // continue to dictionary fallback
         }
       }
-    } catch {
-      // network timeout or failure, proceed to fallback
-    }
 
-    // 3b. Fallback public translation endpoint
-    try {
-      const url = `https://lingva.ml/api/v1/${pair.lingvaSrc}/en/${encodeURIComponent(trimmed)}`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(3500) });
-      if (res.ok) {
-        const data = await res.json();
-        const trText = data?.translation;
-        if (trText && typeof trText === "string" && trText.trim()) {
-          const clean = trText.trim();
-          if (!containsForeignLanguage(clean)) {
-            MEMORY_CACHE.set(trimmed, clean);
-            persistCache();
-            return clean;
-          }
+      // 4. Offline rule-based transliterator / dictionary fallback (longest phrases first)
+      let fallback = trimmed;
+      for (const [zh, en] of SORTED_DICTIONARY_ENTRIES) {
+        if (fallback.includes(zh)) {
+          fallback = fallback.split(zh).join(` ${en} `);
         }
       }
-    } catch {
-      // continue to dictionary fallback
-    }
-  }
+      fallback = formatDramaDesc(fallback).replace(/\s+/g, " ").trim();
+      if (fallback && fallback !== trimmed) {
+        setMemoryCache(trimmed, fallback);
+        return fallback;
+      }
 
-  // 4. Offline rule-based transliterator / dictionary fallback (longest phrases first)
-  let fallback = trimmed;
-  for (const [zh, en] of SORTED_DICTIONARY_ENTRIES) {
-    if (fallback.includes(zh)) {
-      fallback = fallback.split(zh).join(` ${en} `);
+      return formatDramaTitle(trimmed);
+    } finally {
+      inFlightTranslations.delete(trimmed);
     }
-  }
-  fallback = formatDramaDesc(fallback).replace(/\s+/g, " ").trim();
-  if (fallback && fallback !== trimmed) {
-    MEMORY_CACHE.set(trimmed, fallback);
-    return fallback;
-  }
+  })();
 
-  return formatDramaTitle(trimmed);
+  inFlightTranslations.set(trimmed, task);
+  return task;
 }
 
 /**
@@ -310,7 +334,7 @@ export function translateDialogueSync(text: string): string {
 
   if (DIALOGUE_DICTIONARY[trimmed]) {
     const res = DIALOGUE_DICTIONARY[trimmed];
-    MEMORY_CACHE.set(trimmed, res);
+    setMemoryCache(trimmed, res);
     return res;
   }
 
@@ -322,7 +346,7 @@ export function translateDialogueSync(text: string): string {
   }
   fallback = formatDramaDesc(fallback).replace(/\s+/g, " ").trim();
   if (fallback && fallback !== trimmed) {
-    MEMORY_CACHE.set(trimmed, fallback);
+    setMemoryCache(trimmed, fallback);
     return fallback;
   }
 

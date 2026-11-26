@@ -30,7 +30,7 @@ function Row({ item, current, probe, busy, disabled, onPick, onProbe }: {
         {busy ? "…" : probe ? (probe.ok ? `${probe.ms}ms` : probe.status ? `HTTP ${probe.status}` : "Failed") : "—"}
       </span>
       <Button onClick={() => onProbe(item.url)} disabled={busy || disabled}
-        className="shrink-0 h-7 px-2.5 rounded-(--r-sm) bg-s4 text-[12px] text-on/80 pressable disabled:opacity-50">Test</Button>
+        className="shrink-0 h-9 px-3 rounded-(--r-sm) bg-s4 text-[12px] font-medium text-on/80 pressable disabled:opacity-50">Test</Button>
     </div>
   );
 }

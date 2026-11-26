@@ -1,6 +1,6 @@
 import { Button, Form, Input, SegmentedControl, Surface } from "../components/ios/controls";
 import { Loader } from "../components/ios/effects";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, fmt, isMobile } from "../api";
 import type { HotSearchVideo, Post, RankItem, VideoCard } from "../types";
 import { useStore } from "../store";
@@ -220,8 +220,8 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
               <div className="flex items-center justify-between">
                 <h2 className="flex items-center gap-1.5 text-[14px] font-semibold text-on/90"><IFireF size={15} className="text-primary" />{t("search.hot")}</h2>
                 <Button onClick={() => void refreshHot()} disabled={hotLoading} aria-label="Refresh trending searches"
-                  className="flex items-center gap-1 px-2.5 py-1 min-h-7 rounded-full hover:bg-s3 text-[12px] text-mut pressable">
-                  {hotLoading ? <Loader className="w-3 h-3" /> : <IRefresh size={12} />}
+                  className="flex items-center justify-center px-3 py-1.5 min-h-9 min-w-9 rounded-full hover:bg-s3 text-[12px] text-mut pressable">
+                  {hotLoading ? <Loader className="w-3.5 h-3.5" /> : <IRefresh size={14} />}
                 </Button>
               </div>
               {hotError && (
@@ -328,16 +328,23 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
             <Surface className="mt-5 rounded-(--r-md) bg-s2 p-3.5 a-rise">
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-1.5 text-[14px] font-semibold text-on/90"><IFireF size={15} className="text-primary" />{t("search.trending_genres")}</span>
-                <Button onClick={() => push({ kind: "ranks" })} className="text-[12px] text-primary font-semibold pressable">{t("search.full_rankings")}</Button>
+                <Button onClick={() => push({ kind: "ranks" })} className="min-h-8 px-1.5 text-[12.5px] text-primary font-semibold pressable">{t("search.full_rankings")}</Button>
               </div>
               <div className="flex flex-wrap gap-2 mt-3">
-                {popularTags.map((t) => {
-                  const display = formatDramaTag(t);
-                  return (
-                    <Button key={t} onClick={() => { inputRef.current?.blur(); setQ(t); submit(t); }}
-                      className="px-3 h-7 rounded-(--r-ctl) bg-s3 border border-edge/30 hover:border-primary/40 hover:text-primary text-[13px] text-on/85 transition-colors pressable">{display}</Button>
-                  );
-                })}
+                {(() => {
+                  const seenTags = new Set<string>();
+                  return popularTags.reduce<ReactNode[]>((acc, t) => {
+                    const display = formatDramaTag(t);
+                    const key = display.toLowerCase();
+                    if (seenTags.has(key)) return acc;
+                    seenTags.add(key);
+                    acc.push(
+                      <Button key={t} onClick={() => { inputRef.current?.blur(); setTab("video"); setQ(t); submit(t, "video"); }}
+                        className="px-3.5 h-9 rounded-(--r-ctl) bg-s3 border border-edge/30 hover:border-primary/40 hover:text-primary text-[13px] text-on/85 transition-colors pressable">{display}</Button>
+                    );
+                    return acc;
+                  }, []);
+                })()}
               </div>
             </Surface>
 
@@ -346,15 +353,16 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
               <Button onClick={() => {
                 inputRef.current?.blur();
                 const picked = DISCOVERY_THEMES[Math.floor(Math.random() * DISCOVERY_THEMES.length)];
+                setTab("video");
                 setQ(picked);
-                submit(picked);
+                submit(picked, "video");
               }}
-                className="flex items-center gap-1 text-[12px] text-primary font-semibold pressable"><IRefresh size={13} />{t("search.surprise_me")}</Button>
+                className="flex items-center gap-1 min-h-8 px-1.5 text-[12.5px] text-primary font-semibold pressable"><IRefresh size={13} />{t("search.surprise_me")}</Button>
             </div>
             <div className="flex flex-wrap gap-2 mt-2">
               {DISCOVERY_THEMES.map((theme) => (
                 <Button key={theme} onClick={() => { inputRef.current?.blur(); setTab("video"); setQ(theme); submit(theme, "video"); }}
-                  className="px-3 h-7 rounded-(--r-ctl) bg-primary/10 hover:bg-primary/20 text-primary text-[12.5px] font-semibold pressable transition-colors">
+                  className="px-3.5 h-9 rounded-(--r-ctl) bg-primary/10 hover:bg-primary/20 text-primary text-[12.5px] font-semibold pressable transition-colors">
                   {theme}
                 </Button>
               ))}

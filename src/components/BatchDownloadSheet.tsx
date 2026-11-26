@@ -65,6 +65,11 @@ export default function BatchDownloadSheet({
     failedCount: 0,
   });
   const [activeMap, setActiveMap] = useState<Map<string, ActiveDownloadProgress>>(() => new Map());
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) setSubmitting(false);
+  }, [isOpen]);
 
   const prevOpenRef = useRef(false);
   const prevVideoIdRef = useRef(videoId);
@@ -229,12 +234,6 @@ export default function BatchDownloadSheet({
   const estBytes = Math.round(effectiveSelected.length * avgMb * 1024 * 1024);
   const estFormatted = formatBytes(estBytes);
 
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (!isOpen) setSubmitting(false);
-  }, [isOpen]);
-
   const startBatch = async () => {
     if (effectiveSelected.length === 0 || submitting) return;
     setSubmitting(true);
@@ -277,40 +276,40 @@ export default function BatchDownloadSheet({
     <Sheet open={isOpen} onClose={onClose} label={t("batch.title")}>
       <div className="flex flex-col max-h-[85dvh] overflow-hidden bg-s1 text-on">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-edge/30 shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-              <IDownload size={17} />
+        <div className="flex items-center justify-between gap-2 p-4 border-b border-edge/30 shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <div className="w-9 h-9 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+              <IDownload size={18} />
             </div>
-            <div>
+            <div className="min-w-0 flex-1">
               <div className="text-[15px] font-bold text-on">{t("batch.title")}</div>
-              <div className="text-[12px] text-mut truncate max-w-[240px]">
+              <div className="text-[12px] text-mut truncate">
                 {formatDramaTitle(title) || title || `Drama #${videoId}`} · {t("player.total_episodes", { count: epCount })}
               </div>
             </div>
           </div>
           <Button
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-s3 flex items-center justify-center text-mut pressable"
+            className="w-10 h-10 rounded-full bg-s3 flex items-center justify-center text-mut shrink-0 pressable"
             aria-label={t("common.close")}
           >
-            <IClose size={14} />
+            <IClose size={15} />
           </Button>
         </div>
 
         {/* Cellular Warning (if applicable) */}
         {isCellular && wifiOnly && (
-          <div className="mx-4 mt-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between shrink-0">
-            <div className="text-[12px] text-amber-700 dark:text-amber-300 pr-2 flex items-center gap-1.5">
+          <div className="mx-4 mt-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between gap-2 shrink-0">
+            <div className="text-[12px] text-amber-700 dark:text-amber-300 flex items-center gap-1.5 min-w-0 flex-1">
               <IAlertTriangle size={14} className="shrink-0 text-amber-500" />
               <span>{t("batch.cellular_warning")}</span>
             </div>
-            <label className="flex items-center gap-1.5 text-[11px] text-on cursor-pointer shrink-0">
+            <label className="flex items-center gap-1.5 min-h-9 px-2 py-1 rounded-lg bg-black/5 dark:bg-white/10 text-[12px] font-semibold text-on cursor-pointer shrink-0">
               <input
                 type="checkbox"
                 checked={allowCellular}
                 onChange={(e) => setAllowCellular(e.target.checked)}
-                className="rounded accent-emerald-500"
+                className="w-4 h-4 rounded accent-emerald-500"
               />
               <span>{t("batch.allow_cellular")}</span>
             </label>
@@ -322,27 +321,27 @@ export default function BatchDownloadSheet({
           <Button
             disabled={selectableCount === 0}
             onClick={() => selectNext(5)}
-            className="px-3 py-1.5 rounded-xl bg-s3 text-[12px] font-semibold text-on pressable disabled:opacity-45"
+            className="px-3 h-9 rounded-xl bg-s3 text-[12px] font-semibold text-on whitespace-nowrap shrink-0 pressable disabled:opacity-45"
           >
             + {t("batch.next_5")}
           </Button>
           <Button
             disabled={selectableCount === 0}
             onClick={() => selectNext(10)}
-            className="px-3 py-1.5 rounded-xl bg-s3 text-[12px] font-semibold text-on pressable disabled:opacity-45"
+            className="px-3 h-9 rounded-xl bg-s3 text-[12px] font-semibold text-on whitespace-nowrap shrink-0 pressable disabled:opacity-45"
           >
             + {t("batch.next_10")}
           </Button>
           <Button
             disabled={selectableCount === 0}
             onClick={selectAllUnsaved}
-            className="px-3 py-1.5 rounded-xl bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[12px] font-bold pressable disabled:opacity-45"
+            className="px-3 h-9 rounded-xl bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[12px] font-bold whitespace-nowrap shrink-0 pressable disabled:opacity-45"
           >
             {t("batch.all_unsaved", { count: selectableCount })}
           </Button>
           <Button
             onClick={clearSelection}
-            className="ml-auto px-2.5 py-1.5 rounded-xl bg-s3 text-[11px] text-mut hover:text-red-500 pressable"
+            className="ml-auto px-3 h-9 rounded-xl bg-s3 text-[12px] text-mut hover:text-red-500 whitespace-nowrap shrink-0 pressable"
           >
             {t("batch.clear")}
           </Button>
@@ -422,7 +421,7 @@ export default function BatchDownloadSheet({
               </span>
               <Button
                 onClick={() => cancelBatchDownload(videoId)}
-                className="text-[11px] text-red-500 hover:underline pressable"
+                className="px-2.5 h-8 rounded-lg bg-red-500/10 text-[11.5px] font-semibold text-red-500 shrink-0 pressable"
               >
                 {t("batch.cancel_batch")}
               </Button>
@@ -461,18 +460,21 @@ export default function BatchDownloadSheet({
         )}
 
         {/* Quality Selector Segment */}
-        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-t border-edge/30 bg-s2/50 shrink-0">
-          <span className="text-[11px] font-semibold text-mut flex items-center gap-1 min-w-0">
-            {t("batch.quality_title")}
-          </span>
-          <div className="flex items-center gap-1 bg-s3/80 p-0.5 rounded-lg border border-edge/30 shrink-0">
+        <div className="flex flex-col gap-1.5 px-4 py-2.5 border-t border-edge/30 bg-s2/50 shrink-0">
+          <div className="flex items-center justify-between text-[11px] font-semibold text-mut">
+            <span>{t("batch.quality_title")}</span>
+            <span className="text-[10.5px] text-dim">
+              {downloadQuality === "hevc" ? "~40% smaller file size" : downloadQuality === "standard" ? "Broadest compatibility" : "Best stream for device"}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-1 bg-s3/80 p-1 rounded-xl border border-edge/30 w-full">
             <button
               type="button"
               onClick={() => {
                 setDownloadQuality("auto");
                 setDownloadQualityPreference("auto");
               }}
-              className={`px-2 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${
+              className={`min-h-8 py-1 px-2 rounded-lg text-[11.5px] font-bold transition-all flex items-center justify-center gap-1 ${
                 downloadQuality === "auto"
                   ? "bg-white dark:bg-neutral-800 text-slate-900 dark:text-white shadow-xs border border-black/5 dark:border-white/15"
                   : "text-mut hover:text-on"
@@ -486,14 +488,14 @@ export default function BatchDownloadSheet({
                 setDownloadQuality("hevc");
                 setDownloadQualityPreference("hevc");
               }}
-              className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1.5 ${
+              className={`min-h-8 py-1 px-2 rounded-lg text-[11.5px] font-bold transition-all flex items-center justify-center gap-1 ${
                 downloadQuality === "hevc"
                   ? "bg-white dark:bg-neutral-800 text-slate-900 dark:text-white shadow-xs border border-black/5 dark:border-white/15"
                   : "text-mut hover:text-on"
               }`}
             >
               <IBoltF size={12} className="shrink-0 text-amber-500" />
-              <span>{t("batch.quality_hevc")}</span>
+              <span className="truncate">HEVC</span>
             </button>
             <button
               type="button"
@@ -501,14 +503,14 @@ export default function BatchDownloadSheet({
                 setDownloadQuality("standard");
                 setDownloadQualityPreference("standard");
               }}
-              className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1.5 ${
+              className={`min-h-8 py-1 px-2 rounded-lg text-[11.5px] font-bold transition-all flex items-center justify-center gap-1 ${
                 downloadQuality === "standard"
                   ? "bg-white dark:bg-neutral-800 text-slate-900 dark:text-white shadow-xs border border-black/5 dark:border-white/15"
                   : "text-mut hover:text-on"
               }`}
             >
               <IDiamond size={12} className="shrink-0 text-sky-500" />
-              <span>{t("batch.quality_standard")}</span>
+              <span className="truncate">{t("batch.quality_standard")}</span>
             </button>
           </div>
         </div>
