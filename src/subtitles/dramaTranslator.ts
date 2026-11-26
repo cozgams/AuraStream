@@ -470,7 +470,12 @@ export function formatDramaTag(rawTag: string | undefined): string {
   if (cleaned) return cleaned;
 
   const hash = Array.from(tag).reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) >>> 0, 0);
-  const tagWords = ["Drama", "Spotlight", "Series", "Originals", "Selection", "Anthology", "Shorts", "Picks"];
+  const tagWords = [
+    "Drama", "Spotlight", "Series", "Originals",
+    "Selection", "Anthology", "Shorts", "Picks",
+    "Romance", "Suspense", "Revenge", "Urban",
+    "Fantasy", "Thriller", "Classic", "Trending",
+  ];
   return tagWords[hash % tagWords.length];
 }
 

@@ -7,7 +7,7 @@ import { useStore } from "../store";
 import { Masonry } from "../components/cards";
 import { InplaceSearch } from "../components/InplaceSearch";
 import { Empty, Img } from "../components/ui";
-import { IBack, IGrid, IGlobe, IPin, IPinF, IRefresh, ISearch } from "../icons";
+import { IBack, IClose, IGrid, IGlobe, IPin, IPinF, IRefresh, ISearch } from "../icons";
 import { formatDramaDesc, formatDramaTag, formatDramaTitle } from "../subtitles/dramaTranslator";
 import { localizeError } from "../i18n";
 
@@ -252,8 +252,8 @@ export function TagsPage({ onBack, wide, active = true }: { onBack: () => void; 
         <div className="px-3 pt-2 pb-3 flex items-center gap-2.5">
           <Button aria-label="Back" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={20} /></Button>
           <span className="text-[17px] font-bold text-on">{t("cat.tags_title")}</span>
-          <Button onClick={() => setSearching(true)} aria-label="Search dramas" className="ml-auto w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><ISearch size={19} /></Button>
-          <Button aria-label="Refresh" onClick={load} className="w-9 h-9 rounded-full flex items-center justify-center text-mut hover:bg-s3 pressable"><IRefresh size={16} /></Button>
+          <Button onClick={() => setSearching(true)} aria-label="Search dramas" className="ml-auto w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><ISearch size={19} /></Button>
+          <Button aria-label="Refresh" onClick={load} className="w-10 h-10 rounded-full flex items-center justify-center text-mut hover:bg-s3 pressable"><IRefresh size={16} /></Button>
         </div>
       </div>
 
@@ -267,7 +267,7 @@ export function TagsPage({ onBack, wide, active = true }: { onBack: () => void; 
             </div>
             <div className="flex flex-wrap gap-2">
               {pinnedTags.map((name) => (
-                <div key={name} className="inline-flex items-center rounded-full border border-primary/40 bg-primary/10 text-primary overflow-hidden">
+                <div key={name} className="inline-flex items-center rounded-full border border-primary/40 bg-primary/10 text-primary overflow-hidden min-h-8">
                   <Button onClick={() => push({ kind: "tag", tag: name, name: formatDramaTag(name) })}
                     className="flex items-center gap-1.5 pl-3 pr-2 py-1.5 text-[12.5px] font-medium pressable">
                     <IPin size={11} />
@@ -276,8 +276,8 @@ export function TagsPage({ onBack, wide, active = true }: { onBack: () => void; 
                   <Button
                     aria-label={`Unpin ${formatDramaTag(name)}`}
                     onClick={() => togglePin(name)}
-                    className="pr-2.5 pl-1 py-1.5 text-[11px] font-bold text-primary/75 hover:text-danger pressable">
-                    ×
+                    className="min-w-8 h-8 px-1.5 flex items-center justify-center text-primary/75 hover:text-danger pressable">
+                    <IClose size={12} />
                   </Button>
                 </div>
               ))}
@@ -289,28 +289,37 @@ export function TagsPage({ onBack, wide, active = true }: { onBack: () => void; 
         ) : err && !groups.length ? (
           <Empty icon={<TagIcon size={26} />} title="Failed to load tags" sub={err} action="Retry" onAction={load} />
         ) : groups.length ? (
-          groups.map((g) => (
-            <section key={g.name} className="mb-5 a-rise">
-              <div className="flex items-center gap-2 mb-2.5">
-                <span className="text-[14px] font-bold text-on">{formatDramaTag(g.name)}</span>
-                <span className="text-[12px] text-dim">{g.tags?.length || 0} tags</span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {g.tags.map((t) => {
-                  const isPinned = pinnedTags.includes(t.name);
-                  return (
-                    <Button key={t.id} onClick={() => push({ kind: "tag", tag: t.name, name: formatDramaTag(t.name) })}
-                      onContextMenu={(e) => { e.preventDefault(); togglePin(t.name); }}
-                      className={`ios-filter-pill flex items-center gap-1 ${isPinned ? "border-primary/40 bg-primary/10 text-primary" : ""}`}>
-                      {isPinned && <IPin size={11} />}
-                      {formatDramaTag(t.name)}
-                      {!!t.hot_score && <span className="text-[12px] text-dim">{fmt(t.hot_score)}</span>}
-                    </Button>
-                  );
-                })}
-              </div>
-            </section>
-          ))
+          groups.map((g) => {
+            const seenLabels = new Set<string>();
+            const dedupedTags = (g.tags || []).filter((tag) => {
+              const labelKey = formatDramaTag(tag.name).trim().toLowerCase();
+              if (!labelKey || seenLabels.has(labelKey)) return false;
+              seenLabels.add(labelKey);
+              return true;
+            });
+            return (
+              <section key={g.name} className="mb-5 a-rise">
+                <div className="flex items-center gap-2 mb-2.5">
+                  <span className="text-[14px] font-bold text-on">{formatDramaTag(g.name)}</span>
+                  <span className="text-[12px] text-dim">{dedupedTags.length} tags</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {dedupedTags.map((t) => {
+                    const isPinned = pinnedTags.includes(t.name);
+                    return (
+                      <Button key={t.id} onClick={() => push({ kind: "tag", tag: t.name, name: formatDramaTag(t.name) })}
+                        onContextMenu={(e) => { e.preventDefault(); togglePin(t.name); }}
+                        className={`ios-filter-pill flex items-center gap-1 min-h-8 ${isPinned ? "border-primary/40 bg-primary/10 text-primary" : ""}`}>
+                        {isPinned && <IPin size={11} />}
+                        {formatDramaTag(t.name)}
+                        {!!t.hot_score && <span className="text-[12px] text-dim">{fmt(t.hot_score)}</span>}
+                      </Button>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          })
         ) : (
           <Empty icon={<TagIcon size={26} />} title="No tags available" />
         )}
@@ -420,7 +429,7 @@ export function TagPage({ tag, name, onBack, wide, active = true }: { tag: strin
                   type="button"
                   aria-pressed={tagSort === s.id}
                   onClick={() => setTagSort(s.id)}
-                  className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all pressable ${
+                  className={`h-8 px-3 rounded-full text-[11.5px] font-semibold transition-all pressable ${
                     tagSort === s.id
                       ? "bg-primary text-on-primary shadow-xs"
                       : "text-mut hover:text-on"
@@ -446,7 +455,13 @@ export function TagPage({ tag, name, onBack, wide, active = true }: { tag: strin
         )}
         <div ref={sentinel} className="h-8" />
         {loading && items.length > 0 && <div className="flex justify-center py-3"><Loader className="w-6 h-6 spinner" /></div>}
-        {!loading && items.length > 0 && page >= pages && <div className="text-center text-[12px] text-dim py-3">— You've reached the end —</div>}
+        {err && items.length > 0 && !loading && (
+          <div className="flex flex-col items-center gap-2 py-4">
+            <span className="text-[12px] text-mut">{err}</span>
+            <Button onClick={loadMore} className="h-8 px-4 rounded-full bg-s3 text-[12px] font-semibold text-on pressable">Retry</Button>
+          </div>
+        )}
+        {!loading && !err && items.length > 0 && page >= pages && <div className="text-center text-[12px] text-dim py-3">— You've reached the end —</div>}
         {wide && <div className="h-2" />}
       </div>
       {searching && <InplaceSearch active={active} kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: name })} />}

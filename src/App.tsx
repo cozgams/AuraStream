@@ -116,10 +116,11 @@ function TabBar() {
       <div className="hg-drop" aria-hidden="true" style={{ transform: `translateX(${index * 100}%)` }}><LiquidIndicator /></div>
       <div className="ios-mobile-nav-items">
         {items.map(({ key, label, Icon, Active }) => {
-          const Glyph = tab === key ? Active : Icon;
-          return <Button key={key} className="ios-mobile-nav-item" onClick={() => handleTabClick(key)}
+          const isCurrent = tab === key;
+          const Glyph = isCurrent ? Active : Icon;
+          return <Button key={key} className={`ios-mobile-nav-item ${isCurrent ? "is-active" : ""}`} onClick={() => handleTabClick(key)}
             aria-label={label}
-            aria-current={tab === key ? "page" : undefined}>
+            aria-current={isCurrent ? "page" : undefined}>
             <Glyph size={22} /><span>{label}</span>
           </Button>;
         })}

@@ -891,7 +891,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                     setSelectMode(false);
                     setSelectedKeys(new Set());
                   }}
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 active:scale-95 transition-all"
+                  className="w-9 h-9 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 active:scale-95 transition-all"
                   aria-label="Exit selection mode"
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
@@ -903,7 +903,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                 <button
                   type="button"
                   onClick={() => setView("overview")}
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 active:scale-95 transition-all"
+                  className="w-9 h-9 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 active:scale-95 transition-all"
                   aria-label="Back to overview"
                 >
                   <IBack size={20} strokeWidth={2.4} />
@@ -921,7 +921,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                     type="button"
                     onClick={playSelected}
                     disabled={selectedKeys.size === 0}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#1a73e8] dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/15 disabled:opacity-30 pressable active:scale-95 transition-all"
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-[#1a73e8] dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/15 disabled:opacity-30 pressable active:scale-95 transition-all"
                     title="Play selected"
                   >
                     <IPlayF size={15} />
@@ -930,7 +930,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                     type="button"
                     onClick={deleteSelected}
                     disabled={selectedKeys.size === 0}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-red-500 hover:bg-red-50 dark:hover:bg-red-500/15 disabled:opacity-30 pressable active:scale-95 transition-all"
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-red-500 hover:bg-red-50 dark:hover:bg-red-500/15 disabled:opacity-30 pressable active:scale-95 transition-all"
                     title="Delete selected"
                   >
                     <ITrash size={15} />
@@ -954,7 +954,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                         });
                       }
                     }}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 pressable font-bold"
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 pressable font-bold"
                     title="Toggle Select All"
                     aria-label="Select all toggle"
                   >
@@ -971,7 +971,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                         return !v;
                       });
                     }}
-                    className={`w-8 h-8 rounded-full flex items-center justify-center pressable transition-all ${
+                    className={`w-9 h-9 rounded-full flex items-center justify-center pressable transition-all ${
                       downloadSearchOpen ? "bg-blue-100 dark:bg-blue-500/20 text-[#1a73e8] dark:text-blue-400" : "text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10"
                     }`}
                     aria-label="Search downloads"
@@ -982,7 +982,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                     type="button"
                     onClick={() => setSelectMode(true)}
                     disabled={downloads.length === 0}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 pressable font-bold disabled:opacity-40"
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 pressable font-bold disabled:opacity-40"
                     aria-label="Select mode"
                     title="Select episodes"
                   >
@@ -998,7 +998,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
               <button
                 type="button"
                 onClick={() => setView("downloads")}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 active:scale-95 transition-all shrink-0"
+                className="w-9 h-9 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 active:scale-95 transition-all shrink-0"
                 aria-label="Back to Downloads"
               >
                 <IBack size={20} strokeWidth={2.4} />
@@ -1011,7 +1011,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
             <button
               type="button"
               onClick={() => setSeriesMenuOpen(true)}
-              className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 pressable font-bold shrink-0"
+              className="w-9 h-9 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 pressable font-bold shrink-0"
               aria-label="Series options"
             >
               <IMore size={16} className="rotate-90" />
@@ -1023,7 +1023,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
               <button
                 type="button"
                 onClick={() => setView("overview")}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 active:scale-95 transition-all"
+                className="w-9 h-9 rounded-full flex items-center justify-center text-[#0f172a] dark:text-neutral-100 hover:bg-slate-200/60 dark:hover:bg-white/10 active:scale-95 transition-all"
                 aria-label="Back to Overview"
               >
                 <IBack size={20} strokeWidth={2.4} />
@@ -1139,7 +1139,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                   <IChevR size={14} className="text-slate-400 shrink-0" strokeWidth={2.5} />
                 </div>
                 <div className="text-[11px] text-[#64748b] dark:text-neutral-400 truncate mt-0.5">
-                  {user ? (user.desc || "Firebase Cloud Sync Active") : "Local Library · Tap to sign in with Email"}
+                  {user ? (user.desc || "Firebase Cloud Sync Active") : "Local Library · Tap to sign in"}
                 </div>
               </div>
               {!user && (
@@ -1149,7 +1149,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                     e.stopPropagation();
                     setLoginOpen(true);
                   }}
-                  className="px-3 py-1.5 rounded-full bg-[#1a73e8] text-white text-[11.5px] font-bold pressable active:scale-95 transition-all shrink-0"
+                  className="h-9 px-3.5 rounded-full bg-[#1a73e8] text-white text-[11.5px] font-bold pressable active:scale-95 transition-all shrink-0"
                 >
                   Sign In
                 </button>
@@ -1223,7 +1223,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                   <button
                     type="button"
                     onClick={() => setView("history")}
-                    className="text-[11.5px] font-bold text-primary hover:opacity-80 flex items-center gap-0.5 pressable"
+                    className="min-h-9 px-1.5 text-[11.5px] font-bold text-primary hover:opacity-80 flex items-center gap-0.5 pressable"
                   >
                     <span>View all</span>
                     <IChevR size={12} strokeWidth={2.6} />
@@ -1359,7 +1359,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                 <button
                   type="button"
                   onClick={() => setView("favs")}
-                  className="text-[11.5px] font-bold text-primary hover:opacity-80 flex items-center gap-0.5 pressable"
+                  className="min-h-9 px-1.5 text-[11.5px] font-bold text-primary hover:opacity-80 flex items-center gap-0.5 pressable"
                 >
                   <span>View all</span>
                   <IChevR size={12} strokeWidth={2.6} />
@@ -1557,7 +1557,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                   void handleCheckUpdate();
                 }}
                 disabled={checkingUpdate}
-                className={`px-3 py-1 rounded-full text-[10.5px] font-bold pressable disabled:opacity-50 transition-colors ${
+                className={`h-8 px-3 rounded-full text-[10.5px] font-bold pressable disabled:opacity-50 transition-colors ${
                   availableUpdate?.has_update
                     ? "bg-primary/15 text-primary border border-primary/30"
                     : "bg-slate-200/80 dark:bg-neutral-800 text-[#64748b] dark:text-neutral-300 hover:text-primary"
@@ -1767,7 +1767,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                       <button
                         type="button"
                         onClick={() => void resumeAllDownloads()}
-                        className="px-2 py-0.5 rounded-full bg-emerald-500/12 text-[11px] font-bold text-[#16a34a] dark:text-emerald-400 hover:bg-emerald-500/20 pressable whitespace-nowrap"
+                        className="h-8 px-3 rounded-full bg-emerald-500/12 text-[11px] font-bold text-[#16a34a] dark:text-emerald-400 hover:bg-emerald-500/20 pressable whitespace-nowrap"
                       >
                         {hasFailedOnly ? "Retry Failed" : "Resume All"}
                       </button>
@@ -1776,7 +1776,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                       <button
                         type="button"
                         onClick={() => pauseAllDownloads()}
-                        className="px-2 py-0.5 rounded-full bg-blue-500/12 text-[11px] font-bold text-[#1a73e8] dark:text-blue-400 hover:bg-blue-500/20 pressable whitespace-nowrap"
+                        className="h-8 px-3 rounded-full bg-blue-500/12 text-[11px] font-bold text-[#1a73e8] dark:text-blue-400 hover:bg-blue-500/20 pressable whitespace-nowrap"
                       >
                         Pause All
                       </button>
@@ -1784,7 +1784,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                     <button
                       type="button"
                       onClick={() => cancelAllDownloads()}
-                      className="px-2 py-0.5 rounded-full bg-red-500/12 text-[11px] font-bold text-red-500 hover:bg-red-500/20 pressable whitespace-nowrap"
+                      className="h-8 px-3 rounded-full bg-red-500/12 text-[11px] font-bold text-red-500 hover:bg-red-500/20 pressable whitespace-nowrap"
                     >
                       Cancel All
                     </button>
@@ -1900,7 +1900,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                           <button
                             type="button"
                             onClick={() => void resumeDownload(item.id, false)}
-                            className="px-2.5 py-1 rounded-full bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-400 text-[11px] font-bold hover:bg-red-100 pressable"
+                            className="h-8 px-3 rounded-full bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-400 text-[11px] font-bold hover:bg-red-100 pressable"
                           >
                             Retry
                           </button>
@@ -2088,7 +2088,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                   else if (downloadSort === "size") setDownloadSort("title");
                   else setDownloadSort("recent");
                 }}
-                className="flex items-center gap-1 text-[11.5px] font-semibold text-[#475569] dark:text-neutral-300 bg-white/80 dark:bg-neutral-800/90 hover:bg-white dark:hover:bg-neutral-700 border border-slate-200 dark:border-white/10 px-2.5 py-1 rounded-full pressable transition-all shadow-2xs"
+                className="h-9 flex items-center gap-1 text-[11.5px] font-semibold text-[#475569] dark:text-neutral-300 bg-white/80 dark:bg-neutral-800/90 hover:bg-white dark:hover:bg-neutral-700 border border-slate-200 dark:border-white/10 px-3 rounded-full pressable transition-all shadow-2xs"
               >
                 <span>
                   {downloadSort === "recent"
@@ -2623,7 +2623,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
               <button
                 type="button"
                 onClick={() => setEpisodeOrder((prev) => (prev === "asc" ? "desc" : "asc"))}
-                className="flex items-center gap-1 text-[12px] font-semibold text-[#64748b] dark:text-neutral-400 hover:text-[#1a73e8] pressable active:scale-95 transition-all"
+                className="min-h-9 px-2 flex items-center gap-1 text-[12px] font-semibold text-[#64748b] dark:text-neutral-400 hover:text-[#1a73e8] pressable active:scale-95 transition-all"
               >
                 <span>Sort</span>
                 <IChevronDown size={12} className={episodeOrder === "desc" ? "rotate-180 transition-transform" : "transition-transform"} />
@@ -2735,7 +2735,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                         type="button"
                         aria-pressed={favStatusFilter === st.id}
                         onClick={() => setFavStatusFilter(st.id)}
-                        className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all pressable ${
+                        className={`h-8 px-2.5 rounded-full text-[11px] font-semibold transition-all pressable ${
                           favStatusFilter === st.id
                             ? "bg-primary text-on-primary shadow-xs"
                             : "text-[#64748b] dark:text-neutral-400 hover:text-[#0f172a] dark:hover:text-white"
@@ -2759,7 +2759,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                         type="button"
                         aria-pressed={favSort === s.id}
                         onClick={() => setFavSort(s.id)}
-                        className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all pressable ${
+                        className={`h-8 px-2.5 rounded-full text-[11px] font-semibold transition-all pressable ${
                           favSort === s.id
                             ? "bg-primary text-on-primary shadow-xs"
                             : "text-[#64748b] dark:text-neutral-400 hover:text-[#0f172a] dark:hover:text-white"

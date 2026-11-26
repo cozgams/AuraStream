@@ -100,6 +100,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
   const boxRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<VideoHandle>(null);
+  const [activeVideoEl, setActiveVideoEl] = useState<HTMLVideoElement | null>(null);
   const [index, setIndex] = useState(startIndex);
   const [renderIndex, setRenderIndex] = useState(startIndex);
   const [epMap, setEpMap] = useState<Record<number, number>>(() => (startEp ? { [videoIds[startIndex]]: startEp } : {}));
@@ -1724,7 +1725,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       </div>
                       <VideoSurface ref={videoRef} src={playUrl} poster={posterUrl} autoPlay active={active} muted={muted}
                         diagnosticContext={{ active, view: mode, kind, video_id: curId, episode: curEp }}
-                        volume={volume} rate={effRate}
+                        volume={volume} rate={effRate} onVideoElement={setActiveVideoEl}
                         fit={isDesktop ? "contain" : landscapeVideo ? (fs || vpLandscape ? "contain" : portraitFit) : (vpLandscape ? "contain" : portraitFit)}
                         onClick={() => { if (isDesktop) videoRef.current?.toggle(); }}
                         onTime={(t) => {
@@ -1824,7 +1825,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       fs={fs}
                       rotated={rotated}
                       bottomOffset={bottomInset}
-                      videoEl={videoRef.current?.el()}
+                      videoEl={activeVideoEl}
                       onTrackStatus={setSubtitleTrackInfo}
                     />
                   )}
@@ -2219,7 +2220,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                   </div>
                   <div className="relative pt-1 pb-2 flex items-center gap-2 px-4 pointer-events-none">
                     <Button onClick={() => setPanel("detail")}
-                      className="pointer-events-auto flex items-center gap-0.5 text-[12px] font-medium hg-ink-3 hg-ov-shadow-strong pressable px-2.5 py-1 rounded-full bg-black/40 backdrop-blur-md border border-white/10">
+                      className="pointer-events-auto flex items-center gap-0.5 text-[12px] font-medium hg-ink-3 hg-ov-shadow-strong pressable min-h-8 px-3 py-1 rounded-full bg-black/40 backdrop-blur-md border border-white/10">
                       {t("common.details")} · {t("player.episode_num", { num: curEp })}<IChevR size={11} />
                     </Button>
                     {isPlayingOffline && (
@@ -2721,12 +2722,12 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                   <button
                     type="button"
                     onClick={() => setPanel("episodes")}
-                    className="flex flex-col items-center justify-center p-2 rounded-2xl bg-s2/90 hover:bg-s3/90 border border-edge/30 text-center pressable transition-all shadow-2xs"
+                    className="flex flex-col items-center justify-start pt-2.5 pb-2 px-1.5 rounded-2xl bg-s2/90 hover:bg-s3/90 border border-edge/30 text-center pressable transition-all shadow-2xs"
                   >
-                    <div className="w-8 h-8 rounded-xl bg-purple-500/15 text-purple-600 dark:text-purple-400 flex items-center justify-center shadow-2xs">
+                    <div className="w-8 h-8 rounded-xl bg-purple-500/15 text-purple-600 dark:text-purple-400 flex items-center justify-center shadow-2xs shrink-0">
                       <IList size={16} />
                     </div>
-                    <span className="text-[11px] font-bold text-on mt-1.5 leading-tight">Episodes</span>
+                    <span className="text-[11px] font-bold text-on mt-1.5 leading-tight whitespace-nowrap">Episodes</span>
                     <span className="text-[9.5px] text-mut mt-0.5">{episodes.length || 1} eps</span>
                   </button>
 
@@ -2736,14 +2737,14 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       setPanel(null);
                       setDownloadChoiceOpen(true);
                     }}
-                    className="flex flex-col items-center justify-center p-2 rounded-2xl bg-s2/90 hover:bg-s3/90 border border-edge/30 text-center pressable transition-all shadow-2xs"
+                    className="flex flex-col items-center justify-start pt-2.5 pb-2 px-1.5 rounded-2xl bg-s2/90 hover:bg-s3/90 border border-edge/30 text-center pressable transition-all shadow-2xs"
                   >
-                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center shadow-2xs ${
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center shadow-2xs shrink-0 ${
                       isDownloaded ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : isDownloadingCurrent ? "bg-amber-500/20 text-amber-600 dark:text-amber-400" : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
                     }`}>
                       {isDownloaded ? <ICheck size={16} strokeWidth={2.6} /> : isDownloadingCurrent ? <Loader className="w-3.5 h-3.5 spinner" /> : <IDownload size={16} />}
                     </div>
-                    <span className="text-[11px] font-bold text-on mt-1.5 leading-tight">Download</span>
+                    <span className="text-[11px] font-bold text-on mt-1.5 leading-tight whitespace-nowrap">Download</span>
                     <span className="text-[9.5px] text-mut mt-0.5">{isDownloaded ? "Saved" : "Offline"}</span>
                   </button>
 
@@ -2753,15 +2754,15 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       const next = store.toggleWatchLaterLocal(curId);
                       toast(next ? "Saved to Watch Later" : "Removed from Watch Later", "ok");
                     }}
-                    className="flex flex-col items-center justify-center p-2 rounded-2xl bg-s2/90 hover:bg-s3/90 border border-edge/30 text-center pressable transition-all shadow-2xs"
+                    className="flex flex-col items-center justify-start pt-2.5 pb-2 px-1.5 rounded-2xl bg-s2/90 hover:bg-s3/90 border border-edge/30 text-center pressable transition-all shadow-2xs"
                   >
-                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center shadow-2xs ${
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center shadow-2xs shrink-0 ${
                       store.isWatchLater(curId) ? "bg-amber-500/20 text-amber-600 dark:text-amber-400" : "bg-s3 text-mut"
                     }`}>
                       <IClock size={16} />
                     </div>
-                    <span className="text-[11px] font-bold text-on mt-1.5 leading-tight">Watch Later</span>
-                    <span className="text-[9.5px] text-mut mt-0.5">{store.isWatchLater(curId) ? "Saved" : "Save"}</span>
+                    <span className="text-[11px] font-bold text-on mt-1.5 leading-tight whitespace-nowrap">Save Later</span>
+                    <span className="text-[9.5px] text-mut mt-0.5">{store.isWatchLater(curId) ? "Saved" : "Queue"}</span>
                   </button>
 
                   <button
@@ -2771,12 +2772,12 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       setClean(true);
                       toast("Clean Screen active (tap video to restore controls)", "info");
                     }}
-                    className="flex flex-col items-center justify-center p-2 rounded-2xl bg-s2/90 hover:bg-s3/90 border border-edge/30 text-center pressable transition-all shadow-2xs"
+                    className="flex flex-col items-center justify-start pt-2.5 pb-2 px-1.5 rounded-2xl bg-s2/90 hover:bg-s3/90 border border-edge/30 text-center pressable transition-all shadow-2xs"
                   >
-                    <div className="w-8 h-8 rounded-xl bg-sky-500/15 text-sky-600 dark:text-sky-400 flex items-center justify-center shadow-2xs">
+                    <div className="w-8 h-8 rounded-xl bg-sky-500/15 text-sky-600 dark:text-sky-400 flex items-center justify-center shadow-2xs shrink-0">
                       <IEye size={16} />
                     </div>
-                    <span className="text-[11px] font-bold text-on mt-1.5 leading-tight">Clean View</span>
+                    <span className="text-[11px] font-bold text-on mt-1.5 leading-tight whitespace-nowrap">Clean View</span>
                     <span className="text-[9.5px] text-mut mt-0.5">Hide UI</span>
                   </button>
                 </div>
@@ -2864,7 +2865,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       setPanel(null);
                       setLineOpen(true);
                     }}
-                    className="px-3 py-1.5 rounded-xl bg-s1 border border-edge/30 text-[12px] font-bold text-on shadow-2xs hover:bg-s3 pressable flex items-center gap-1 whitespace-nowrap shrink-0"
+                    className="h-9 px-3.5 rounded-xl bg-s1 border border-edge/30 text-[12px] font-bold text-on shadow-2xs hover:bg-s3 pressable flex items-center gap-1 whitespace-nowrap shrink-0"
                   >
                     <span>Switch Line</span>
                     <IChevR size={12} className="text-mut shrink-0" />
@@ -2896,7 +2897,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         videoRef.current?.setAudioOffset?.(next);
                         toast(next === 0 ? "Voice synced to video" : `Audio delay: +${next}ms`, "ok");
                       }}
-                      className="px-3 py-1.5 rounded-lg bg-s1 hover:bg-s4/40 text-on text-[12px] font-bold pressable flex items-center gap-1 shadow-2xs"
+                      className="h-9 px-3 rounded-lg bg-s1 hover:bg-s4/40 text-on text-[12px] font-bold pressable flex items-center gap-1 shadow-2xs"
                     >
                       <span>-50ms</span>
                     </button>
@@ -2910,7 +2911,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         videoRef.current?.setAudioOffset?.(0);
                         toast("Voice synced to video", "ok");
                       }}
-                      className="px-3 py-1.5 rounded-lg text-center pressable"
+                      className="h-9 px-3 rounded-lg text-center pressable"
                     >
                       <span className="text-[12px] font-bold text-on">
                         {audioSyncOffset === 0 ? "Perfect Sync" : "Tap to Reset (0ms)"}
@@ -2927,7 +2928,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         videoRef.current?.setAudioOffset?.(next);
                         toast(`Audio delay: +${next}ms`, "ok");
                       }}
-                      className="px-3 py-1.5 rounded-lg bg-s1 hover:bg-s4/40 text-on text-[12px] font-bold pressable flex items-center gap-1 shadow-2xs"
+                      className="h-9 px-3 rounded-lg bg-s1 hover:bg-s4/40 text-on text-[12px] font-bold pressable flex items-center gap-1 shadow-2xs"
                     >
                       <span>+50ms</span>
                     </button>
@@ -2949,7 +2950,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                           videoRef.current?.setAudioOffset?.(val);
                           toast(val === 0 ? "Voice synced to video" : `Audio delay: +${val}ms`, "ok");
                         }}
-                        className={`py-1.5 rounded-lg text-center text-[11px] font-semibold transition-all ${
+                        className={`h-9 rounded-lg text-center text-[11px] font-semibold transition-all ${
                           Math.max(0, audioSyncOffset) === val
                             ? "bg-primary text-on-primary shadow-2xs font-bold"
                             : "bg-s3/60 text-mut hover:text-on hover:bg-s3"
@@ -2980,7 +2981,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                           videoRef.current?.rate(r);
                           toast(`Playback Speed: ${r}x`, "info");
                         }}
-                        className={`py-1.5 rounded-lg text-center text-[12px] font-bold transition-all ${
+                        className={`h-9 rounded-lg text-center text-[12px] font-bold transition-all ${
                           rate === r
                             ? "bg-primary text-on-primary shadow-2xs font-bold"
                             : "text-mut hover:text-on"
@@ -3021,7 +3022,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                           setLocalSleepTimer(val as SleepTimerOption);
                           toast(val === "off" ? "Sleep timer disabled" : `Sleep timer set to ${label}`, "ok");
                         }}
-                        className={`py-1.5 rounded-lg text-center text-[11.5px] font-bold transition-all ${
+                        className={`h-9 rounded-lg text-center text-[11.5px] font-bold transition-all ${
                           sleepTimer === val
                             ? "bg-primary text-on-primary shadow-2xs font-bold"
                             : "text-mut hover:text-on"
@@ -3055,7 +3056,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                             setAutoSkipSecState(sec);
                             toast(sec === 0 ? "Auto-skip intro disabled" : `Auto-skip intro set to ${label}`, "ok");
                           }}
-                          className={`py-1.5 rounded-lg text-center text-[12px] font-bold transition-all ${
+                          className={`h-9 rounded-lg text-center text-[12px] font-bold transition-all ${
                             autoSkipSec === sec
                               ? "bg-primary text-on-primary shadow-2xs font-bold"
                               : "text-mut hover:text-on"

@@ -431,10 +431,12 @@ body { background:var(--p-canvas); }
 .ios-poster-title { letter-spacing:0; }
 
 .ios-mobile-nav { padding:12px 14px calc(12px + var(--sab, 0px)); }
+.ios-mobile-nav:not([data-over-video=true]) { background:linear-gradient(to top, var(--p-bg) 52%, transparent); }
 .ios-mobile-nav .hg-glass { height:66px; }
 .ios-mobile-nav .hg-drop { top:6px; bottom:6px; transition:transform .34s var(--motion-spring); }
 .ios-mobile-nav .hg-drop>.ios-liquid-fill { margin-inline:4px; width:calc(100% - 8px); background:var(--motion-ink); box-shadow:0 4px 0 rgb(25 25 25 / .12); }
-.ios-mobile-nav .ios-mobile-nav-item { color:var(--p-mut); transition:color .22s ease,scale .28s var(--motion-spring); }
+.ios-mobile-nav .ios-mobile-nav-item { color:var(--p-mut); transition:scale .28s var(--motion-spring); }
+.ios-mobile-nav .ios-mobile-nav-item.is-active,
 .ios-mobile-nav .ios-mobile-nav-item[aria-current=page] { color:var(--motion-on-ink); }
 
 /* Solid white floating capsule in light mode matching modern glassmorphic designs without messy content bleed */
@@ -452,6 +454,7 @@ html.theme-light .ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-ite
   color: #475569 !important;
   font-weight: 600 !important;
 }
+html.theme-light .ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item.is-active,
 html.theme-light .ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item[aria-current=page] {
   color: #ffffff !important;
   font-weight: 700 !important;
@@ -470,6 +473,7 @@ html:not(.theme-light) .ios-mobile-nav:not([data-over-video=true]) .ios-mobile-n
   color: #a3aab8 !important;
   font-weight: 600 !important;
 }
+html:not(.theme-light) .ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item.is-active,
 html:not(.theme-light) .ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item[aria-current=page] {
   color: #ffffff !important;
   font-weight: 700 !important;
@@ -483,6 +487,8 @@ html[data-accent] .ios-mobile-nav:not([data-over-video=true]) .hg-drop>.ios-liqu
   background: var(--p-primary) !important;
   box-shadow: 0 4px 14px var(--p-glow) !important;
 }
+.ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item.is-active,
+html[data-accent] .ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item.is-active,
 .ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item[aria-current=page],
 html[data-accent] .ios-mobile-nav:not([data-over-video=true]) .ios-mobile-nav-item[aria-current=page] {
   color: var(--p-on-primary, #ffffff) !important;
@@ -558,7 +564,7 @@ html.theme-light {
   background:var(--glass-shine);
   opacity:.8;
 }
-.ios-mobile-nav .hg-glass>.ios-mobile-nav-items,
+.ios-mobile-nav .hg-glass>.ios-mobile-nav-items { position:relative; z-index:2; isolation:isolate; transform:translateZ(0); }
 .ios-dialog>* ,
 .ios-toast-host>div>* ,
 .win-search-launch>* { position:relative; z-index:1; }
@@ -583,7 +589,7 @@ html.theme-light {
 .ios-filter-pill[aria-pressed=true]:active { scale:.96; }
 
 .ios-dialog { overflow:auto; }
-.ios-mobile-nav .hg-drop { z-index:0; will-change:transform; transition:transform .34s var(--motion-spring); }
+.ios-mobile-nav .hg-drop { z-index:1; transition:transform .34s var(--motion-spring); }
 .ios-mobile-nav .hg-drop>.ios-liquid-fill { position:relative; overflow:hidden; border-radius:inherit; }
 .ios-mobile-nav .hg-drop>.ios-liquid-fill::after { display:none; }
 .ios-mobile-nav .ios-mobile-nav-item[aria-current=page] { animation:none; }

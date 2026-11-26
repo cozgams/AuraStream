@@ -51,14 +51,14 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bar
           {epCount > 1 && (
             <Button
               onClick={() => setBatchOpen(true)}
-              className="ml-auto px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[11px] font-bold flex items-center gap-1 pressable"
+              className="ml-auto h-8 px-2.5 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[11px] font-bold flex items-center gap-1 pressable"
             >
               <IDownload size={12} /> Batch Download
             </Button>
           )}
           <Button
             onClick={() => setAsc((v) => !v)}
-            className="px-2 py-1 rounded-lg bg-black/5 dark:bg-white/10 text-[11px] font-semibold text-on/80 flex items-center gap-1 pressable hover:bg-black/10 dark:hover:bg-white/15 transition-colors"
+            className="h-8 px-2.5 rounded-lg bg-black/5 dark:bg-white/10 text-[11px] font-semibold text-on/80 flex items-center gap-1 pressable hover:bg-black/10 dark:hover:bg-white/15 transition-colors"
             aria-label={asc ? "Sort descending" : "Sort ascending"}
           >
             <IVertSwap size={12} className="text-mut" />
@@ -72,14 +72,14 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bar
           {(episodes?.length || 0) > 1 && (
             <Button
               onClick={() => setBatchOpen(true)}
-              className="ml-auto px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[11px] font-bold flex items-center gap-1 pressable"
+              className="ml-auto h-8 px-2.5 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[11px] font-bold flex items-center gap-1 pressable"
             >
               <IDownload size={12} /> Batch
             </Button>
           )}
           <Button
             onClick={() => setAsc((v) => !v)}
-            className="px-2 py-1 rounded-lg bg-black/5 dark:bg-white/10 text-[11px] font-semibold text-on/80 flex items-center gap-1 pressable hover:bg-black/10 dark:hover:bg-white/15 transition-colors"
+            className="h-8 px-2.5 rounded-lg bg-black/5 dark:bg-white/10 text-[11px] font-semibold text-on/80 flex items-center gap-1 pressable hover:bg-black/10 dark:hover:bg-white/15 transition-colors"
             aria-label={asc ? "Sort descending" : "Sort ascending"}
           >
             <IVertSwap size={12} className="text-mut" />
@@ -146,7 +146,20 @@ function saveStoredUserComments(scopeKey: string, comments: Comment[]): void {
   try {
     const raw = localStorage.getItem(USER_COMMENTS_KEY);
     const map = raw ? (JSON.parse(raw) as Record<string, Comment[]>) : {};
-    map[scopeKey] = comments.slice(0, 50);
+    const sliced = comments.slice(0, 50);
+    if (sliced.length === 0) {
+      delete map[scopeKey];
+    } else {
+      // Delete and re-insert so recently updated series move to the tail (LRU eviction).
+      delete map[scopeKey];
+      map[scopeKey] = sliced;
+    }
+    const keys = Object.keys(map);
+    if (keys.length > 100) {
+      for (const oldKey of keys.slice(0, keys.length - 100)) {
+        delete map[oldKey];
+      }
+    }
     localStorage.setItem(USER_COMMENTS_KEY, JSON.stringify(map));
   } catch {
     // ignore storage errors
@@ -325,7 +338,7 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
           <button
             type="button"
             onClick={() => setLoginOpen(true)}
-            className="ml-auto mr-1 text-[11.5px] font-semibold text-primary hover:underline pressable"
+            className="ml-auto mr-1 min-h-9 px-2 text-[12px] font-semibold text-primary hover:underline pressable"
           >
             Sign in
           </button>

@@ -42,6 +42,7 @@ type Props = {
   onEnded?: () => void;
   onError?: (msg: string) => void;
   onClick?: () => void;
+  onVideoElement?: (el: HTMLVideoElement | null) => void;
   className?: string;
 };
 
@@ -50,7 +51,7 @@ const safeVolume = (vol: number) => Math.max(0, Math.min(1, Number.isFinite(vol)
 /** Core video playback surface (HLS.js + HTMLVideoElement) */
 const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
   { src, poster, autoPlay = true, active = true, diagnosticContext = {}, muted = false, loop = false, fit = "contain", volume = 1, rate = 1,
-    onTime, onDuration, onSize, onPlaying, onPause, onWaiting, onEnded, onError, onClick, className = "" },
+    onTime, onDuration, onSize, onPlaying, onPause, onWaiting, onEnded, onError, onClick, onVideoElement, className = "" },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -353,13 +354,18 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
   }, [src, proxyRecovery.revision]);
 
   // Enable inline playback attributes for Android & mobile WebViews and clean up audio context on unmount
+  const onVideoElementRef = useRef(onVideoElement);
+  onVideoElementRef.current = onVideoElement;
+
   useEffect(() => {
     const v = videoRef.current;
     if (v) {
       v.setAttribute("playsinline", "true");
       v.setAttribute("webkit-playsinline", "true");
+      onVideoElementRef.current?.(v);
     }
     return () => {
+      onVideoElementRef.current?.(null);
       if (audioCtxRef.current) {
         try {
           void audioCtxRef.current.close();

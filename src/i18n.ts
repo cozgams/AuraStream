@@ -136,7 +136,7 @@ export const translations = {
     "cat.posts_desc": "Hot topics, discussions & leaks",
 
     // Search Page
-    "search.placeholder": "Search dramas, actors, genres...",
+    "search.placeholder": "Search dramas, actors...",
     "search.hot": "Trending Searches",
     "search.history": "Recent Searches",
     "search.clear": "Clear",

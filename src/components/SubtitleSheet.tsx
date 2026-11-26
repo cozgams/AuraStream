@@ -366,7 +366,7 @@ export default function SubtitleSheet({
           </div>
           <Button
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-s3 hover:bg-s4/20 flex items-center justify-center text-on/70 hover:text-on pressable"
+            className="w-10 h-10 rounded-full bg-s3 hover:bg-s4/20 flex items-center justify-center text-on/70 hover:text-on pressable"
             aria-label={t("common.close")}
           >
             <IClose size={16} />
@@ -412,7 +412,7 @@ export default function SubtitleSheet({
                     removeSubtitleTrackForEpisode(videoId, episode);
                     toast("Subtitle track removed", "info");
                   }}
-                  className="px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 text-[11px] font-bold flex items-center gap-1 shrink-0 pressable"
+                  className="h-8 px-2.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 text-[11px] font-bold flex items-center gap-1 shrink-0 pressable"
                 >
                   <ITrash size={12} />
                   <span>Remove</span>
@@ -529,14 +529,14 @@ export default function SubtitleSheet({
                   <Button
                     type="button"
                     onClick={() => void handlePasteClipboard()}
-                    className="h-8 rounded-xl bg-s3 border border-border text-[12px] font-semibold text-on pressable"
+                    className="h-9 rounded-xl bg-s3 border border-border text-[12px] font-semibold text-on pressable"
                   >
                     Paste Clipboard
                   </Button>
                   <Button
                     type="button"
                     onClick={handleLoadPasted}
-                    className="h-8 rounded-xl bg-primary text-on-primary text-[12px] font-bold pressable"
+                    className="h-9 rounded-xl bg-primary text-on-primary text-[12px] font-bold pressable"
                   >
                     Load Captions
                   </Button>
@@ -565,7 +565,7 @@ export default function SubtitleSheet({
                           setAiConfig(next);
                           setAICaptionConfig(next);
                         }}
-                        className={`h-8 rounded-lg border text-[11px] font-bold transition-all ${
+                        className={`h-9 rounded-lg border text-[11px] font-bold transition-all ${
                           selected
                             ? "bg-primary/15 border-primary text-primary"
                             : "bg-s3 border-border text-mut"
@@ -795,14 +795,14 @@ export default function SubtitleSheet({
               <button
                 type="button"
                 onClick={() => updateOffsetSec(currentOffsetSec - 0.25)}
-                className="px-2 py-1 rounded-lg bg-s3 border border-border text-[11px] font-bold text-on pressable"
+                className="h-9 px-2.5 rounded-lg bg-s3 border border-border text-[11px] font-bold text-on pressable"
               >
                 -0.25s
               </button>
               <button
                 type="button"
                 onClick={() => updateOffsetSec(0)}
-                className="px-2 py-1 rounded-lg bg-white dark:bg-neutral-900 border border-border text-[11px] font-mono font-bold text-amber-500 min-w-[54px] text-center pressable"
+                className="h-9 px-2.5 rounded-lg bg-white dark:bg-neutral-900 border border-border text-[11px] font-mono font-bold text-amber-500 min-w-[54px] text-center pressable"
                 title="Reset offset to 0.00s"
               >
                 {currentOffsetSec > 0 ? `+${currentOffsetSec.toFixed(2)}s` : `${currentOffsetSec.toFixed(2)}s`}
@@ -810,7 +810,7 @@ export default function SubtitleSheet({
               <button
                 type="button"
                 onClick={() => updateOffsetSec(currentOffsetSec + 0.25)}
-                className="px-2 py-1 rounded-lg bg-s3 border border-border text-[11px] font-bold text-on pressable"
+                className="h-9 px-2.5 rounded-lg bg-s3 border border-border text-[11px] font-bold text-on pressable"
               >
                 +0.25s
               </button>
@@ -866,7 +866,7 @@ export default function SubtitleSheet({
                 <button
                   type="button"
                   onClick={() => onPositionPreset("bottom", 12)}
-                  className="text-amber-500 hover:text-amber-400 text-[11px] font-semibold flex items-center gap-1 pressable"
+                  className="min-h-8 px-1.5 text-amber-500 hover:text-amber-400 text-[11px] font-semibold flex items-center gap-1 pressable"
                 >
                   <IRefresh size={11} /> Reset Downside
                 </button>
@@ -945,7 +945,7 @@ export default function SubtitleSheet({
                     key={p.id}
                     type="button"
                     onClick={() => applyPreset(p.id)}
-                    className={`h-8 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 pressable transition-all active:scale-95 ${
+                    className={`h-9 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 pressable transition-all active:scale-95 ${
                       isPresetActive
                         ? "bg-white dark:bg-neutral-900 text-on border-amber-500/60 shadow-xs ring-1 ring-amber-500/30"
                         : "bg-s2 hover:bg-s3 border-border text-on"
@@ -989,7 +989,7 @@ export default function SubtitleSheet({
                       setStyleConfig(updated);
                       setSubtitleStyleConfig(updated);
                     }}
-                    className={`h-8 rounded-xl border text-[11px] font-bold flex items-center justify-center pressable transition-all ${
+                    className={`h-9 rounded-xl border text-[11px] font-bold flex items-center justify-center pressable transition-all ${
                       active
                         ? "bg-white dark:bg-neutral-900 text-on border-amber-500/60 shadow-xs ring-1 ring-amber-500/30"
                         : "bg-s2 border-border text-on/80 hover:bg-s3 font-semibold"

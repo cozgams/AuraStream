@@ -493,7 +493,13 @@ class MainActivity : TauriActivity() {
 
   override fun onTrimMemory(level: Int) {
     super.onTrimMemory(level)
-    if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+    // TRIM_MEMORY_UI_HIDDEN (20) and TRIM_MEMORY_BACKGROUND (40) fire on normal app-switching;
+    // preserve active playback & cover caches unless Android signals genuine memory pressure.
+    val isGenuinePressure =
+      level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
+        level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
+        level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE
+    if (isGenuinePressure) {
       cleanupExportsDir(15 * 60 * 1000L)
       runOnUiThread {
         currentWebView?.evaluateJavascript(
