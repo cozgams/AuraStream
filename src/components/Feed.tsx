@@ -965,7 +965,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   /* Voice & Audio Sync offset synchronization */
   useEffect(() => {
     videoRef.current?.setAudioOffset?.(audioSyncOffset);
-  }, [audioSyncOffset, playKey]);
+  }, [audioSyncOffset, playKey, activeVideoEl]);
 
   /* Persist final progress and cleanup offline blob URLs */
   useEffect(() => () => {
@@ -1725,7 +1725,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       </div>
                       <VideoSurface ref={videoRef} src={playUrl} poster={posterUrl} autoPlay active={active} muted={muted}
                         diagnosticContext={{ active, view: mode, kind, video_id: curId, episode: curEp }}
-                        volume={volume} rate={effRate} onVideoElement={setActiveVideoEl}
+                        volume={volume} rate={effRate} audioOffset={audioSyncOffset} onVideoElement={setActiveVideoEl}
                         fit={isDesktop ? "contain" : landscapeVideo ? (fs || vpLandscape ? "contain" : portraitFit) : (vpLandscape ? "contain" : portraitFit)}
                         onClick={() => { if (isDesktop) videoRef.current?.toggle(); }}
                         onTime={(t) => {

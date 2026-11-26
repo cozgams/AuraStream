@@ -66,6 +66,86 @@ import { getAndroidPermissionsStatus, type AndroidPermissionsStatus } from "../o
 import BatchDownloadSheet from "../components/BatchDownloadSheet";
 import { formatDramaTag, formatDramaTitle } from "../subtitles/dramaTranslator";
 
+function ProfileThumb({
+  src,
+  alt = "",
+  className = "w-full h-full object-cover",
+  eager = false,
+  variant = "layers",
+  iconSize = 16,
+  fallbackTitle,
+}: {
+  src?: string | null;
+  alt?: string;
+  className?: string;
+  eager?: boolean;
+  variant?: "layers" | "history";
+  iconSize?: number;
+  fallbackTitle?: string;
+}) {
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const [status, setStatus] = useState<"loading" | "loaded" | "error">(src ? "loading" : "error");
+
+  useEffect(() => {
+    if (!src) {
+      setStatus("error");
+      return;
+    }
+    const el = imgRef.current;
+    if (el && el.complete) {
+      setStatus(el.naturalWidth > 0 ? "loaded" : "error");
+    } else {
+      setStatus("loading");
+    }
+  }, [src]);
+
+  const showHistoryBackdrop = variant === "history" && status !== "loaded";
+
+  return (
+    <div className="relative w-full h-full">
+      {status === "loading" && (
+        <div
+          aria-hidden="true"
+          className={`absolute inset-0 animate-pulse ${
+            variant === "history"
+              ? "bg-gradient-to-br from-slate-800 via-slate-700/80 to-slate-900"
+              : "bg-gradient-to-br from-slate-200 via-slate-100 to-slate-200 dark:from-neutral-800 dark:via-neutral-700/70 dark:to-neutral-800"
+          }`}
+        />
+      )}
+      {showHistoryBackdrop && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-800/80 to-slate-950/90 text-white/90 p-2 text-center pointer-events-none">
+          <IHist size={iconSize} className="text-white/40 mb-0.5" />
+          {fallbackTitle ? (
+            <span className="text-[10px] font-bold tracking-tight line-clamp-1 text-white/80">
+              {fallbackTitle}
+            </span>
+          ) : null}
+        </div>
+      )}
+      {variant === "layers" && status === "error" && (
+        <div className="w-full h-full flex items-center justify-center text-slate-400">
+          <ILayers size={iconSize} />
+        </div>
+      )}
+      {src && status !== "error" ? (
+        <img
+          ref={imgRef}
+          src={src}
+          alt={alt}
+          loading={eager ? "eager" : "lazy"}
+          decoding="async"
+          className={`relative z-[1] ${className} transition-opacity duration-200 ${status === "loaded" ? "opacity-100" : "opacity-0"}`}
+          onLoad={(e) => {
+            setStatus(e.currentTarget.naturalWidth > 0 ? "loaded" : "error");
+          }}
+          onError={() => setStatus("error")}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 function FolderDownloadIcon({ size = 44, className = "" }: { size?: number; className?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true">
@@ -1275,29 +1355,14 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                         className="group w-28 shrink-0 flex flex-col cursor-pointer pressable active:scale-[0.98] transition-transform relative"
                       >
                         <div className="w-full h-[80px] rounded-xl overflow-hidden relative shadow-xs border border-slate-200/60 dark:border-white/10 bg-slate-900">
-                          {coverSrc ? (
-                            <img
-                              src={coverSrc}
-                              alt={dramaTitle}
-                              className="w-full h-full object-cover"
-                              loading="lazy"
-                              onError={(e) => {
-                                (e.target as HTMLElement).style.display = "none";
-                                const fallback = (e.target as HTMLElement).nextElementSibling as HTMLElement;
-                                if (fallback) fallback.style.display = "flex";
-                              }}
-                            />
-                          ) : null}
-                          <div
-                            className={`w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-800 to-slate-950 text-white/90 p-2 text-center ${
-                              coverSrc ? "hidden" : "flex"
-                            }`}
-                          >
-                            <IHist size={16} className="text-white/40 mb-0.5" />
-                            <span className="text-[10px] font-bold tracking-tight line-clamp-1 text-white/80">
-                              {dramaTitle}
-                            </span>
-                          </div>
+                          <ProfileThumb
+                            src={coverSrc}
+                            alt={dramaTitle}
+                            eager
+                            variant="history"
+                            iconSize={16}
+                            fallbackTitle={dramaTitle}
+                          />
 
                           {/* Accent Progress Bar along Bottom */}
                           {progressPct > 0 && (
@@ -1797,20 +1862,12 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                     className="bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md rounded-2xl border border-blue-100 dark:border-blue-500/25 shadow-[0_4px_20px_-2px_rgba(37,99,235,0.08)] p-3 flex flex-col gap-2.5 overflow-hidden min-w-0"
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-12 aspect-[3/4] rounded-xl overflow-hidden shrink-0 shadow-xs border border-black/5 dark:border-white/10 bg-slate-100 dark:bg-neutral-800 relative flex items-center justify-center">
-                        {(() => {
-                          const coverSrc = getOfflineCoverUrl({ id: item.id, cover: item.cover || "" }, 160);
-                          return coverSrc ? (
-                            <img
-                              src={coverSrc}
-                              alt=""
-                              className="w-full h-full object-cover"
-                              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-                            />
-                          ) : (
-                            <ILayers size={16} className="text-slate-400" />
-                          );
-                        })()}
+                      <div className="w-12 aspect-[3/4] rounded-xl overflow-hidden shrink-0 shadow-xs border border-black/5 dark:border-white/10 bg-slate-100 dark:bg-neutral-800 relative">
+                        <ProfileThumb
+                          src={getOfflineCoverUrl({ id: item.id, cover: item.cover || "" }, 160)}
+                          eager
+                          iconSize={16}
+                        />
                         <div className="absolute bottom-0.5 left-0.5 px-1 py-0.2 rounded bg-black/60 text-[8px] font-bold text-white">
                           Ep. {item.episode}
                         </div>
@@ -2182,20 +2239,10 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                           }}
                           className="w-14 aspect-[3/4] rounded-xl overflow-hidden shrink-0 shadow-xs border border-black/5 dark:border-white/10 bg-slate-100 dark:bg-neutral-800 cursor-pointer pressable relative p-0 border-0 text-left block"
                         >
-                          {(() => {
-                            const coverSrc = getOfflineCoverUrl(group.episodes.find((e) => e.hasLocalCover) || group.episodes[0] || { id: "", cover: group.cover }, 200);
-                            return coverSrc ? (
-                              <img
-                                src={coverSrc}
-                                alt=""
-                                className="w-full h-full object-cover"
-                                loading="lazy"
-                                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-slate-400"><ILayers size={18} /></div>
-                            );
-                          })()}
+                          <ProfileThumb
+                            src={getOfflineCoverUrl(group.episodes.find((e) => e.hasLocalCover) || group.episodes[0] || { id: "", cover: group.cover }, 200)}
+                            iconSize={18}
+                          />
                           <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded-md bg-black/60 backdrop-blur-xs text-[9px] font-bold text-white shadow-xs">
                             {group.episodes.length} {group.episodes.length === 1 ? "ep" : "eps"}
                           </div>
@@ -2224,8 +2271,10 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                           <div className="text-[15px] font-bold text-[#0f172a] dark:text-neutral-100 leading-snug line-clamp-2">
                             {formatDramaTitle(group.title)}
                           </div>
-                          <div className="text-[11.5px] text-[#64748b] dark:text-neutral-400 mt-0.5 tabular-nums">
-                            {group.episodes.length} {group.episodes.length === 1 ? "episode" : "episodes"} · {formatBytes(group.totalBytes)}
+                          <div className="text-[11.5px] text-[#64748b] dark:text-neutral-400 mt-0.5 tabular-nums flex flex-wrap items-center gap-x-1">
+                            <span className="whitespace-nowrap">{group.episodes.length} {group.episodes.length === 1 ? "episode" : "episodes"}</span>
+                            <span aria-hidden="true">·</span>
+                            <span className="whitespace-nowrap">{formatBytes(group.totalBytes)}</span>
                           </div>
                           <div className="flex items-center gap-1.5 mt-1">
                             {runningCount > 0 ? (
@@ -2324,18 +2373,10 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                                 className="w-[104px] shrink-0 snap-start flex flex-col gap-1 cursor-pointer pressable active:scale-95 transition-all"
                               >
                                 <div className="w-full aspect-[16/10] rounded-lg overflow-hidden relative border border-black/5 bg-slate-200 dark:bg-neutral-800">
-                                  {(() => {
-                                    const coverSrc = getOfflineCoverUrl(ep, 160);
-                                    return coverSrc ? (
-                                      <img
-                                        src={coverSrc}
-                                        alt=""
-                                        className="w-full h-full object-cover"
-                                        loading="lazy"
-                                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-                                      />
-                                    ) : null;
-                                  })()}
+                                  <ProfileThumb
+                                    src={getOfflineCoverUrl(ep, 160)}
+                                    iconSize={14}
+                                  />
                                   <div className="absolute bottom-1 right-1 w-4 h-4 rounded-full bg-[#10b981] text-white flex items-center justify-center shadow-xs">
                                     <ICheck size={9} strokeWidth={3.5} />
                                   </div>
@@ -2474,19 +2515,11 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
             {/* Top Showcase Hero */}
             <div className="flex items-center gap-3.5 px-0.5">
               <div className="w-16 h-16 rounded-2xl overflow-hidden shrink-0 shadow-md border border-black/5 dark:border-white/10 bg-slate-100 dark:bg-neutral-800">
-                {(() => {
-                  const coverSrc = getOfflineCoverUrl(selectedSeriesGroup.episodes.find((e) => e.hasLocalCover) || selectedSeriesGroup.episodes[0] || { id: "", cover: selectedSeriesGroup.cover }, 240);
-                  return coverSrc ? (
-                    <img
-                      src={coverSrc}
-                      alt=""
-                      className="w-full h-full object-cover"
-                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-slate-400"><ILayers size={22} /></div>
-                  );
-                })()}
+                <ProfileThumb
+                  src={getOfflineCoverUrl(selectedSeriesGroup.episodes.find((e) => e.hasLocalCover) || selectedSeriesGroup.episodes[0] || { id: "", cover: selectedSeriesGroup.cover }, 240)}
+                  eager
+                  iconSize={22}
+                />
               </div>
               <div className="flex-1 min-w-0">
                 <h2 className="text-[19px] font-black text-[#0f172a] dark:text-neutral-100 tracking-tight leading-tight truncate">
@@ -2651,30 +2684,23 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                     }
                     className="p-3 rounded-2xl bg-white/90 dark:bg-neutral-900/90 backdrop-blur-md border border-white/70 dark:border-white/10 shadow-xs flex items-center gap-3 cursor-pointer pressable active:scale-[0.99] transition-all"
                   >
-                    <div className="w-20 aspect-[16/10] rounded-xl overflow-hidden relative border border-black/5 bg-slate-200 dark:bg-neutral-800 shrink-0">
-                      {(() => {
-                        const coverSrc = getOfflineCoverUrl(item, 160);
-                        return coverSrc ? (
-                          <img
-                            src={coverSrc}
-                            alt=""
-                            className="w-full h-full object-cover"
-                            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-                          />
-                        ) : null;
-                      })()}
+                    <div className="w-[72px] aspect-[16/10] rounded-xl overflow-hidden relative border border-black/5 bg-slate-200 dark:bg-neutral-800 shrink-0">
+                      <ProfileThumb
+                        src={getOfflineCoverUrl(item, 160)}
+                        eager
+                        iconSize={16}
+                      />
                     </div>
 
                     <div className="flex-1 min-w-0">
                       <div className="text-[14px] font-bold text-[#0f172a] dark:text-neutral-100 truncate">
                         Episode {item.episode}
                       </div>
-                      <div className="text-[11.5px] text-[#64748b] dark:text-neutral-400 mt-0.5 tabular-nums flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
+                      <div className="text-[11.5px] text-[#64748b] dark:text-neutral-400 mt-0.5 tabular-nums flex items-center gap-1.5 whitespace-nowrap">
                         <span className="w-3.5 h-3.5 rounded-full bg-[#10b981] text-white flex items-center justify-center shrink-0">
                           <ICheck size={8} strokeWidth={3.5} />
                         </span>
-                        <span className="font-semibold text-slate-700 dark:text-neutral-200 shrink-0">{epMB} MB</span>
-                        <span className="truncate">· Downloaded</span>
+                        <span className="font-semibold text-slate-700 dark:text-neutral-200">{epMB} MB</span>
                       </div>
                     </div>
 

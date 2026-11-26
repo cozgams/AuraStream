@@ -47,7 +47,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
       })
       .catch(() => {});
     return () => { alive = false; };
-  }, []);
+  }, [lineEpoch]);
 
   useEffect(() => {
     const handler = (e: Event) => {

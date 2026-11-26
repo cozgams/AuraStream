@@ -312,6 +312,17 @@ function AppBody() {
           </LayerBox>
         ))}
 
+        {platform === "android" && !fs && !keyboardOpen && stack.length > 0 && stack[stack.length - 1]?.kind !== "feed" && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none fixed inset-x-0 bottom-0"
+            style={{
+              zIndex: Math.min(48, 30 + stack.length),
+              height: "calc(max(var(--sab, 0px), 16px) + 18px)",
+              background: "linear-gradient(to top, var(--p-bg) 56%, transparent)",
+            }}
+          />
+        )}
         {isMobile && !fs && !cleanActive && !keyboardOpen && stack.length === 0 && !loginOpen && tab !== "home" && tab !== "profile" && <ContinueWatchingBar />}
         {isMobile && !fs && !cleanActive && !keyboardOpen && stack.length === 0 && !loginOpen && <TabBar />}
       </div>

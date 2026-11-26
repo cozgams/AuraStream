@@ -33,6 +33,7 @@ type Props = {
   /** Re-applies volume and playback rate after source change */
   volume?: number;
   rate?: number;
+  audioOffset?: number;
   onTime?: (t: number) => void;
   onDuration?: (d: number) => void;
   onSize?: (w: number, h: number) => void;
@@ -49,8 +50,49 @@ type Props = {
 const safeVolume = (vol: number) => Math.max(0, Math.min(1, Number.isFinite(vol) ? vol : 1));
 
 /** Core video playback surface (HLS.js + HTMLVideoElement) */
+function syncMediaAudioDelay(
+  v: HTMLVideoElement,
+  offsetMs: number,
+  audioCtxRef: { current: AudioContext | null },
+  sourceNodeRef: { current: MediaElementAudioSourceNode | null },
+  delayNodeRef: { current: DelayNode | null },
+) {
+  const clampedMs = Math.max(0, Math.min(500, offsetMs));
+  if (clampedMs === 0) {
+    if (delayNodeRef.current && audioCtxRef.current) {
+      try {
+        delayNodeRef.current.delayTime.setValueAtTime(0, audioCtxRef.current.currentTime);
+      } catch { /* ignore */ }
+    }
+    return;
+  }
+  try {
+    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new AudioCtx();
+    }
+    const ctx = audioCtxRef.current;
+    if (ctx.state === "suspended") {
+      void ctx.resume();
+    }
+    if (!sourceNodeRef.current) {
+      sourceNodeRef.current = ctx.createMediaElementSource(v);
+    }
+    if (!delayNodeRef.current) {
+      delayNodeRef.current = ctx.createDelay(1.0);
+      sourceNodeRef.current.connect(delayNodeRef.current);
+      delayNodeRef.current.connect(ctx.destination);
+    }
+    const delaySec = clampedMs / 1000;
+    delayNodeRef.current.delayTime.setValueAtTime(delaySec, ctx.currentTime);
+  } catch {
+    // Ignored if cross-origin or unsupported
+  }
+}
+
 const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
-  { src, poster, autoPlay = true, active = true, diagnosticContext = {}, muted = false, loop = false, fit = "contain", volume = 1, rate = 1,
+  { src, poster, autoPlay = true, active = true, diagnosticContext = {}, muted = false, loop = false, fit = "contain", volume = 1, rate = 1, audioOffset = 0,
     onTime, onDuration, onSize, onPlaying, onPause, onWaiting, onEnded, onError, onClick, onVideoElement, className = "" },
   ref,
 ) {
@@ -118,38 +160,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
     setAudioOffset: (offsetMs: number) => {
       const v = videoRef.current;
       if (!v) return;
-      const clampedMs = Math.max(0, Math.min(500, offsetMs));
-      if (clampedMs === 0) {
-        if (delayNodeRef.current && audioCtxRef.current) {
-          try {
-            delayNodeRef.current.delayTime.setValueAtTime(0, audioCtxRef.current.currentTime);
-          } catch { /* ignore */ }
-        }
-        return;
-      }
-      try {
-        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-        if (!AudioCtx) return;
-        if (!audioCtxRef.current) {
-          audioCtxRef.current = new AudioCtx();
-        }
-        const ctx = audioCtxRef.current;
-        if (ctx.state === "suspended") {
-          void ctx.resume();
-        }
-        if (!sourceNodeRef.current) {
-          sourceNodeRef.current = ctx.createMediaElementSource(v);
-        }
-        if (!delayNodeRef.current) {
-          delayNodeRef.current = ctx.createDelay(1.0);
-          sourceNodeRef.current.connect(delayNodeRef.current);
-          delayNodeRef.current.connect(ctx.destination);
-        }
-        const delaySec = clampedMs / 1000;
-        delayNodeRef.current.delayTime.setValueAtTime(delaySec, ctx.currentTime);
-      } catch {
-        // Ignored if cross-origin or unsupported
-      }
+      syncMediaAudioDelay(v, offsetMs, audioCtxRef, sourceNodeRef, delayNodeRef);
     },
     reload: () => {
       const v = videoRef.current;
@@ -380,6 +391,11 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
   useEffect(() => { if (videoRef.current) videoRef.current.muted = muted; }, [muted]);
   useEffect(() => { if (videoRef.current) videoRef.current.volume = safeVolume(volume); }, [volume]);
   useEffect(() => { if (videoRef.current) videoRef.current.playbackRate = rate; }, [rate]);
+  useEffect(() => {
+    if (videoRef.current) {
+      syncMediaAudioDelay(videoRef.current, audioOffset, audioCtxRef, sourceNodeRef, delayNodeRef);
+    }
+  }, [audioOffset, src]);
 
   /* Playback stall watchdog */
   useEffect(() => {
@@ -486,6 +502,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
     v.volume = safeVolume(volume);
     v.muted = muted;
     v.playbackRate = rate;
+    syncMediaAudioDelay(v, audioOffset, audioCtxRef, sourceNodeRef, delayNodeRef);
   };
 
   const handleVideoError = () => {
