@@ -79,19 +79,24 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
     });
   };
 
+  const mirrorRequest = useRef(0);
+
   const readMirrors = async () => {
+    const req = ++mirrorRequest.current;
     setLoadingMirrors(true);
     setMirrorErr("");
     try {
       const res = await api.lineMirrors();
+      if (req !== mirrorRequest.current) return;
       setMirrors(res?.items || []);
       setRecommended(res?.recommended || []);
     } catch (e) {
-      setMirrors([]);
+      if (req !== mirrorRequest.current) return;
+      setMirrors(null);
       setRecommended([]);
       setMirrorErr(errorMessage(e, "Failed to retrieve mirror endpoints"));
     } finally {
-      setLoadingMirrors(false);
+      if (req === mirrorRequest.current) setLoadingMirrors(false);
     }
   };
 
@@ -99,8 +104,11 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
     if (!open) return;
     readState(true);
     setCustomError("");
-    if (mirrors === null) void readMirrors();
-    return () => { stateRequest.current++; };
+    if (mirrors === null || Boolean(mirrorErr)) void readMirrors();
+    return () => {
+      stateRequest.current++;
+      mirrorRequest.current++;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 

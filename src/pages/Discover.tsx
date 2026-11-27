@@ -122,33 +122,46 @@ export function TopicPage({ slug, name, onBack, wide, active = true }: { slug: s
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const busy = useRef(false);
+  const reqSeqRef = useRef(0);
 
-  const loadMore = useCallback(async () => {
-    if (busy.current || page >= pages) return;
+  const loadMore = useCallback(async (force = false) => {
+    if (!force && (busy.current || page >= pages)) return;
     busy.current = true;
+    const seq = ++reqSeqRef.current;
     setLoading(true);
     try {
       const res = await api.topic(slug);
+      if (seq !== reqSeqRef.current) return;
       setTopic(res?.topic || null);
       setRelated(res?.related || []);
-      const next = page + 1;
       const items = res?.videos?.items || [];
-      const pag = res?.videos?.pagination;
       setVideos(items);
-      setPage(pag?.page || next);
-      setPages(pag?.pages || 1);
+      setPage(1);
+      setPages(1);
       setErr("");
     } catch (e) {
+      if (seq !== reqSeqRef.current) return;
       const msg = localizeError(e);
       setErr(msg);
       toast(msg, "info");
     } finally {
-      busy.current = false;
-      setLoading(false);
+      if (seq === reqSeqRef.current) {
+        busy.current = false;
+        setLoading(false);
+      }
     }
   }, [page, pages, slug, toast]);
 
-  useEffect(() => { loadMore(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => {
+    setVideos([]);
+    setTopic(null);
+    setRelated([]);
+    setPage(0);
+    setPages(1);
+    setErr("");
+    busy.current = false;
+    void loadMore(true);
+  }, [slug]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
@@ -186,7 +199,7 @@ export function TopicPage({ slug, name, onBack, wide, active = true }: { slug: s
         {loading && !videos.length ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
         ) : err && !videos.length ? (
-          <Empty icon={<TopicIcon size={26} />} title="Failed to load" sub={err} action="Retry" onAction={loadMore} />
+          <Empty icon={<TopicIcon size={26} />} title="Failed to load" sub={err} action="Retry" onAction={() => void loadMore(true)} />
         ) : videos.length ? (
           <Masonry videos={videos} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: videos.map((x) => x.id), index: Math.max(0, videos.findIndex((x) => x.id === v.id)), title: topic?.title || name })} />
         ) : (

@@ -158,20 +158,19 @@ try {
   const profileTab = page.locator('nav button:has-text("Profile")').first();
   if (await profileTab.isVisible()) {
     await profileTab.click();
-    await page.waitForTimeout(400);
 
-    // Click Settings button
+    // Wait for lazy Profile chunk and click Settings button
     const settingsBtn = page.locator('button[aria-label="Settings"]').first();
-    if (await settingsBtn.isVisible()) {
-      await settingsBtn.click();
-      await page.waitForTimeout(400);
+    await settingsBtn.waitFor({ state: "visible", timeout: 5000 });
+    await settingsBtn.click();
 
-      const hasHevc = await page.locator('button:has-text("HEVC")').count();
-      const hasH264 = await page.locator('button:has-text("H.264")').count();
-      const hasAuto = await page.locator('button:has-text("Auto")').count();
-      console.log(`✔ Settings has Download Quality options: HEVC=${hasHevc > 0}, H.264=${hasH264 > 0}, Auto=${hasAuto > 0}`);
-      assert.ok(hasHevc > 0, "HEVC quality selector button must be present in Settings");
-    }
+    const hevcBtn = page.locator('button:has-text("HEVC")').first();
+    await hevcBtn.waitFor({ state: "visible", timeout: 5000 });
+    const hasHevc = await page.locator('button:has-text("HEVC")').count();
+    const hasH264 = await page.locator('button:has-text("H.264")').count();
+    const hasAuto = await page.locator('button:has-text("Auto")').count();
+    console.log(`✔ Settings has Download Quality options: HEVC=${hasHevc > 0}, H.264=${hasH264 > 0}, Auto=${hasAuto > 0}`);
+    assert.ok(hasHevc > 0, "HEVC quality selector button must be present in Settings");
   }
 
   assert.equal(errors.length, 0, `No console/page errors allowed: ${errors.join(", ")}`);

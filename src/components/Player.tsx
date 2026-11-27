@@ -77,7 +77,7 @@ export default function Player({
       const dur = video.duration && Number.isFinite(video.duration) ? video.duration : 0;
       const target = dur > 0 ? Math.max(0, Math.min(dur - 0.15, t)) : Math.max(0, t);
       requestSeek(target, `legacy_${input}`);
-      setWaiting(true);
+      if (Math.abs(video.currentTime - target) > 0.05) setWaiting(true);
       if (hlsRef.current) {
         try { hlsRef.current.startLoad(target); } catch { /* ignore */ }
       }
@@ -283,10 +283,23 @@ export default function Player({
     return () => document.removeEventListener("fullscreenchange", onFs);
   }, []);
 
+  const wasFullRef = useRef(false);
+  useEffect(() => {
+    if (!active && full) {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+      setFull(false);
+    }
+  }, [active, full]);
+
   useEffect(() => {
     const bridge = (window as unknown as { AuraNativeExport?: { setImmersiveFullscreen?: (fs: boolean, landscape: boolean) => void } }).AuraNativeExport;
     if (isMobile && typeof bridge?.setImmersiveFullscreen === "function") {
-      bridge.setImmersiveFullscreen(full, full);
+      if (full || wasFullRef.current) {
+        bridge.setImmersiveFullscreen(full, full);
+      }
+      wasFullRef.current = full;
       return () => {
         if (full) bridge.setImmersiveFullscreen?.(false, false);
       };
@@ -388,6 +401,7 @@ export default function Player({
         onPause={() => { setPlaying(false); onTogglePlay?.(false); }}
         onWaiting={() => setWaiting(true)}
         onStalled={() => setWaiting(true)}
+        onCanPlay={() => setWaiting(false)}
         onPlaying={() => { if (activity.isActive()) { setWaiting(false); setErrMsg(""); onPlaying?.(); } }}
         onSeeked={() => setWaiting(false)}
         onTimeUpdate={(e) => {
@@ -463,7 +477,12 @@ export default function Player({
       )}
 
       {controls && (
-        <div className={`player-inline-controls absolute inset-x-0 bottom-0 z-20 px-3 pb-2 pt-8 transition-opacity ${!playing || controlsVisible ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+        <div
+          className={`player-inline-controls absolute inset-x-0 bottom-0 z-20 px-3 pb-2 pt-8 transition-opacity ${
+            !playing || controlsVisible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"
+          }`}
+          style={full ? { paddingBottom: "max(var(--sab, 0px), 12px)", paddingInline: "max(var(--sal, 0px), var(--sar, 0px), 14px)" } : undefined}
+        >
           <Input aria-label="Playback progress" type="range" {...seek.inputProps}
             onPointerDown={(e) => { if (isMobile) flashControls(); seek.inputProps.onPointerDown?.(e); }}
             className="hg-range w-full" style={{ ...seek.inputProps.style, "--fill": `${pct}%` } as React.CSSProperties} />

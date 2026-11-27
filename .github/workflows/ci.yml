@@ -44,9 +44,6 @@ jobs:
       - name: Typecheck and build
         run: pnpm build
 
-      - name: API loading states
-        run: pnpm test:api-loading
-
       - name: Full application test suite
         run: pnpm test
 

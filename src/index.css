@@ -454,7 +454,7 @@ input[type="range"].hg-range::-webkit-slider-thumb { -webkit-appearance: none; w
   inset: 0;
   width: 100vw; height: 100vh;
   width: 100dvw; height: 100dvh;
-  z-index: 45;
+  z-index: 200;
   background: #000;
   overflow: hidden;
 }
@@ -467,7 +467,7 @@ input[type="range"].hg-range::-webkit-slider-thumb { -webkit-appearance: none; w
   width: 100dvh; height: 100dvw;
   transform: translate(-50%, -50%) rotate(90deg);
   transform-origin: center center;
-  z-index: 45;
+  z-index: 200;
   background: #000;
   overflow: hidden;
 }

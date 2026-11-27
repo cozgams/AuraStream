@@ -61,6 +61,9 @@ function syncMediaAudioDelay(
   if (clampedMs === 0) {
     if (delayNodeRef.current && audioCtxRef.current) {
       try {
+        if (audioCtxRef.current.state === "suspended") {
+          void audioCtxRef.current.resume();
+        }
         delayNodeRef.current.delayTime.setValueAtTime(0, audioCtxRef.current.currentTime);
       } catch { /* ignore */ }
     }
@@ -103,6 +106,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
   const nearEndFiredRef = useRef(false);
   const reportedSizeRef = useRef({ w: 0, h: 0 });
   const [ready, setReady] = useState(false);
+  const [reloadNonce, setReloadNonce] = useState(0);
   const isBufferingRef = useRef(false);
   const stallStageRef = useRef(0);
   const lastAdvanceTimeRef = useRef(Date.now());
@@ -171,18 +175,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
           hls.recoverMediaError();
         } catch { /* ignore */ }
       } else if (v) {
-        try {
-          const cur = v.currentTime;
-          const expectedSrc = v.currentSrc;
-          if (cur > 0) {
-            v.addEventListener("loadedmetadata", () => {
-              if (!v.isConnected || v.currentSrc !== expectedSrc) return;
-              try { v.currentTime = cur; } catch { /* ignore */ }
-            }, { once: true });
-          }
-          v.load();
-          v.play().catch(() => {});
-        } catch { /* ignore */ }
+        setReloadNonce((n) => n + 1);
       }
     },
   }), [trace]);
@@ -326,9 +319,9 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
           return;
         }
         if (recoverTimerRef.current) { window.clearTimeout(recoverTimerRef.current); recoverTimerRef.current = null; }
-        onErrorRef.current?.(`${data.type}/${data.details}`);
         hls.destroy();
         hlsRef.current = null;
+        onErrorRef.current?.(`${data.type}/${data.details}`);
       });
     } else {
       video.src = url;
@@ -353,7 +346,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [src, proxyRecovery.revision]);
+  }, [src, proxyRecovery.revision, reloadNonce]);
 
   // Enable inline playback attributes for Android & mobile WebViews and clean up audio context on unmount
   const onVideoElementRef = useRef(onVideoElement);
@@ -379,7 +372,12 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
     };
   }, []);
 
-  useEffect(() => { if (videoRef.current) videoRef.current.muted = muted; }, [muted]);
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.muted = muted;
+    if (!muted && audioCtxRef.current?.state === "suspended") {
+      void audioCtxRef.current.resume();
+    }
+  }, [muted]);
   useEffect(() => { if (videoRef.current) videoRef.current.volume = safeVolume(volume); }, [volume]);
   useEffect(() => { if (videoRef.current) videoRef.current.playbackRate = rate; }, [rate]);
   useEffect(() => {
@@ -521,6 +519,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
     <video
       ref={videoRef}
       poster={poster}
+      crossOrigin={src && /^(blob:|hg:|https?:\/\/(?:127\.0\.0\.1|hg\.localhost|localhost)(?::\d+)?\/)/i.test(src) ? "anonymous" : undefined}
       playsInline
       disablePictureInPicture={platform === "android"}
       controlsList="nodownload noplaybackrate nopictureinpicture"

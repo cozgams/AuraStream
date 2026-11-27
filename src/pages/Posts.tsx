@@ -26,15 +26,19 @@ export function PostsPage({ onBack, wide, active = true }: { onBack: () => void;
   const busy = useRef(false);
   const sentinel = useRef<HTMLDivElement>(null);
 
+  const reqSeqRef = useRef(0);
+
   const loadMore = async (reset = false) => {
-    if (busy.current) return;
+    if (busy.current && !reset) return;
     const next = reset ? 1 : page + 1;
     if (!reset && next > pages) return;
+    const seq = ++reqSeqRef.current;
     busy.current = true;
     setLoading(true);
     if (reset) setErr("");
     try {
       const res = await api.postCategory("remen-chigua", next, 20, "latest");
+      if (seq !== reqSeqRef.current) return;
       setItems((prev) => {
         const base = reset ? [] : prev;
         const seen = new Set(base.map((x) => x.id));
@@ -44,10 +48,13 @@ export function PostsPage({ onBack, wide, active = true }: { onBack: () => void;
       setPages(res?.pagination?.pages || next);
       setErr("");
     } catch (e) {
+      if (seq !== reqSeqRef.current) return;
       setErr(localizeError(e));
     } finally {
-      busy.current = false;
-      setLoading(false);
+      if (seq === reqSeqRef.current) {
+        busy.current = false;
+        setLoading(false);
+      }
     }
   };
 
@@ -86,7 +93,13 @@ export function PostsPage({ onBack, wide, active = true }: { onBack: () => void;
           <Empty icon={<IFireF size={26} />} title="No community posts yet" sub="Check back soon for new updates" action="Refresh" onAction={() => void loadMore(true)} />
         )}
         <div ref={sentinel} className="h-10" />
-        {loading && <div className="flex justify-center py-2"><Loader className="w-6 h-6 spinner" /></div>}
+        {loading && items.length > 0 && <div className="flex justify-center py-2"><Loader className="w-6 h-6 spinner" /></div>}
+        {err && items.length > 0 && !loading && (
+          <div className="flex items-center justify-center gap-2 py-3 text-[12.5px] text-mut">
+            <span>{err}</span>
+            <Button onClick={() => void loadMore()} className="px-3.5 h-8 rounded-full bg-s3 text-on text-[12px] font-semibold pressable">Retry</Button>
+          </div>
+        )}
       </div>
       {searching && <InplaceSearch active={active} kind="post" postLabel="Community Posts" wide={wide} onClose={() => setSearching(false)} onOpenPost={(p) => push({ kind: "post", id: p.id })} />}
     </div>
@@ -159,7 +172,7 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
         <span className="text-[14px] font-semibold text-on truncate">Post Details</span>
       </div>
 
-      <div className="flex-1 scroll-y pb-[calc(var(--sab,0px)+28px)]">
+      <div className="flex-1 scroll-y px-0 pb-[calc(var(--sab,0px)+28px)]">
         {err ? (
           <Empty icon={<IFireF size={26} />} title="Failed to load post" sub={err} action="Retry" onAction={() => loadPost()} />
         ) : !post ? (

@@ -54,7 +54,6 @@ class MainActivity : TauriActivity() {
   private var currentExportFile: File? = null
   var lastExportedUri: Uri? = null
   var currentWebView: WebView? = null
-  var autoPipEnabled: Boolean = false
   private var wakeLock: PowerManager.WakeLock? = null
   var activeDownloadCount: Int = 0
   @Volatile
@@ -446,6 +445,7 @@ class MainActivity : TauriActivity() {
     }
     registerNetworkMonitor()
     registerNoisyAudioReceiver()
+    systemBarDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_NO
     applySystemBarsAndInsets()
   }
 
@@ -462,7 +462,6 @@ class MainActivity : TauriActivity() {
       androidx.core.app.NotificationManagerCompat.from(this).cancel(AuraDownloadService.COMPLETE_NOTIFICATION_ID)
     } catch (_: Exception) {}
     try {
-      currentWebView?.onResume()
       currentWebView?.resumeTimers()
       pushInsetsToWebView()
       currentWebView?.post {
@@ -576,16 +575,6 @@ class MainActivity : TauriActivity() {
   override fun onUserLeaveHint() {
     super.onUserLeaveHint()
     // Auto-PiP mini popup disabled completely when user switches apps or presses home
-  }
-
-  override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
-    super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
-    runOnUiThread {
-      currentWebView?.evaluateJavascript(
-        "window.dispatchEvent(new CustomEvent('aurastream:pip-changed', { detail: { inPip: $isInPictureInPictureMode } }));",
-        null
-      )
-    }
   }
 
   class AuraExportBridge(private val activity: MainActivity) {
@@ -728,7 +717,9 @@ class MainActivity : TauriActivity() {
           activity.maybePromptNotificationPermissionOnce()
           activity.acquireWakeLock()
           if (!AuraDownloadService.isRunning && !MainActivity.serviceStartRequested) {
-            activity.startDownloadService("Episode", "Downloading offline...", activity.activeDownloadCount)
+            if (activity.isAppInForeground) {
+              activity.startDownloadService("Episode", "Downloading offline...", activity.activeDownloadCount)
+            }
           } else {
             AuraDownloadService.instance?.refreshNotification(activity.activeDownloadCount)
           }
@@ -756,9 +747,11 @@ class MainActivity : TauriActivity() {
         AuraDownloadService.upsertDownload(id, title, subtitle, clampedProgress, speedFormatted, fileSizeFormatted)
         if (activity.activeDownloadCount > 0) {
           activity.updateDownloadService(id, clampedProgress, speedFormatted, fileSizeFormatted, title, subtitle, activity.activeDownloadCount)
-        } else {
+        } else if (activity.isAppInForeground) {
           activity.activeDownloadCount = 1
           activity.startDownloadService(title, subtitle, 1)
+          activity.updateDownloadService(id, clampedProgress, speedFormatted, fileSizeFormatted, title, subtitle, 1)
+        } else if (AuraDownloadService.isRunning) {
           activity.updateDownloadService(id, clampedProgress, speedFormatted, fileSizeFormatted, title, subtitle, 1)
         }
       }

@@ -293,6 +293,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   );
   /* Fullscreen transition retry playback */
   const keepAliveTimers = useRef<number[]>([]);
+  const bufferAppendRetryKeyRef = useRef("");
   /* Pinch-to-zoom: scale 1-4x with pan */
   const [zoom, setZoom] = useState({ s: 1, x: 0, y: 0, g: false });
   /* Aspect ratio fit modes: contain vs cover */
@@ -1735,6 +1736,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         onDuration={onDurationTick}
                         onSize={(w, h) => setVsize((prev) => (prev.w === w && prev.h === h ? prev : { w, h }))}
                         onPlaying={() => {
+                          bufferAppendRetryKeyRef.current = "";
                           setPaused(false); setWaiting(false); setErr(""); setVideoStarted(true);
                           if (!muted) {
                             try { (window as any).AuraNativeExport?.requestPlaybackAudioFocus?.(); } catch {}
@@ -1772,7 +1774,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         onError={(m) => {
                           for (const t of keepAliveTimers.current) window.clearTimeout(t);
                           keepAliveTimers.current = [];
-                          if (m.includes("bufferAppendError")) {
+                          if (m.includes("bufferAppendError") && bufferAppendRetryKeyRef.current !== playKey) {
+                            bufferAppendRetryKeyRef.current = playKey;
                             videoRef.current?.reload?.();
                             return;
                           }

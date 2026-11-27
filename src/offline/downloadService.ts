@@ -1319,6 +1319,7 @@ export function cancelDownload(id: string): void {
   }
 
   activeRunTokens.delete(id);
+  pendingJsBatchQueue = pendingJsBatchQueue.filter((item) => `${item.videoId}_${item.episode}` !== id);
   const ctrl = activeAbortControllers.get(id);
   if (ctrl) {
     activeAbortControllers.delete(id);
@@ -1378,6 +1379,7 @@ export function pauseDownload(id: string): void {
   }
 
   activeRunTokens.delete(id);
+  pendingJsBatchQueue = pendingJsBatchQueue.filter((item) => `${item.videoId}_${item.episode}` !== id);
   const ctrl = activeAbortControllers.get(id);
   if (ctrl) {
     activeAbortControllers.delete(id);
@@ -2762,16 +2764,25 @@ export async function executeBatchDownload(
       cellular: isCellularConnection(),
     });
 
-    batchState = {
-      active: true,
-      videoId,
-      title,
-      total: unDownloaded.length,
-      completed: 0,
-      currentEpisode: unDownloaded[0],
-      failedCount: 0,
-      episodeIds,
-    };
+    if (batchState.active && batchState.videoId === videoId) {
+      const mergedIds = Array.from(new Set([...(batchState.episodeIds || []), ...episodeIds]));
+      batchState = {
+        ...batchState,
+        episodeIds: mergedIds,
+        total: Math.max(batchState.total, mergedIds.length),
+      };
+    } else {
+      batchState = {
+        active: true,
+        videoId,
+        title,
+        total: unDownloaded.length,
+        completed: 0,
+        currentEpisode: unDownloaded[0],
+        failedCount: 0,
+        episodeIds,
+      };
+    }
     notifyBatchProgress();
     syncNativeDownloadCount();
     await syncNativeDownloadState();
@@ -2843,6 +2854,9 @@ export async function executeBatchDownload(
       while (pendingJsBatchQueue.length > 0 && activeBatchToken === myBatchToken) {
         const next = pendingJsBatchQueue.shift()!;
         const id = `${next.videoId}_${next.episode}`;
+        if (activeProgress.get(id)?.status === "paused") {
+          continue;
+        }
         if (isEpisodeDownloaded(next.videoId, next.episode)) {
           activeProgress.delete(id);
           success++;

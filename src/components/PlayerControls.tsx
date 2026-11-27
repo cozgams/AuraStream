@@ -50,7 +50,9 @@ export default function PlayerControls({
   const seek = useSeekInput({ time: clockTime, duration, enabled: seekEnabled, resetKey: seekKey, onInteraction: onSeekInteraction,
     onSeek: (target, input) => onSeek(target, `desktop_${input}`) });
   const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
-  const safeBuffered = Number.isFinite(buffered) ? Math.max(0, Math.min(1, buffered)) : 0;
+  const safeBuffered = Number.isFinite(buffered) && buffered > 0
+    ? (buffered > 1 && safeDuration > 0 ? Math.max(0, Math.min(1, buffered / safeDuration)) : Math.max(0, Math.min(1, buffered)))
+    : 0;
   const pct = safeDuration > 0 ? Math.max(0, Math.min(100, (seek.time / safeDuration) * 100)) : 0;
 
   useEffect(() => {

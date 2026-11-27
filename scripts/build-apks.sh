@@ -1,7 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
-export PATH="/opt/android-sdk/build-tools/35.0.0:$PATH"
+BUILD_TOOLS_DIR="$(ls -d "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/opt/android-sdk}}"/build-tools/* 2>/dev/null | sort -V | tail -n1 || true)"
+if [ -n "$BUILD_TOOLS_DIR" ]; then
+  export PATH="${BUILD_TOOLS_DIR}:$PATH"
+fi
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
 cd /data/home/Project/A/HGhubX
 

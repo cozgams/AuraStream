@@ -330,7 +330,7 @@ function AppBody() {
             hidden={i !== stack.length - 1}
             inert={i !== stack.length - 1 || loginOpen}
             ariaHidden={i !== stack.length - 1 || loginOpen}
-            className="absolute inset-0 z-30 bg-bg isolate"
+            className={`absolute inset-0 z-30 bg-bg ${fs && i === stack.length - 1 ? "" : "isolate"}`}
             enterClass={platform === "android" && p.kind === "feed" ? undefined : "a-page-in"}
             style={{ zIndex: 30 + i }}>
             <StackPage page={p} onBack={pop} wide={wide} top={i === stack.length - 1} bottomInset={stackInset} />

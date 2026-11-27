@@ -282,16 +282,16 @@ export default function ExportSheet({
     >
       <div className="flex flex-col max-h-[85dvh] overflow-hidden bg-s1 text-on">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-edge/30 shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center text-sm font-bold">
+        <div className="flex items-center justify-between gap-2.5 p-4 border-b border-edge/30 shrink-0">
+          <div className="flex items-center gap-2.5 flex-1 min-w-0">
+            <div className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center text-sm font-bold shrink-0">
               <IExport size={16} />
             </div>
-            <div>
-              <div className="text-[15px] font-bold text-on">
+            <div className="min-w-0 flex-1">
+              <div className="text-[15px] font-bold text-on truncate">
                 {isBatch ? `Export Series (${epCount} Episodes)` : "Export Episode to Phone / SD Card"}
               </div>
-              <div className="text-[12px] text-mut truncate max-w-[240px]">
+              <div className="text-[12px] text-mut truncate">
                 {isBatch
                   ? `${cleanTitle} · ${epCount} Episodes`
                   : `${cleanTitle}${episode != null ? ` · Ep. ${episode}` : ""}`}
@@ -301,7 +301,7 @@ export default function ExportSheet({
           <Button
             disabled={exporting}
             onClick={onClose}
-            className="w-10 h-10 rounded-full bg-s3 flex items-center justify-center text-mut pressable disabled:opacity-40"
+            className="w-10 h-10 rounded-full bg-s3 flex items-center justify-center text-mut pressable disabled:opacity-40 shrink-0"
             aria-label="Close"
           >
             <IClose size={16} />

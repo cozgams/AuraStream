@@ -386,21 +386,21 @@ export default function LoginModal() {
 
         {/* Optional Custom Firebase Cloud Config Section */}
         <div className="mt-4 pt-3 border-t border-edge/25">
-          <div className="flex items-center justify-between text-[11.5px] text-mut">
-            <span className="flex items-center gap-1.5">
+          <div className="flex items-center justify-between gap-2 flex-wrap text-[11.5px] text-mut">
+            <span className="flex items-center gap-1.5 min-w-0 truncate">
               {customConnected ? (
                 <>
-                  <ICheck size={12} className="text-emerald-500" />
-                  <span>Custom Firebase Cloud: {getStoredConfig()?.projectId}</span>
+                  <ICheck size={12} className="text-emerald-500 shrink-0" />
+                  <span className="truncate">Custom Firebase Cloud: {getStoredConfig()?.projectId}</span>
                 </>
               ) : (
-                <span>Built-in Account Vault Active</span>
+                <span className="truncate">Built-in Account Vault Active</span>
               )}
             </span>
             <button
               type="button"
               onClick={() => setShowCustomConfig((v) => !v)}
-              className="text-primary font-semibold hover:underline pressable"
+              className="text-primary font-semibold hover:underline pressable shrink-0 whitespace-nowrap"
             >
               {showCustomConfig ? "Hide Cloud Setup" : customConnected ? "Edit Firebase" : "Custom Firebase (Optional)"}
             </button>

@@ -40,6 +40,7 @@ class AuraDownloadService : Service() {
   private val idleTicks = AtomicInteger(0)
   private val mainHandler = Handler(Looper.getMainLooper())
   private var pendingStopRunnable: Runnable? = null
+  private var pendingNotifyRunnable: Runnable? = null
   @Volatile
   private var lastStartId: Int = -1
   @Volatile
@@ -103,6 +104,7 @@ class AuraDownloadService : Service() {
       private set
 
     private val activeDownloads = LinkedHashMap<Int, DownloadItem>()
+    private val lastBatchIds = LinkedHashSet<Int>()
     private val notifiedCompleted = Collections.synchronizedSet(LinkedHashSet<String>())
     private val recentCompletedSummary = ArrayList<String>()
 
@@ -298,12 +300,22 @@ class AuraDownloadService : Service() {
 
     @Synchronized
     fun replaceAllFromNative(items: List<DownloadItem>, queuedCount: Int) {
+      val currentIds = items.map { it.id }.toHashSet()
+      if (isRunning) {
+        for (prevId in lastBatchIds) {
+          if (!currentIds.contains(prevId)) {
+            sessionCompletedCount++
+          }
+        }
+      }
+      lastBatchIds.clear()
+      lastBatchIds.addAll(currentIds)
       activeDownloads.clear()
       for (item in items) {
         activeDownloads[item.id] = item
       }
       nativeTotalQueuedCount = queuedCount
-      val totalNow = items.size + queuedCount
+      val totalNow = sessionCompletedCount + items.size + queuedCount
       if (totalNow > sessionInitialTotal) {
         sessionInitialTotal = totalNow
       }
@@ -318,6 +330,7 @@ class AuraDownloadService : Service() {
     @Synchronized
     fun clearDownloads() {
       activeDownloads.clear()
+      lastBatchIds.clear()
       nativeTotalQueuedCount = 0
       sessionCompletedCount = 0
       sessionInitialTotal = 0
@@ -567,14 +580,16 @@ class AuraDownloadService : Service() {
       }
     } catch (e: Exception) {
       e.printStackTrace()
-      try {
-        startForeground(NOTIFICATION_ID, notification)
-        isInForeground = true
-        synchronized(notifyLock) {
-          lastForegroundNotifyAtMs = SystemClock.elapsedRealtime()
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+        try {
+          startForeground(NOTIFICATION_ID, notification)
+          isInForeground = true
+          synchronized(notifyLock) {
+            lastForegroundNotifyAtMs = SystemClock.elapsedRealtime()
+          }
+        } catch (e2: Exception) {
+          e2.printStackTrace()
         }
-      } catch (e2: Exception) {
-        e2.printStackTrace()
       }
     }
   }
@@ -683,9 +698,25 @@ class AuraDownloadService : Service() {
   fun refreshNotification(reportedCount: Int) {
     if (!isRunning || !isInForeground) return
     val now = SystemClock.elapsedRealtime()
+    var delayMs = 0L
     synchronized(notifyLock) {
-      if (now - lastForegroundNotifyAtMs < MIN_NOTIFY_INTERVAL_MS) return
-      lastForegroundNotifyAtMs = now
+      val elapsed = now - lastForegroundNotifyAtMs
+      if (elapsed < MIN_NOTIFY_INTERVAL_MS) {
+        delayMs = (MIN_NOTIFY_INTERVAL_MS - elapsed).coerceAtLeast(50L)
+      } else {
+        lastForegroundNotifyAtMs = now
+      }
+    }
+    pendingNotifyRunnable?.let { mainHandler.removeCallbacks(it) }
+    pendingNotifyRunnable = null
+    if (delayMs > 0L) {
+      val r = Runnable {
+        pendingNotifyRunnable = null
+        refreshNotification(reportedCount)
+      }
+      pendingNotifyRunnable = r
+      mainHandler.postDelayed(r, delayMs)
+      return
     }
     try {
       val notification = buildForegroundNotification("AuraStream", "Downloading...", 0, "", "", reportedCount)
@@ -900,6 +931,8 @@ class AuraDownloadService : Service() {
   override fun onDestroy() {
     pendingStopRunnable?.let { mainHandler.removeCallbacks(it) }
     pendingStopRunnable = null
+    pendingNotifyRunnable?.let { mainHandler.removeCallbacks(it) }
+    pendingNotifyRunnable = null
     stopDiskPoller()
     releaseLocks()
     try {

@@ -256,28 +256,23 @@ export default function DownloadChoiceSheet({
         <div className="flex flex-col gap-3 pt-1">
           {/* CARD 1: Single Episode Download */}
           <div
-            role="button"
-            tabIndex={0}
-            onClick={handleSingleAction}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                handleSingleAction();
-              }
-            }}
-            className={`w-full p-3.5 sm:p-4 rounded-[20px] border text-left pressable transition-all flex flex-col gap-3 shadow-xs cursor-pointer active:scale-[0.985] ${
+            className={`w-full p-3.5 sm:p-4 rounded-[20px] border text-left transition-all flex flex-col gap-3 shadow-xs ${
               isTargetDownloaded
-                ? "bg-emerald-500/10 border-emerald-500/40 text-on hover:bg-emerald-500/15"
-                : isTargetDownloading
-                ? "bg-amber-500/10 border-amber-500/40 text-on hover:bg-amber-500/15"
+                ? "bg-emerald-500/10 border-emerald-500/40 text-on"
+                : isTargetDownloading || isTargetQueued
+                ? "bg-amber-500/10 border-amber-500/40 text-on"
                 : isTargetError
-                ? "bg-red-500/10 border-red-500/35 text-on hover:bg-red-500/15"
+                ? "bg-red-500/10 border-red-500/35 text-on"
                 : isTargetPaused
-                ? "bg-s2/90 border-amber-500/30 text-on hover:bg-s2"
+                ? "bg-s2/90 border-amber-500/30 text-on"
                 : "bg-white dark:bg-neutral-800/90 border-amber-500/35 hover:border-amber-500/60 hover:bg-amber-500/5 text-on"
             }`}
           >
-            <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={handleSingleAction}
+              className="flex items-center gap-3 min-w-0 w-full text-left pressable cursor-pointer active:scale-[0.99]"
+            >
               <div
                 className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 shadow-xs ${
                   isTargetDownloaded
@@ -331,10 +326,14 @@ export default function DownloadChoiceSheet({
                   )}
                 </div>
               </div>
-            </div>
+            </button>
 
             <div className="flex flex-wrap items-center justify-between gap-2.5">
-              <div className="min-w-0 flex-1 text-[12px] text-mut leading-snug">
+              <button
+                type="button"
+                onClick={handleSingleAction}
+                className="min-w-0 flex-1 text-left text-[12px] text-mut leading-snug cursor-pointer"
+              >
                 {isTargetDownloaded
                   ? "Saved permanently · Tap to export MP4 to gallery"
                   : isTargetQueued
@@ -356,13 +355,17 @@ export default function DownloadChoiceSheet({
                   : isTargetError
                   ? targetActiveProg?.error || "Download failed · Tap to retry"
                   : `Ultra-fast single episode download (~${estEpMb} MB)`}
-              </div>
+              </button>
 
               <div className="shrink-0 flex items-center gap-1.5">
               {isTargetDownloaded ? (
-                <div className="px-3.5 py-2 rounded-xl bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[12.5px] font-bold flex items-center gap-1.5 shadow-xs whitespace-nowrap">
+                <button
+                  type="button"
+                  onClick={handleSingleAction}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[12.5px] font-bold flex items-center gap-1.5 shadow-xs whitespace-nowrap pressable"
+                >
                   <IExport size={14} /> Export
-                </div>
+                </button>
               ) : isTargetDownloading || isTargetQueued ? (
                 <>
                   <div className="text-amber-600 text-[13px] font-bold tabular-nums whitespace-nowrap bg-amber-500/15 px-2.5 py-1.5 rounded-xl">
@@ -371,10 +374,7 @@ export default function DownloadChoiceSheet({
                   <button
                     type="button"
                     aria-label="Pause download"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      pauseDownload(targetKey);
-                    }}
+                    onClick={() => pauseDownload(targetKey)}
                     className="w-10 h-10 rounded-xl bg-s3 hover:bg-s4/30 text-on flex items-center justify-center pressable"
                   >
                     <IPauseF size={14} />
@@ -382,10 +382,7 @@ export default function DownloadChoiceSheet({
                   <button
                     type="button"
                     aria-label="Cancel download"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      cancelDownload(targetKey);
-                    }}
+                    onClick={() => cancelDownload(targetKey)}
                     className="w-10 h-10 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-red-500 flex items-center justify-center pressable"
                   >
                     <IClose size={14} />
@@ -396,10 +393,7 @@ export default function DownloadChoiceSheet({
                   <button
                     type="button"
                     aria-label="Resume download"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleSingleAction();
-                    }}
+                    onClick={handleSingleAction}
                     className="px-3.5 h-10 rounded-xl bg-amber-500 text-white text-[12.5px] font-bold flex items-center gap-1.5 pressable"
                   >
                     <IPlayF size={12} /> Resume
@@ -407,23 +401,28 @@ export default function DownloadChoiceSheet({
                   <button
                     type="button"
                     aria-label="Cancel download"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      cancelDownload(targetKey);
-                    }}
+                    onClick={() => cancelDownload(targetKey)}
                     className="w-10 h-10 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-red-500 flex items-center justify-center pressable"
                   >
                     <IClose size={14} />
                   </button>
                 </>
               ) : isTargetError ? (
-                <div className="px-3.5 py-2 rounded-xl bg-red-500 text-white text-[12.5px] font-bold flex items-center gap-1.5 shadow-sm whitespace-nowrap">
+                <button
+                  type="button"
+                  onClick={handleSingleAction}
+                  className="px-3.5 py-2 rounded-xl bg-red-500 text-white text-[12.5px] font-bold flex items-center gap-1.5 shadow-sm whitespace-nowrap pressable"
+                >
                   Retry
-                </div>
+                </button>
               ) : (
-                <div className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-white text-[13px] font-bold flex items-center gap-1.5 shadow-sm whitespace-nowrap">
+                <button
+                  type="button"
+                  onClick={handleSingleAction}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-white text-[13px] font-bold flex items-center gap-1.5 shadow-sm whitespace-nowrap pressable"
+                >
                   <IDownload size={14} /> Download
-                </div>
+                </button>
               )}
               </div>
             </div>

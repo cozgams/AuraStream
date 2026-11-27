@@ -69,13 +69,29 @@ export function InplaceSearch({ kind, postLabel = "Community", scope, active = t
           return [...base, ...list.filter((x) => !seen.has(x.id))];
         });
       } else {
-        const list = (res?.items || []) as unknown as VideoCard[];
-        const scoped = scope === "original" ? list.filter((v) => v.is_original === 1) : list;
+        let curP = p;
+        let totalPages = res?.pagination?.pages || 1;
+        let accumulated: VideoCard[] = [];
+        const firstList = (res?.items || []) as unknown as VideoCard[];
+        accumulated = scope === "original" ? firstList.filter((v) => v.is_original === 1) : firstList;
+        let scans = 0;
+        while (scope === "original" && accumulated.length === 0 && curP < totalPages && scans < 3) {
+          curP++;
+          scans++;
+          const more = await api.search(keyword, curP, 20, "video");
+          if (seq !== seqRef.current) return;
+          totalPages = more?.pagination?.pages || totalPages;
+          accumulated = ((more?.items || []) as unknown as VideoCard[]).filter((v) => v.is_original === 1);
+        }
         setItems((prev) => {
           const base = p === 1 ? [] : prev;
           const seen = new Set(base.map((x) => x.id));
-          return [...base, ...scoped.filter((x) => !seen.has(x.id))];
+          return [...base, ...accumulated.filter((x) => !seen.has(x.id))];
         });
+        setPage(curP);
+        setPages(totalPages);
+        setErr(null);
+        return;
       }
       setPage(p);
       setPages(res?.pagination?.pages || 1);
@@ -109,10 +125,10 @@ export function InplaceSearch({ kind, postLabel = "Community", scope, active = t
     <div className="ios-page absolute inset-0 z-20 bg-bg flex flex-col">
       <div className="shrink-0 px-4 pb-3 flex items-center gap-2 bg-s1" style={{ paddingTop: "calc(var(--sat, 0px) + 12px)" }}>
         <Button onClick={onClose} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable shrink-0" aria-label="Exit search"><IBack size={20} /></Button>
-        <Form className="flex-1 flex items-center gap-2 h-11 rounded-(--r-ctl) bg-s3 px-3.5 focus-within:bg-s4 transition-colors"
+        <Form className="flex-1 min-w-0 flex items-center gap-2 h-11 rounded-(--r-ctl) bg-s3 px-3.5 focus-within:bg-s4 transition-colors"
           onSubmit={(e) => { e.preventDefault(); submit(q); }}>
           <ISearch size={17} className="text-mut shrink-0" />
-          <Input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={kind === "post" ? `Search ${postLabel}…` : `Search ${videoLabel}…`}
+          <Input autoFocus size={1} value={q} onChange={(e) => setQ(e.target.value)} placeholder={kind === "post" ? `Search ${postLabel}…` : `Search ${videoLabel}…`}
             className="flex-1 min-w-0 bg-transparent text-[16px] text-on placeholder-dim outline-none" />
           {q && <Button aria-label="Clear search" type="button" onClick={() => { seqRef.current++; busy.current = false; setLoading(false); setErr(null); setQ(""); setSubmitted(""); setItems([]); setPosts([]); }} className="w-8 h-8 -mr-1 rounded-full bg-s4/70 flex items-center justify-center text-mut pressable shrink-0"><IClose size={13} /></Button>}
         </Form>
@@ -146,7 +162,13 @@ export function InplaceSearch({ kind, postLabel = "Community", scope, active = t
             </>
           )
         ) : (
-          <Empty icon={<ISearch size={26} />} title={err || "No results found"} sub="Try searching with other keywords" />
+          <Empty
+            icon={<ISearch size={26} />}
+            title={err || "No results found"}
+            sub={err ? "Check your connection and retry." : "Try searching with other keywords"}
+            action={err ? "Retry" : page < pages ? "Scan More" : undefined}
+            onAction={err ? () => void run(submitted, Math.max(1, page || 1)) : page < pages ? () => void run(submitted, page + 1) : undefined}
+          />
         )}
       </div>
     </div>

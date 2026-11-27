@@ -52,8 +52,6 @@ pub struct CompletedOfflineEpisode {
     pub duration: Option<f64>,
     #[serde(alias = "downloaded_at", alias = "completed_at", alias = "completedAt")]
     pub downloaded_at: u64,
-    #[serde(default)]
-    pub cues: Vec<Value>,
     #[serde(default = "default_quality")]
     pub quality: String,
     #[serde(default, alias = "is_hevc")]
@@ -108,8 +106,6 @@ pub struct QueueDownloadItem {
     pub is_hevc: bool,
     #[serde(default = "default_true")]
     pub auto_resume: bool,
-    #[serde(default)]
-    pub cues: Vec<Value>,
     #[serde(skip, default)]
     pub run_token: u64,
 }
@@ -159,8 +155,6 @@ pub struct EnqueueRequestItem {
     pub quality: String,
     #[serde(default)]
     pub is_hevc: bool,
-    #[serde(default)]
-    pub cues: Vec<Value>,
 }
 
 fn now_ms() -> u64 {
@@ -755,9 +749,9 @@ fn update_item_progress(upd: ProgressUpdate<'_>) {
         if item.status != "downloading" {
             return;
         }
-        item.progress = upd.pct.min(99);
-        item.downloaded_bytes = upd.downloaded;
-        item.total_bytes = upd.total;
+        item.progress = item.progress.max(upd.pct.min(99));
+        item.downloaded_bytes = item.downloaded_bytes.max(upd.downloaded);
+        item.total_bytes = item.total_bytes.max(upd.total);
         item.speed_bytes_per_sec = upd.speed_bps;
         item.speed_formatted = upd.speed_fmt;
         item.eta_seconds = upd.eta_sec;
@@ -1170,7 +1164,6 @@ async fn run_episode_download(mut item: QueueDownloadItem, cancel: Arc<AtomicBoo
                 size_bytes: total_bytes,
                 duration: None,
                 downloaded_at: finished_at,
-                cues: item.cues.clone(),
                 quality: item.quality.clone(),
                 is_hevc: item.is_hevc,
                 is_hls,
@@ -1561,7 +1554,7 @@ async fn download_hls_to_dir(
                         return Err("__cancelled__".to_string());
                     }
                     let l = data.len() as u64;
-                    atomic_write_bytes(&seg_path, &data)?;
+                    atomic_write_bytes_opts(&seg_path, &data, false)?;
                     (l, false)
                 }
             };
@@ -2001,7 +1994,6 @@ pub async fn native_download_enqueue(
                 quality: req.quality,
                 is_hevc: req.is_hevc,
                 auto_resume: true,
-                cues: req.cues,
                 run_token: 0,
             });
             added += 1;
@@ -2017,46 +2009,6 @@ pub async fn native_download_enqueue(
 #[tauri::command]
 pub fn native_download_set_cellular(cellular: bool) -> Result<(), String> {
     CELLULAR_MODE.store(cellular, Ordering::Release);
-    Ok(())
-}
-
-#[tauri::command]
-pub fn native_offline_set_cues(id: String, cues: Vec<Value>) -> Result<(), String> {
-    if !is_safe_segment(&id) {
-        return Err("Invalid episode ID".into());
-    }
-    if cues.is_empty() {
-        return Ok(());
-    }
-    let Some(root) = offline_root() else {
-        return Err("Offline storage unavailable".into());
-    };
-    let mut updated = false;
-    {
-        let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(comp) = st.completed.iter_mut().find(|c| c.id == id) {
-            comp.cues = cues.clone();
-            updated = true;
-        }
-        if let Some(q) = st.queue.iter_mut().find(|q| q.id == id) {
-            q.cues = cues.clone();
-            updated = true;
-        }
-        if updated {
-            persist_all_locked(&st);
-            emit_frontend_snapshot(&st);
-        }
-    }
-    if let Ok(bytes) = serde_json::to_vec_pretty(&cues) {
-        let ep_dir = root.join(&id);
-        if ep_dir.is_dir() {
-            let _ = atomic_write_bytes(&ep_dir.join("cues.json"), &bytes);
-        }
-        let part_dir = root.join(format!("{id}.part"));
-        if part_dir.is_dir() {
-            let _ = atomic_write_bytes(&part_dir.join("cues.json"), &bytes);
-        }
-    }
     Ok(())
 }
 

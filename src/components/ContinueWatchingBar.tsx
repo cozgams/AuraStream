@@ -60,7 +60,10 @@ export default function ContinueWatchingBar() {
 
   useEffect(() => {
     setDrama(null);
-    const needFetch = Boolean(shouldShow || (recent?.id && !isDismissed && isFinishedEp && totalEpisodes === 0));
+  }, [recent?.id]);
+
+  useEffect(() => {
+    const needFetch = Boolean(recent?.id && !isDismissed && ((recent.t > 3 && recent.dur && recent.dur > 0) || isFinishedEp));
     if (!needFetch || !recent?.id) return;
     if (typeof navigator !== "undefined" && navigator.onLine === false) return;
     let alive = true;
@@ -73,7 +76,7 @@ export default function ContinueWatchingBar() {
     return () => {
       alive = false;
     };
-  }, [recent?.id, shouldShow, isDismissed, isFinishedEp, totalEpisodes]);
+  }, [recent?.id, isDismissed, isFinishedEp, recent?.t, recent?.dur]);
 
   const offlineItem = useMemo(
     () => (!drama && recent ? getOfflineEpisodes().find((it) => it.videoId === recent.id) ?? null : null),

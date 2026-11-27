@@ -21,35 +21,47 @@ export function FollowingPage({ onBack, wide }: { onBack: () => void; wide: bool
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const busy = useRef(false);
+  const reqSeqRef = useRef(0);
+  const userRef = useRef(user);
+  userRef.current = user;
   const sentinel = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<() => void>(() => {});
 
-  const loadMore = useCallback(async () => {
-    if (busy.current || page >= pages) return;
+  const loadMore = useCallback(async (forcePage?: number) => {
+    if ((busy.current && forcePage === undefined) || (forcePage === undefined && page >= pages) || !userRef.current) return;
+    const seq = ++reqSeqRef.current;
     busy.current = true;
     setLoading(true);
     try {
-      const next = page + 1;
+      const next = forcePage ?? page + 1;
       const res = await api.following(next, 20);
+      if (seq !== reqSeqRef.current || !userRef.current) return;
       setItems((prev) => {
-        const seen = new Set(prev.map((x) => x.id));
-        return [...prev, ...(res?.items || []).filter((x) => !seen.has(x.id))];
+        const base = next === 1 ? [] : prev;
+        const seen = new Set(base.map((x) => x.id));
+        return [...base, ...(res?.items || []).filter((x) => !seen.has(x.id))];
       });
       setPage(next);
       setPages(res?.pagination?.pages || next);
       setErr("");
     } catch (e) {
+      if (seq !== reqSeqRef.current || !userRef.current) return;
       const msg = localizeError(e);
       setErr(msg);
       toast(msg, "info");
     } finally {
-      busy.current = false;
-      setLoading(false);
+      if (seq === reqSeqRef.current) {
+        busy.current = false;
+        setLoading(false);
+      }
     }
   }, [page, pages, toast]);
   loadMoreRef.current = () => { void loadMore(); };
 
   useEffect(() => {
+    reqSeqRef.current++;
+    busy.current = false;
+    setLoading(false);
     if (!user) {
       setItems([]);
       setPage(0);
@@ -57,7 +69,7 @@ export function FollowingPage({ onBack, wide }: { onBack: () => void; wide: bool
       setErr("");
       return;
     }
-    void loadMore();
+    void loadMore(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
@@ -95,7 +107,13 @@ export function FollowingPage({ onBack, wide }: { onBack: () => void; wide: bool
         )}
         <div ref={sentinel} className="h-8" />
         {loading && items.length > 0 && <div className="flex justify-center py-3"><Loader className="w-6 h-6 spinner" /></div>}
-        {!loading && items.length > 0 && page >= pages && <div className="text-center text-[12px] text-dim py-3">— You've reached the end —</div>}
+        {err && items.length > 0 && !loading && (
+          <div className="flex items-center justify-center gap-2 py-3 text-[12.5px] text-mut">
+            <span>{err}</span>
+            <Button onClick={() => void loadMore()} className="px-3.5 h-8 rounded-full bg-s3 text-on text-[12px] font-semibold pressable">Retry</Button>
+          </div>
+        )}
+        {!loading && !err && items.length > 0 && page >= pages && <div className="text-center text-[12px] text-dim py-3">— You've reached the end —</div>}
       </div>
       {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: list.findIndex((x) => x.id === v.id), title: "Following" })} />}
     </div>
@@ -126,15 +144,18 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
     return () => { alive = false; };
   }, [id]);
 
+  const reqSeqRef = useRef(0);
+
   const loadMore = useCallback(async (forcePage?: number) => {
-    if (busy.current || (forcePage === undefined && page >= pages)) return;
+    if ((busy.current && forcePage === undefined) || (forcePage === undefined && page >= pages)) return;
+    const seq = ++reqSeqRef.current;
     const targetId = id;
     busy.current = true;
     setLoading(true);
     try {
       const next = forcePage ?? page + 1;
       const res = await api.userVideos(targetId, next, 20);
-      if (idRef.current !== targetId) return;
+      if (seq !== reqSeqRef.current || idRef.current !== targetId) return;
       setItems((prev) => {
         const base = next === 1 ? [] : prev;
         const seen = new Set(base.map((x) => x.id));
@@ -144,18 +165,22 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
       setPages(res?.pagination?.pages || next);
       setErr("");
     } catch (e) {
-      if (idRef.current !== targetId) return;
+      if (seq !== reqSeqRef.current || idRef.current !== targetId) return;
       const msg = localizeError(e);
       setErr(msg);
       toast(msg, "info");
     } finally {
-      busy.current = false;
-      setLoading(false);
+      if (seq === reqSeqRef.current) {
+        busy.current = false;
+        setLoading(false);
+      }
     }
   }, [id, page, pages, toast]);
   loadMoreRef.current = () => { void loadMore(); };
 
   useEffect(() => {
+    reqSeqRef.current++;
+    busy.current = false;
     setItems([]);
     setPage(0);
     setPages(1);
@@ -195,7 +220,7 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
 
       <div className="flex-1 scroll-y px-4 pt-3 pb-[calc(var(--sab,48px)+24px)]">
         {/* Profile Card */}
-        <Surface className="rounded-(--r-lg) bg-s1 p-4 elev-1 flex items-center gap-3.5 a-rise">
+        <Surface className="rounded-(--r-lg) bg-s1 p-3 sm:p-4 elev-1 flex items-center gap-2.5 sm:gap-3.5 a-rise">
           <Avatar size={56} src={profile?.avatar} name={creatorName || "U"} hue={220} ring />
           <div className="flex-1 min-w-0">
             <div className="text-[16px] font-bold text-on truncate">{creatorName || "Creator"}</div>
@@ -227,7 +252,13 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
         )}
         <div ref={sentinel} className="h-8" />
         {loading && items.length > 0 && <div className="flex justify-center py-3"><Loader className="w-6 h-6 spinner" /></div>}
-        {!loading && items.length > 0 && page >= pages && <div className="text-center text-[12px] text-dim py-3">— You've reached the end —</div>}
+        {err && items.length > 0 && !loading && (
+          <div className="flex items-center justify-center gap-2 py-3 text-[12.5px] text-mut">
+            <span>{err}</span>
+            <Button onClick={() => void loadMore()} className="px-3.5 h-8 rounded-full bg-s3 text-on text-[12px] font-semibold pressable">Retry</Button>
+          </div>
+        )}
+        {!loading && !err && items.length > 0 && page >= pages && <div className="text-center text-[12px] text-dim py-3">— You've reached the end —</div>}
       </div>
       {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: list.findIndex((x) => x.id === v.id), title: profile?.nickname || name || "Creator Dramas" })} />}
     </div>

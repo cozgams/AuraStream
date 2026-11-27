@@ -183,7 +183,7 @@ html.theme-light[data-accent="violet"] {
 .ios-rank-meter span { display:block; height:100%; background:var(--p-primary); }
 .ios-rank-metric { display:flex; align-items:center; gap:4px; color:var(--p-primary); font-size:13px; white-space:nowrap; }
 .ios-page { container-type:inline-size; background:var(--p-bg); }
-.ios-page>.scroll-y { padding-inline:var(--ios-page-inset); }
+.ios-page>.scroll-y:not(.px-0) { padding-inline:var(--ios-page-inset); }
 .ios-page>.shrink-0 { padding-inline:var(--ios-page-inset); }
 .ios-page-title { font-size:34px; line-height:1.2; font-weight:750; letter-spacing:-1px; color:var(--p-on); }
 .ios-page-heading { padding-top:calc(var(--sat,0px) + 24px); padding-bottom:16px; }

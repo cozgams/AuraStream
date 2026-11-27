@@ -112,19 +112,27 @@ export default function UpdateModal({
   const errMsg = matchesCurrentAsset ? runtime.error : "";
 
   useEffect(() => {
+    triggeredRef.current = false;
+  }, [info?.latest, activeApkPath]);
+
+  useEffect(() => {
     if (!info?.has_update) return;
     const prevStage = prevStageRef.current;
     prevStageRef.current = effectiveStage;
 
+    if (effectiveStage !== "need_permission") {
+      triggeredRef.current = false;
+    }
+
     if (
-      prevStage === "downloading" &&
+      (prevStage === "downloading" || prevStage === "need_permission") &&
       (effectiveStage === "ready" || effectiveStage === "need_permission") &&
       activeApkPath &&
       autoTriggeredForPathRef.current !== activeApkPath
     ) {
-      autoTriggeredForPathRef.current = activeApkPath;
       setCachedPath(activeApkPath);
       if (canInstallOtaPackages()) {
+        autoTriggeredForPathRef.current = activeApkPath;
         const res = installOtaApk(activeApkPath);
         markOtaInstallResult(res);
       }
@@ -138,6 +146,7 @@ export default function UpdateModal({
       if (triggeredRef.current) return;
       if (canInstallOtaPackages()) {
         triggeredRef.current = true;
+        autoTriggeredForPathRef.current = activeApkPath;
         const res = installOtaApk(activeApkPath);
         markOtaInstallResult(res);
         if (res === "STARTED") {
@@ -146,12 +155,14 @@ export default function UpdateModal({
       }
     };
     window.addEventListener("aurastream:app-resumed", checkAndResumeInstall);
+    window.addEventListener("focus", checkAndResumeInstall);
     const onVis = () => {
       if (document.visibilityState === "visible") checkAndResumeInstall();
     };
     document.addEventListener("visibilitychange", onVis);
     return () => {
       window.removeEventListener("aurastream:app-resumed", checkAndResumeInstall);
+      window.removeEventListener("focus", checkAndResumeInstall);
       document.removeEventListener("visibilitychange", onVis);
     };
   }, [info?.has_update, effectiveStage, activeApkPath]);

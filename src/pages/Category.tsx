@@ -50,8 +50,10 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
     return () => { mounted.current = false; };
   }, []);
 
+  const keySeqRef = useRef<Record<string, number>>({});
+
   const loadPreview = useCallback(async (key: string): Promise<void> => {
-    if (pending.current.has(key)) return;
+    const seq = (keySeqRef.current[key] = (keySeqRef.current[key] || 0) + 1);
     pending.current.add(key);
     const requestEpoch = lineEpochRef.current;
     if (mounted.current) {
@@ -61,22 +63,24 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
     try {
       if (key === "posts") {
         const res = await api.postCategory("remen-chigua", 1, 6, "latest");
-        if (mounted.current && requestEpoch === lineEpochRef.current) setPosts(res?.items || []);
+        if (mounted.current && seq === keySeqRef.current[key] && requestEpoch === lineEpochRef.current) setPosts(res?.items || []);
       } else {
         const res = key === "original"
           ? await api.originalVideos("all", 1, 6, "new")
           : await api.category(key, 1, 6, "latest");
-        if (mounted.current && requestEpoch === lineEpochRef.current) {
+        if (mounted.current && seq === keySeqRef.current[key] && requestEpoch === lineEpochRef.current) {
           setRows(r => ({ ...r, [key]: res?.items || [] }));
         }
       }
     } catch (error) {
-      const stale = requestEpoch !== lineEpochRef.current;
+      const stale = seq !== keySeqRef.current[key] || requestEpoch !== lineEpochRef.current;
       if (mounted.current && !stale) setErrors(m => ({ ...m, [key]: (error as Error).message || "Failed to load" }));
       if (stale) retryKeys.current.add(key);
     } finally {
-      pending.current.delete(key);
-      if (mounted.current) setLoading(m => ({ ...m, [key]: false }));
+      if (seq === keySeqRef.current[key]) {
+        pending.current.delete(key);
+        if (mounted.current) setLoading(m => ({ ...m, [key]: false }));
+      }
     }
   }, []);
 

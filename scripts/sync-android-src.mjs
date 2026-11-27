@@ -4,7 +4,7 @@
  * into the generated Android project directory.
  * Ensures local builds and CI release builds preserve native background services and permissions.
  */
-import { cpSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -71,6 +71,32 @@ try {
     const valNightDest = join(genApp, "res", "values-night");
     mkdirSync(valNightDest, { recursive: true });
     cpSync(join(src, "themes-night.xml"), join(valNightDest, "themes.xml"), { force: true });
+  }
+
+  // 5. Align Kotlin & Java target to JVM 17 in generated Gradle scripts
+  const appGradle = join(root, "src-tauri", "gen", "android", "app", "build.gradle.kts");
+  if (existsSync(appGradle)) {
+    let gradleText = readFileSync(appGradle, "utf8");
+    const updatedGradle = gradleText
+      .replace(/jvmTarget\s*=\s*"1\.8"/g, 'jvmTarget = "17"')
+      .replace(
+        /(kotlinOptions\s*\{)/,
+        gradleText.includes("compileOptions")
+          ? "$1"
+          : 'compileOptions {\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n    }\n    $1',
+      );
+    if (updatedGradle !== gradleText) {
+      writeFileSync(appGradle, updatedGradle, "utf8");
+    }
+  }
+
+  const gradleProps = join(root, "src-tauri", "gen", "android", "gradle.properties");
+  if (existsSync(gradleProps)) {
+    let propsText = readFileSync(gradleProps, "utf8");
+    if (!propsText.includes("android.suppressUnsupportedCompileSdk=")) {
+      propsText = `${propsText.trimEnd()}\nandroid.suppressUnsupportedCompileSdk=36\n`;
+      writeFileSync(gradleProps, propsText, "utf8");
+    }
   }
 
   console.log(`[android-src] Synchronized ${ktFiles.length} Kotlin file(s) + manifest/xml/themes -> ${genApp}`);
