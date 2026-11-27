@@ -3,7 +3,7 @@ import type { VideoCard } from "../types";
 import { IPlayF, IStarF } from "../icons";
 import { Img } from "./ui";
 import { Button } from "./ios/controls";
-import { formatDramaAuthor, formatDramaTag, formatDramaTitle } from "../subtitles/dramaTranslator";
+import { formatDramaAuthor, formatDramaTag, formatDramaTitle } from "../dramaTranslator";
 
 function ScoreBadge({ score }: { score: number }) {
   return Number.isFinite(score) && score > 0 ? <span className="ios-score-badge" aria-label={`Rating ${score.toFixed(1)}`}>
@@ -56,10 +56,10 @@ export function Masonry({ videos, onOpen, wide = false }: {
   </div>;
 }
 
-export function RowCard({ v, onOpen }: { v: VideoCard; onOpen: () => void }) {
+export function RowCard({ v, onOpen, priority = false }: { v: VideoCard; onOpen: () => void; priority?: boolean }) {
   const tag0 = v.tags?.[0] ? formatDramaTag(v.tags[0]) : "Drama";
   const tagsStr = formatUniqueTags(v.tags, 2);
-  return <div className="ios-row-card"><MediaCard title={v.title} cover={v.cover} score={v.score} onOpen={onOpen}
+  return <div className="ios-row-card"><MediaCard title={v.title} cover={v.cover} score={v.score} onOpen={onOpen} priority={priority}
     badge={v.is_finished ? completedEpisodeLabel(v) : `${v.episode_count} Eps`}
     isFinished={v.is_finished}
     subtitle={tagsStr || tag0 || "AuraStream"} />

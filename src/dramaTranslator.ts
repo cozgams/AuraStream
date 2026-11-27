@@ -555,30 +555,3 @@ export function formatCommentText(rawText: string | undefined): string {
   }
   return cleanTranslatedPunctuation(translated) || "Great episode!";
 }
-
-function formatSingleSubtitleLine(line: string): string {
-  const text = line.trim();
-  if (!text) return "";
-  if (!/[\u4e00-\u9fff]/.test(text)) return cleanTranslatedPunctuation(text);
-
-  let translated = text;
-  for (const [pattern, replacement] of KEYWORD_MAP) {
-    translated = translated.replace(pattern, replacement);
-  }
-  if (/[\u4e00-\u9fff]/.test(translated)) {
-    translated = translated.replace(/[\u4e00-\u9fff]/g, (char) =>
-      CHAR_MAP[char] ? ` ${CHAR_MAP[char]} ` : " "
-    );
-  }
-  return cleanTranslatedPunctuation(translated);
-}
-
-export function formatSubtitleText(rawText: string | undefined): string {
-  if (!rawText) return "";
-  const lines = rawText
-    .replace(/\r\n?/g, "\n")
-    .split("\n")
-    .map(formatSingleSubtitleLine)
-    .filter(Boolean);
-  return lines.join("\n");
-}

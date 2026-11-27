@@ -171,8 +171,8 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
                 </span>
               </Button>
               <div className="scroll-x flex gap-2.5 px-4 snap-x">
-                {list.map((v) => (
-                  <RowCard key={v.id} v={v} onOpen={() => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: c.name })} />
+                {list.map((v, idx) => (
+                  <RowCard key={v.id} v={v} priority={idx < 3} onOpen={() => push({ kind: "feed", videoIds: list.map((x) => x.id), index: Math.max(0, list.findIndex((x) => x.id === v.id)), title: c.name })} />
                 ))}
                 {!list.length && <PreviewStatus name={c.name} loading={isBusy} error={err} onRetry={() => void loadPreview(c.cate)} />}
               </div>
@@ -194,8 +194,8 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
             </span>
           </Button>
           <div className="scroll-x flex gap-2.5 px-4 snap-x">
-            {posts.map((post) => (
-              <div key={post.id} className="ios-row-card"><MediaCard title={post.title} cover={post.cover}
+            {posts.map((post, idx) => (
+              <div key={post.id} className="ios-row-card"><MediaCard title={post.title} cover={post.cover} priority={idx < 3}
                 subtitle={`${fmt(post.hot)} views`} onOpen={() => push({ kind: "post", id: post.id })} /></div>
             ))}
             {!posts.length && <PreviewStatus name="Community" loading={Boolean(loading.posts)} error={errors.posts} onRetry={() => void loadPreview("posts")} />}

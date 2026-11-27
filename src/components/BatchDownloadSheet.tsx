@@ -28,7 +28,7 @@ import {
   type BatchProgressState,
   type DownloadQuality,
 } from "../offline/downloadService";
-import { formatDramaTitle } from "../subtitles/dramaTranslator";
+import { formatDramaTitle } from "../dramaTranslator";
 
 interface BatchDownloadSheetProps {
   videoId: number;

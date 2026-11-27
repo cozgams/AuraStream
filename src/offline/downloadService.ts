@@ -1,6 +1,6 @@
 /**
  * AuraStream Offline Download Manager
- * Uses IndexedDB to store video blobs and subtitle tracks for zero-data offline playback on Android.
+ * Uses IndexedDB to store video blobs for zero-data offline playback on Android.
  * Features: live speed (MB/s), ETA calculation, cancel/pause controls, Smart Downloads (auto-download next ep),
  * Phone Storage visualizer, "Download on Wi-Fi Only" cellular guard, and 1-Click Series Batch Downloader.
  */
@@ -9,17 +9,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { api, cover as getRemoteCoverUrl, isLocalMedia, LOCAL, logLine } from "../api";
 import { readStorage, writeStorage, STORAGE_KEYS } from "../storage";
-import {
-  getAICaptionConfig,
-  getSubtitlesForEpisode,
-  transcribeEpisodeWithAI,
-} from "../subtitles/aiSubtitleService";
-import {
-  containsForeignLanguage,
-  translateDialogueSync,
-  translateTrackToEnglish,
-} from "../subtitles/translator";
-import type { SubtitleCue } from "../subtitles/types";
 import type { PlayInfo } from "../types";
 import type { NativeExportBridge } from "./exportService";
 
@@ -34,7 +23,6 @@ export interface OfflineEpisode {
   sizeBytes: number;
   duration?: number;
   downloadedAt: number;
-  cues?: SubtitleCue[];
   quality?: DownloadQuality;
   isHevc?: boolean;
   isHls?: boolean;
@@ -239,7 +227,6 @@ function applyNativeDownloadSnapshot(payload: { queue?: unknown[]; completed?: u
         const quality = (
           c.quality === "hevc" ? "hevc" : c.quality === "standard" ? "standard" : "auto"
         ) as DownloadQuality;
-        const cues = Array.isArray(c.cues) ? (c.cues as SubtitleCue[]) : undefined;
         return {
           id,
           videoId,
@@ -253,7 +240,6 @@ function applyNativeDownloadSnapshot(payload: { queue?: unknown[]; completed?: u
           isHevc,
           hasLocalCover,
           quality,
-          cues,
           storage: "native" as const,
         };
       });
@@ -610,7 +596,6 @@ async function scanDbRecords(
               cover: rec.cover || "",
               sizeBytes: rec.sizeBytes || 0,
               downloadedAt: rec.downloadedAt || Date.now(),
-              cues: rec.cues || [],
               quality: rec.quality,
               isHevc: rec.isHevc,
               isHls: Boolean(rec.isHls),
@@ -1318,15 +1303,6 @@ export async function getOfflinePlaybackUrl(
 }
 
 /**
- * Retrieves cached subtitle cues for an offline episode
- */
-export function getOfflineSubtitles(videoId: number, episode: number): SubtitleCue[] | null {
-  const id = `${videoId}_${episode}`;
-  const item = getOfflineEpisodes().find((it) => it.id === id);
-  return item?.cues || null;
-}
-
-/**
  * Cancels an active or queued download and cleans up memory/disk
  */
 export function cancelDownload(id: string): void {
@@ -1842,29 +1818,6 @@ export async function startEpisodeDownload(
       });
       syncNativeDownloadCount();
       await syncNativeDownloadState();
-
-      // Prefetch/translate/AI-transcribe subtitles asynchronously so download starts immediately
-      void (async () => {
-        try {
-          let cues: SubtitleCue[] = [];
-          const track = await getSubtitlesForEpisode(videoId, episode, title, undefined, streamUrl);
-          if (track && track.source !== "none" && track.cues.length > 0) {
-            const translated = await translateTrackToEnglish(track);
-            cues = translated.cues;
-          } else if (streamUrl) {
-            const aiConfig = getAICaptionConfig();
-            if (aiConfig.provider !== "none" || aiConfig.geminiKey || aiConfig.groqKey) {
-              const aiTrack = await transcribeEpisodeWithAI(videoId, episode, streamUrl);
-              if (aiTrack?.cues?.length) cues = aiTrack.cues;
-            }
-          }
-          if (cues.length > 0) {
-            await invoke("native_offline_set_cues", { id, cues }).catch(() => {});
-          }
-        } catch {
-          // ignore background subtitle prefetch error
-        }
-      })();
     })();
 
     nativeEnqueueInFlight.set(id, enqueuePromise);
@@ -1960,31 +1913,9 @@ export async function startEpisodeDownload(
   };
 
   try {
-    // 1. Fetch real subtitle track in parallel if present so subtitles work offline (never fake cues)
-    let cues: SubtitleCue[] = [];
-    try {
-      const track = await getSubtitlesForEpisode(videoId, episode, title, undefined, streamUrl);
-      if (track && track.source !== "none" && track.cues.length > 0) {
-        const translated = await translateTrackToEnglish(track);
-        cues = translated.cues;
-      } else if (streamUrl) {
-        const aiConfig = getAICaptionConfig();
-        if (aiConfig.provider !== "none" || aiConfig.geminiKey || aiConfig.groqKey) {
-          try {
-            const aiTrack = await transcribeEpisodeWithAI(videoId, episode, streamUrl);
-            if (aiTrack?.cues?.length) cues = aiTrack.cues;
-          } catch {
-            // ignore AI generation error
-          }
-        }
-      }
-    } catch {
-      // Subtitle fallback if offline or request failed
-    }
-
     if (!isCurrentRun()) return;
 
-    // 2. Fetch the video stream (support HLS .m3u8 & direct stream via local proxy)
+    // 1. Fetch the video stream (support HLS .m3u8 & direct stream via local proxy)
     const blobParts: BlobPart[] = [];
     let segmentBlobs: Blob[] = [];
     let mapSegments: Array<{ uri: string; blob: Blob }> = [];
@@ -2344,7 +2275,6 @@ export async function startEpisodeDownload(
           keyIv,
           blob: finalBlob || undefined,
           sizeBytes: totalSize,
-          cues,
           quality,
           isHevc,
         };
@@ -2382,7 +2312,6 @@ export async function startEpisodeDownload(
       cover,
       sizeBytes: totalSize,
       downloadedAt: Date.now(),
-      cues,
       quality,
       isHevc,
       isHls,
@@ -2817,51 +2746,7 @@ export async function executeBatchDownload(
   // Native Rust Tokio background queue: enqueue ALL episodes at once so Ep 2..N run natively even when WebView sleeps
   if (isNativeRustDownloaderAvailable()) {
     const preferHevc = qualityPreference === "hevc" || qualityPreference === "auto";
-    const loadCachedCues = (vid: number, ep: number): SubtitleCue[] => {
-      try {
-        const raw = localStorage.getItem(`aurastream_sub_${vid}_${ep}`);
-        if (!raw || raw.includes('"procedural"') || raw.includes('"mock"')) return [];
-        const parsed = JSON.parse(raw);
-        if (parsed && parsed.source !== "procedural" && parsed.source !== "mock" && Array.isArray(parsed.cues)) {
-          return (parsed.cues as SubtitleCue[]).map((cue) => {
-            if (cue.en && containsForeignLanguage(cue.en)) {
-              const tr = translateDialogueSync(cue.en);
-              return { ...cue, en: tr };
-            }
-            if (!cue.en && cue.zh) {
-              const tr = translateDialogueSync(cue.zh);
-              return { ...cue, en: tr, zh: cue.zh };
-            }
-            return cue;
-          });
-        }
-      } catch {
-        // ignore
-      }
-      return [];
-    };
     const episodeIds = unDownloaded.map((ep) => `${videoId}_${ep}`);
-
-    // Background prefetch real subtitles in small waves so English CC is ready offline
-    void (async () => {
-      for (let i = 0; i < unDownloaded.length; i += 3) {
-        const slice = unDownloaded.slice(i, i + 3);
-        const fetched = await Promise.allSettled(
-          slice.map(async (ep) => {
-            await getSubtitlesForEpisode(videoId, ep, title);
-            return { ep, cues: loadCachedCues(videoId, ep) };
-          })
-        );
-        for (const r of fetched) {
-          if (r.status === "fulfilled" && r.value.cues.length > 0) {
-            void invoke("native_offline_set_cues", {
-              id: `${videoId}_${r.value.ep}`,
-              cues: r.value.cues,
-            }).catch(() => {});
-          }
-        }
-      }
-    })();
 
     await invoke("native_download_enqueue", {
       items: unDownloaded.map((ep) => ({
@@ -2872,7 +2757,7 @@ export async function executeBatchDownload(
         streamUrl: null,
         quality: qualityPreference,
         isHevc: preferHevc,
-        cues: loadCachedCues(videoId, ep),
+        cues: [],
       })),
       cellular: isCellularConnection(),
     });

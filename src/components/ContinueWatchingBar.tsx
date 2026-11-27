@@ -4,7 +4,7 @@ import { api, cover as getCoverUrl, isLocalMedia, isMobile } from "../api";
 import type { Detail } from "../types";
 import { Button } from "./ios/controls";
 import { IClose, IPlayF } from "../icons";
-import { formatDramaTitle } from "../subtitles/dramaTranslator";
+import { formatDramaTitle } from "../dramaTranslator";
 import { getOfflineCoverUrl, getOfflineEpisodes } from "../offline/downloadService";
 
 function fmtTime(sec?: number): string {

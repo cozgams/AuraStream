@@ -11,7 +11,7 @@ import Player from "../components/Player";
 import { IBack, IFireF, IPlayF, ISearch } from "../icons";
 import { handleArticleClick, parseInternalVideoId, sanitizeHtml } from "../html";
 import { InplaceSearch } from "../components/InplaceSearch";
-import { formatDramaTag, formatDramaTitle } from "../subtitles/dramaTranslator";
+import { formatDramaTag, formatDramaTitle } from "../dramaTranslator";
 import { localizeError } from "../i18n";
 
 /* ================= Community Buzz List ================= */

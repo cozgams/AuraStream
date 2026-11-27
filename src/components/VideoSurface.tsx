@@ -231,8 +231,6 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         interstitialsController: undefined,
         contentSteeringController: undefined,
         enableInterstitialPlayback: false,
-        enableWebVTT: true,
-        enableCEA708Captions: true,
         // Disable worker in WKWebView for stability on iOS
         enableWorker: platform !== "ios",
         // Prefer standard MSE on macOS; hls.js handles MMS-only fallback and seek recovery.
@@ -275,13 +273,6 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
         if (!hls.loadingEnabled) hls.startLoad(resume?.time ?? -1);
         const shouldPlay = autoPlayRef.current && (!resume || resume.playing !== false);
         if (shouldPlay) activity.play("manifest_autoplay", true);
-      });
-      hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
-        hls.subtitleDisplay = false;
-        if (hls.subtitleTracks?.length && hls.subtitleTrack === -1) {
-          const enIdx = hls.subtitleTracks.findIndex((tr) => /^en/i.test(tr.lang || tr.name || ""));
-          hls.subtitleTrack = enIdx >= 0 ? enIdx : 0;
-        }
       });
       hls.on(Hls.Events.FRAG_BUFFERED, () => {
         recoverCountRef.current = 0;

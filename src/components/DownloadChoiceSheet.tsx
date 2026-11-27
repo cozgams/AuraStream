@@ -43,7 +43,7 @@ import {
   formatBytes,
   type ActiveDownloadProgress,
 } from "../offline/downloadService";
-import { formatDramaTitle } from "../subtitles/dramaTranslator";
+import { formatDramaTitle } from "../dramaTranslator";
 import { cover } from "../api";
 
 interface DownloadChoiceSheetProps {

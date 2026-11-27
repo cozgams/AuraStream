@@ -40,6 +40,9 @@ export default defineConfig({
           if (id.includes("node_modules/@tauri-apps/")) {
             return "vendor-tauri";
           }
+          if (id.includes("node_modules/firebase/") || id.includes("node_modules/@firebase/")) {
+            return "vendor-firebase";
+          }
         },
       },
     },

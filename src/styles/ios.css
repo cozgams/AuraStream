@@ -741,3 +741,14 @@ html[data-platform="android"] .video-surface-overlay .backdrop-blur-xl {
   .ios-mobile-nav .hg-drop>.ios-liquid-fill,.ios-segmented-indicator { background:Highlight; }
   .ios-mobile-nav .ios-mobile-nav-item[aria-current=page],.ios-mobile-nav[data-over-video=true] .ios-mobile-nav-item[aria-current=page],.ios-segmented-items>[aria-pressed=true] { color:HighlightText!important; }
 }
+
+body.has-series-detail .plat-android::after {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 48;
+  height: calc(max(var(--sab, 0px), 16px) + 18px);
+  background: linear-gradient(to top, var(--p-bg) 56%, transparent);
+}

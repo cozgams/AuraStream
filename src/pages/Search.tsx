@@ -7,7 +7,7 @@ import { useStore } from "../store";
 import { MediaCard, Masonry, RankRow } from "../components/cards";
 import { Empty } from "../components/ui";
 import { IBack, IChevR, IClose, IFireF, IPlayF, IRefresh, ISearch, ITrophy } from "../icons";
-import { formatDramaTag, formatDramaTitle } from "../subtitles/dramaTranslator";
+import { formatDramaTag, formatDramaTitle } from "../dramaTranslator";
 import { localizeError } from "../i18n";
 
 const DEFAULT_HOT_TAGS = ["Urban", "Revenge", "Costume", "System", "Romance", "Campus", "Fantasy", "Workplace", "Drama", "Action", "Mystery", "Sci-Fi"];

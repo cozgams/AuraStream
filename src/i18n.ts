@@ -221,21 +221,6 @@ export const translations = {
     "settings.about": "About AuraStream",
     "settings.about_desc": "Version {version} · Non-commercial use only",
 
-    // Captions & Subtitles
-    "captions.title": "Subtitles & Closed Captions (CC)",
-    "captions.subtitle": "English Closed Captions",
-    "captions.language_select": "Subtitle Language",
-    "captions.en": "English Subtitles",
-    "captions.en_desc": "Display synchronized English captions",
-    "captions.off": "Off",
-    "captions.off_desc": "Disable subtitles",
-    "captions.font_size": "Caption Size",
-    "captions.size_sm": "Small",
-    "captions.size_md": "Medium",
-    "captions.size_lg": "Large",
-    "captions.badge_cc": "CC",
-    "captions.mode_changed": "Captions: {mode}",
-
     // Modals & General
     "common.close": "Close",
     "common.cancel": "Cancel",

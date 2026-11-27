@@ -8,7 +8,7 @@ import { Masonry } from "../components/cards";
 import { InplaceSearch } from "../components/InplaceSearch";
 import { Empty, Img } from "../components/ui";
 import { IBack, IClose, IGrid, IGlobe, IPin, IPinF, IRefresh, ISearch } from "../icons";
-import { formatDramaDesc, formatDramaTag, formatDramaTitle } from "../subtitles/dramaTranslator";
+import { formatDramaDesc, formatDramaTag, formatDramaTitle } from "../dramaTranslator";
 import { localizeError } from "../i18n";
 
 const TopicIcon = IGrid;

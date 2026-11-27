@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Sheet, Toggle } from "./ui";
+import { Sheet } from "./ui";
 import { Button } from "./ios/controls";
 import { Loader } from "./ios/effects";
 import {
@@ -10,21 +10,19 @@ import {
   IExport,
   IFilm,
   IFolder,
-  IMessageSquare,
   ISdCard,
   IShare,
 } from "../icons";
 import { useStore } from "../store";
 import {
   processEpisodeExport,
-  processSubtitleExport,
   openInGallery,
   getDeviceStorageInfo,
   isNativeExportSupported,
   type ExportAction,
   type StorageInfo,
 } from "../offline/exportService";
-import { formatDramaTitle } from "../subtitles/dramaTranslator";
+import { formatDramaTitle } from "../dramaTranslator";
 
 export interface ExportTarget {
   id: ExportAction;
@@ -72,7 +70,6 @@ export default function ExportSheet({
   const [progress, setProgress] = useState<number>(0);
   const [currentEpIndex, setCurrentEpIndex] = useState<number>(0);
   const [exportStatus, setExportStatus] = useState<ExportBannerStatus | null>(null);
-  const [includeSubtitles, setIncludeSubtitles] = useState<boolean>(true);
 
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
@@ -192,7 +189,7 @@ export default function ExportSheet({
                 setProgress(Math.round(epProgressBase + pct / itemsToExport.length));
               }
             },
-            { includeSubtitles, signal: controller.signal }
+            { signal: controller.signal }
           );
           if (res.cancelled) {
             throw new DOMException(res.error || "Export cancelled", "AbortError");
@@ -238,8 +235,8 @@ export default function ExportSheet({
           action === "share"
             ? `Shared ${savedPathResult || "episode"}`
             : itemsToExport.length > 1
-              ? `Successfully exported ${itemsToExport.length} episodes to ${savedPathResult}${includeSubtitles ? " (+ Subtitles)" : ""}`
-              : `Saved to ${savedPathResult}${includeSubtitles ? " (+ Subtitles)" : ""}`;
+              ? `Successfully exported ${itemsToExport.length} episodes to ${savedPathResult}`
+              : `Saved to ${savedPathResult}`;
         setExportStatus({
           kind: "success",
           message: msg,
@@ -262,108 +259,6 @@ export default function ExportSheet({
         setExportStatus({
           kind: "error",
           message: `Export error: ${errText}`,
-          showGallery: false,
-        });
-      }
-    } finally {
-      if (abortRef.current === controller) {
-        abortRef.current = null;
-      }
-      if (mountedRef.current) {
-        setExporting(false);
-      }
-    }
-  };
-
-  const handleExportSubtitle = async (fmt: "srt" | "vtt") => {
-    if (exporting) return;
-    if (itemsToExport.length === 0) {
-      toast("No episode available to export", "info");
-      return;
-    }
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setExporting(true);
-    setProgress(0);
-    setCurrentEpIndex(0);
-    setExportStatus(null);
-
-    try {
-      let savedPathResult = "";
-      let succeededCount = 0;
-      const failures: Array<{ episode: number; error: string }> = [];
-
-      for (let i = 0; i < itemsToExport.length; i++) {
-        if (controller.signal.aborted || !mountedRef.current) {
-          throw new DOMException("Export cancelled", "AbortError");
-        }
-        const item = itemsToExport[i];
-        if (mountedRef.current) setCurrentEpIndex(i + 1);
-        try {
-          const res = await processSubtitleExport(
-            item.videoId,
-            item.episode,
-            fmt,
-            item.title,
-            "en",
-            "save_downloads"
-          );
-          if (!res.success) {
-            failures.push({ episode: item.episode, error: res.error || "Failed" });
-          } else {
-            succeededCount++;
-            savedPathResult = res.savedPath || "Storage";
-          }
-        } catch (subErr: any) {
-          failures.push({ episode: item.episode, error: subErr?.message || "Failed" });
-        }
-        if (mountedRef.current) {
-          setProgress(Math.round(((i + 1) / itemsToExport.length) * 100));
-        }
-      }
-
-      if (!mountedRef.current) return;
-
-      if (succeededCount === 0) {
-        const errMsg = failures[0]?.error || "Subtitle export failed";
-        setExportStatus({
-          kind: "error",
-          message: `Subtitle error: ${errMsg}`,
-          showGallery: false,
-        });
-        toast(errMsg, "info");
-        return;
-      }
-
-      setProgress(100);
-      const msg =
-        failures.length > 0
-          ? `Saved ${succeededCount} of ${itemsToExport.length} .${fmt.toUpperCase()} subtitles (${failures.length} failed)`
-          : itemsToExport.length > 1
-            ? `Saved ${itemsToExport.length} .${fmt.toUpperCase()} subtitles to ${savedPathResult}`
-            : `Saved subtitle (.${fmt.toUpperCase()}) to ${savedPathResult}`;
-      setExportStatus({
-        kind: "success",
-        message: msg,
-        showGallery: false,
-      });
-      toast(msg, failures.length > 0 ? "info" : "ok");
-    } catch (e: any) {
-      if (!mountedRef.current) return;
-      if (e?.name === "AbortError" || controller.signal.aborted) {
-        setExportStatus({
-          kind: "error",
-          message: "Subtitle export cancelled",
-          showGallery: false,
-        });
-        toast("Subtitle export cancelled", "info");
-      } else {
-        const errText = e?.message || "Failed";
-        toast(errText, "info");
-        setExportStatus({
-          kind: "error",
-          message: `Subtitle error: ${errText}`,
           showGallery: false,
         });
       }
@@ -492,27 +387,6 @@ export default function ExportSheet({
 
         {/* Export Destinations */}
         <div className="p-4 flex-1 min-h-0 flex flex-col gap-2.5 overflow-y-auto">
-          {/* Subtitle Bundle Toggle */}
-          <div className="p-3 rounded-2xl bg-s2/70 border border-edge/60 flex items-center justify-between gap-2.5">
-            <div className="pr-1 flex-1 min-w-0">
-              <div className="text-[13px] font-bold text-on flex flex-wrap items-center gap-1.5">
-                <IMessageSquare size={15} className="text-primary shrink-0" />
-                <span>Bundle Subtitles (.SRT)</span>
-                <span className="px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-bold whitespace-nowrap">Auto-Sync</span>
-              </div>
-              <div className="text-[11px] text-mut line-clamp-2 leading-snug mt-0.5">
-                Saves matching .srt file alongside MP4 for auto-loading in VLC/Gallery
-              </div>
-            </div>
-            <div className="shrink-0">
-              <Toggle
-                label="Bundle Subtitles (.SRT)"
-                on={includeSubtitles}
-                onChange={setIncludeSubtitles}
-              />
-            </div>
-          </div>
-
           <div className="text-[11px] font-bold uppercase tracking-wider text-mut px-1 mt-1">
             Video Destinations
           </div>
@@ -544,42 +418,6 @@ export default function ExportSheet({
               </div>
             </button>
           ))}
-
-          {/* Standalone Subtitles Section */}
-          <div className="text-[11px] font-bold uppercase tracking-wider text-mut px-1 mt-2">
-            Standalone Subtitle Tracks
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              type="button"
-              disabled={exporting}
-              onClick={() => void handleExportSubtitle("srt")}
-              className="p-3 rounded-xl border border-edge/60 bg-s2/60 hover:bg-s2 text-left flex items-center gap-2.5 pressable"
-            >
-              <div className="w-8 h-8 rounded-lg bg-amber-500/15 text-amber-500 flex items-center justify-center font-bold text-[11px]">
-                SRT
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-[12.5px] font-bold text-on truncate">Export .SRT</div>
-                <div className="text-[10.5px] text-mut truncate">SubRip Subtitle</div>
-              </div>
-            </Button>
-
-            <Button
-              type="button"
-              disabled={exporting}
-              onClick={() => void handleExportSubtitle("vtt")}
-              className="p-3 rounded-xl border border-edge/60 bg-s2/60 hover:bg-s2 text-left flex items-center gap-2.5 pressable"
-            >
-              <div className="w-8 h-8 rounded-lg bg-cyan-500/15 text-cyan-500 flex items-center justify-center font-bold text-[11px]">
-                VTT
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-[12.5px] font-bold text-on truncate">Export .VTT</div>
-                <div className="text-[10.5px] text-mut truncate">WebVTT Standard</div>
-              </div>
-            </Button>
-          </div>
         </div>
 
         {/* Footer info */}

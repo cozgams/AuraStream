@@ -495,6 +495,7 @@ class MainActivity : TauriActivity() {
     super.onTrimMemory(level)
     // TRIM_MEMORY_UI_HIDDEN (20) and TRIM_MEMORY_BACKGROUND (40) fire on normal app-switching;
     // preserve active playback & cover caches unless Android signals genuine memory pressure.
+    @Suppress("DEPRECATION")
     val isGenuinePressure =
       level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
         level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
@@ -1224,47 +1225,10 @@ class MainActivity : TauriActivity() {
       }
     }
 
-    @JavascriptInterface
-    fun exportSubtitleText(fileName: String, content: String, action: String): String {
-      return try {
-        activity.cleanupExportsDir(30 * 60 * 1000L)
-        val exportsDir = File(activity.cacheDir, "exports").canonicalFile
-        if (!exportsDir.exists()) exportsDir.mkdirs()
-        val safeFileName = sanitizeExportFileName(fileName, "subtitle", "srt")
-        val file = File(exportsDir, safeFileName).canonicalFile
-        if (!file.path.startsWith(exportsDir.path + File.separator)) {
-          return "ERROR:Invalid subtitle filename"
-        }
-        file.writeText(content, Charsets.UTF_8)
-
-        val subDir = if (action == "save_downloads") "Download/AuraStream" else "Movies/AuraStream"
-        val savedUri = saveToMediaStore(file, safeFileName, subDir)
-        if (savedUri != null) {
-          activity.lastExportedUri = savedUri
-          try { file.delete() } catch (_: Exception) {}
-          "SUCCESS:$subDir/$safeFileName"
-        } else {
-          "SAVED_LOCAL:${file.absolutePath}"
-        }
-      } catch (e: Exception) {
-        e.printStackTrace()
-        "ERROR:${e.message}"
-      }
-    }
-
     private fun saveToMediaStore(sourceFile: File, displayName: String, subDir: String = "Movies/AuraStream"): Uri? {
       val resolver = activity.contentResolver
       val isDownloads = subDir.startsWith("Download")
-      val isSubtitle = displayName.endsWith(".srt", ignoreCase = true) ||
-        displayName.endsWith(".vtt", ignoreCase = true) ||
-        displayName.endsWith(".ass", ignoreCase = true) ||
-        displayName.endsWith(".ssa", ignoreCase = true) ||
-        displayName.endsWith(".txt", ignoreCase = true)
-      val resolvedSubDir = if (isDownloads || isSubtitle) {
-        if (subDir.startsWith("Download")) subDir else "Download/AuraStream"
-      } else {
-        subDir
-      }
+      val resolvedSubDir = subDir
       val mimeType = mimeTypeForFileName(displayName)
       val contentValues = ContentValues().apply {
         put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
@@ -1276,13 +1240,13 @@ class MainActivity : TauriActivity() {
       }
 
       val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        if (isDownloads || isSubtitle) {
+        if (isDownloads) {
           MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         } else {
           MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         }
       } else {
-        if (isDownloads || isSubtitle) {
+        if (isDownloads) {
           @Suppress("DEPRECATION")
           val dlDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
           val auraDir = File(dlDir, "AuraStream")
@@ -2090,28 +2054,6 @@ class MainActivity : TauriActivity() {
       } catch (e: Exception) {
         e.printStackTrace()
         false
-      }
-    }
-
-    @JavascriptInterface
-    fun openCaptionSettings(): Boolean {
-      return try {
-        val intent = Intent(Settings.ACTION_CAPTIONING_SETTINGS).apply {
-          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        activity.startActivity(intent)
-        true
-      } catch (_: Exception) {
-        try {
-          val fallback = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-          }
-          activity.startActivity(fallback)
-          true
-        } catch (e2: Exception) {
-          e2.printStackTrace()
-          false
-        }
       }
     }
   }

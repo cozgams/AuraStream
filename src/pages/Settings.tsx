@@ -30,7 +30,6 @@ import {
 import UpdateModal from "../components/UpdateModal";
 import { getAvailableUpdateInfo, getOtaRuntimeState, isAutoUpdateCheckEnabled, setAutoUpdateCheckEnabled, setAvailableUpdateInfo, isAndroidNativeOtaSupported, subscribeAvailableUpdate, subscribeOtaRuntimeState, type OtaRuntimeState } from "../otaUpdater";
 import { getAndroidPermissionsStatus, type AndroidPermissionsStatus } from "../offline/exportService";
-import { clearSubtitleCache } from "../subtitles/aiSubtitleService";
 import {
   getDownloadQualityPreference,
   setDownloadQualityPreference,
@@ -1001,7 +1000,6 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 setClearing(true);
                 try {
                   await api.clearCache();
-                  clearSubtitleCache();
                   setClearOpen(false);
                   toast(t("settings.cache_cleared"), "ok");
                 } catch (e) {

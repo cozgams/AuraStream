@@ -1,21 +1,12 @@
-import { LiquidIndicator } from "./components/ios/effects";
+import { LiquidIndicator, Loader } from "./components/ios/effects";
 import { Button } from "./components/ios/controls";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore, type Page, type Tab } from "./store";
 import { api, isMobile, selfTest, type UpdateInfo } from "./api";
 import { addPluginListener, invoke } from "@tauri-apps/api/core";
 import { runBack } from "./back";
 import Home from "./pages/Home";
-import Search, { RankPage } from "./pages/Search";
-import Category, { ChannelPage } from "./pages/Category";
-import Profile from "./pages/Profile";
-import SettingsPage from "./pages/Settings";
 import Feed from "./components/Feed";
-import { PostsPage, PostDetail } from "./pages/Posts";
-import { TopicsPage, TopicPage, TagsPage, TagPage } from "./pages/Discover";
-import { FollowingPage, UserPage } from "./pages/User";
-import LoginModal from "./components/LoginModal";
-import UpdateModal from "./components/UpdateModal";
 import { getSkippedUpdateVersion, isAndroidNativeOtaSupported, isAutoUpdateCheckEnabled, setAvailableUpdateInfo } from "./otaUpdater";
 import { ToastHost } from "./components/ui";
 import { DesktopRail, DesktopTitleBar } from "./components/DesktopChrome";
@@ -23,6 +14,31 @@ import ResizeHandles from "./components/ResizeHandles";
 import ContinueWatchingBar from "./components/ContinueWatchingBar";
 import { tracePlayback } from "./playbackDiagnostics";
 import { IGrid, IGridF, IHome, IHomeF, ISearch, IUser, IUserF } from "./icons";
+
+const Search = lazy(() => import("./pages/Search"));
+const RankPage = lazy(() => import("./pages/Search").then((m) => ({ default: m.RankPage })));
+const Category = lazy(() => import("./pages/Category"));
+const ChannelPage = lazy(() => import("./pages/Category").then((m) => ({ default: m.ChannelPage })));
+const Profile = lazy(() => import("./pages/Profile"));
+const SettingsPage = lazy(() => import("./pages/Settings"));
+const PostsPage = lazy(() => import("./pages/Posts").then((m) => ({ default: m.PostsPage })));
+const PostDetail = lazy(() => import("./pages/Posts").then((m) => ({ default: m.PostDetail })));
+const TopicsPage = lazy(() => import("./pages/Discover").then((m) => ({ default: m.TopicsPage })));
+const TopicPage = lazy(() => import("./pages/Discover").then((m) => ({ default: m.TopicPage })));
+const TagsPage = lazy(() => import("./pages/Discover").then((m) => ({ default: m.TagsPage })));
+const TagPage = lazy(() => import("./pages/Discover").then((m) => ({ default: m.TagPage })));
+const FollowingPage = lazy(() => import("./pages/User").then((m) => ({ default: m.FollowingPage })));
+const UserPage = lazy(() => import("./pages/User").then((m) => ({ default: m.UserPage })));
+const LoginModal = lazy(() => import("./components/LoginModal"));
+const UpdateModal = lazy(() => import("./components/UpdateModal"));
+
+function PageFallback() {
+  return (
+    <div className="ios-page absolute inset-0 bg-bg flex items-center justify-center" aria-busy="true">
+      <Loader className="w-7 h-7 spinner" />
+    </div>
+  );
+}
 
 function useNativeBottomInset() {
   const { platform } = useStore();
@@ -141,18 +157,22 @@ function StackPage({ page, onBack, wide, top, bottomInset }: {
         mode="context" active={top} bottomInset={bottomInset} onBack={onBack} />
     );
   }
-  if (page.kind === "channel") return <ChannelPage cate={page.cate} name={page.name} onBack={onBack} wide={wide} active={top} />;
-  if (page.kind === "ranks") return <RankPage onBack={onBack} wide={wide} />;
-  if (page.kind === "settings") return <SettingsPage onBack={onBack} wide={wide} />;
-  if (page.kind === "posts") return <PostsPage onBack={onBack} wide={wide} active={top} />;
-  if (page.kind === "post") return <PostDetail id={page.id} onBack={onBack} active={top} />;
-  if (page.kind === "topics") return <TopicsPage onBack={onBack} wide={wide} active={top} />;
-  if (page.kind === "topic") return <TopicPage slug={page.slug} name={page.name} onBack={onBack} wide={wide} active={top} />;
-  if (page.kind === "tags") return <TagsPage onBack={onBack} wide={wide} active={top} />;
-  if (page.kind === "tag") return <TagPage tag={page.tag} name={page.name} onBack={onBack} wide={wide} active={top} />;
-  if (page.kind === "following") return <FollowingPage onBack={onBack} wide={wide} />;
-  if (page.kind === "user") return <UserPage id={page.id} name={page.name} onBack={onBack} wide={wide} />;
-  return null;
+  return (
+    <Suspense fallback={<PageFallback />}>
+      {page.kind === "channel" ? <ChannelPage cate={page.cate} name={page.name} onBack={onBack} wide={wide} active={top} />
+        : page.kind === "ranks" ? <RankPage onBack={onBack} wide={wide} />
+        : page.kind === "settings" ? <SettingsPage onBack={onBack} wide={wide} />
+        : page.kind === "posts" ? <PostsPage onBack={onBack} wide={wide} active={top} />
+        : page.kind === "post" ? <PostDetail id={page.id} onBack={onBack} active={top} />
+        : page.kind === "topics" ? <TopicsPage onBack={onBack} wide={wide} active={top} />
+        : page.kind === "topic" ? <TopicPage slug={page.slug} name={page.name} onBack={onBack} wide={wide} active={top} />
+        : page.kind === "tags" ? <TagsPage onBack={onBack} wide={wide} active={top} />
+        : page.kind === "tag" ? <TagPage tag={page.tag} name={page.name} onBack={onBack} wide={wide} active={top} />
+        : page.kind === "following" ? <FollowingPage onBack={onBack} wide={wide} />
+        : page.kind === "user" ? <UserPage id={page.id} name={page.name} onBack={onBack} wide={wide} />
+        : null}
+    </Suspense>
+  );
 }
 
 /* ============ Main Application ============ */
@@ -245,8 +265,13 @@ function AppBody() {
   const { platform, tab, setTab, stack, pop, loginOpen, setLoginOpen, fs, setFs, clean, setClean } = useStore();
   const mainRef = useRef<HTMLDivElement>(null);
   const [wide, setWide] = useState(!isMobile);
+  const [mountedTabs, setMountedTabs] = useState<Set<Tab>>(() => new Set(["home"]));
   const androidInsetBottom = useNativeBottomInset();
   const keyboardOpen = useSoftKeyboardOpen(isMobile);
+
+  useEffect(() => {
+    setMountedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
+  }, [tab]);
 
   useLayoutEffect(() => {
     const el = mainRef.current;
@@ -294,9 +319,9 @@ function AppBody() {
       <div ref={mainRef} className="relative flex-1 min-w-0 overflow-hidden win-main">
         <LayerBox hidden={stack.length > 0} inert={!pageActive} ariaHidden={!pageActive} className="absolute inset-0">
           <div className={vis("home")} inert={(!pageActive || tab !== "home") || undefined} aria-hidden={!pageActive || tab !== "home"}><Home active={pageActive && tab === "home"} bottomInset={bottomInset} /></div>
-          <LayerBox hidden={!pageActive || tab !== "search"} inert={!pageActive || tab !== "search"} ariaHidden={!pageActive || tab !== "search"} className="absolute inset-0 ios-tab-active"><Search active={pageActive && tab === "search"} wide={wide} /></LayerBox>
-          <LayerBox hidden={!pageActive || tab !== "category"} inert={!pageActive || tab !== "category"} ariaHidden={!pageActive || tab !== "category"} className="absolute inset-0 ios-tab-active"><Category wide={wide} active={pageActive && tab === "category"} /></LayerBox>
-          <LayerBox hidden={!pageActive || tab !== "profile"} inert={!pageActive || tab !== "profile"} ariaHidden={!pageActive || tab !== "profile"} className="absolute inset-0 ios-tab-active"><Profile wide={wide} active={pageActive && tab === "profile"} /></LayerBox>
+          {mountedTabs.has("search") && <LayerBox hidden={!pageActive || tab !== "search"} inert={!pageActive || tab !== "search"} ariaHidden={!pageActive || tab !== "search"} className="absolute inset-0 ios-tab-active"><Suspense fallback={<PageFallback />}><Search active={pageActive && tab === "search"} wide={wide} /></Suspense></LayerBox>}
+          {mountedTabs.has("category") && <LayerBox hidden={!pageActive || tab !== "category"} inert={!pageActive || tab !== "category"} ariaHidden={!pageActive || tab !== "category"} className="absolute inset-0 ios-tab-active"><Suspense fallback={<PageFallback />}><Category wide={wide} active={pageActive && tab === "category"} /></Suspense></LayerBox>}
+          {mountedTabs.has("profile") && <LayerBox hidden={!pageActive || tab !== "profile"} inert={!pageActive || tab !== "profile"} ariaHidden={!pageActive || tab !== "profile"} className="absolute inset-0 ios-tab-active"><Suspense fallback={<PageFallback />}><Profile wide={wide} active={pageActive && tab === "profile"} /></Suspense></LayerBox>}
         </LayerBox>
 
         {stack.map((p, i) => (
@@ -356,6 +381,11 @@ function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boole
   const { stack, pop, loginOpen, setLoginOpen, tab, setTab, platform } = useStore();
   const mainRef = useRef<HTMLDivElement>(null);
   const [wide, setWide] = useState(true);
+  const [mountedTabs, setMountedTabs] = useState<Set<Tab>>(() => new Set(["home"]));
+
+  useEffect(() => {
+    setMountedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
+  }, [tab]);
 
   useLayoutEffect(() => {
     const el = mainRef.current;
@@ -398,9 +428,9 @@ function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boole
       <div ref={mainRef} className={`relative flex-1 min-w-0 overflow-hidden win-main ${theater ? "is-theater-main" : ""}`}>
         <LayerBox hidden={stack.length > 0} inert={!pageActive} ariaHidden={!pageActive} className="absolute inset-0">
           <div className={vis("home")} inert={(!pageActive || tab !== "home") || undefined} aria-hidden={!pageActive || tab !== "home"}><Home active={pageActive && tab === "home"} bottomInset={14} /></div>
-          <div className={vis("search")} inert={(!pageActive || tab !== "search") || undefined} aria-hidden={!pageActive || tab !== "search"}><Search active={pageActive && tab === "search"} wide={wide} /></div>
-          <div className={vis("category")} inert={(!pageActive || tab !== "category") || undefined} aria-hidden={!pageActive || tab !== "category"}><Category wide={wide} active={pageActive && tab === "category"} /></div>
-          <div className={vis("profile")} inert={(!pageActive || tab !== "profile") || undefined} aria-hidden={!pageActive || tab !== "profile"}><Profile wide={wide} active={pageActive && tab === "profile"} /></div>
+          {mountedTabs.has("search") && <div className={vis("search")} inert={(!pageActive || tab !== "search") || undefined} aria-hidden={!pageActive || tab !== "search"}><Suspense fallback={<PageFallback />}><Search active={pageActive && tab === "search"} wide={wide} /></Suspense></div>}
+          {mountedTabs.has("category") && <div className={vis("category")} inert={(!pageActive || tab !== "category") || undefined} aria-hidden={!pageActive || tab !== "category"}><Suspense fallback={<PageFallback />}><Category wide={wide} active={pageActive && tab === "category"} /></Suspense></div>}
+          {mountedTabs.has("profile") && <div className={vis("profile")} inert={(!pageActive || tab !== "profile") || undefined} aria-hidden={!pageActive || tab !== "profile"}><Suspense fallback={<PageFallback />}><Profile wide={wide} active={pageActive && tab === "profile"} /></Suspense></div>}
         </LayerBox>
         {stack.map((p, i) => (
           <LayerBox
@@ -631,8 +661,12 @@ export default function App() {
   return (
     <>
       {isMobile ? <MobileShell /> : <DesktopShell />}
-      <LoginModal />
-      <UpdateModal info={startupUpdate} onClose={() => setStartupUpdate(null)} showSkip />
+      <Suspense fallback={null}><LoginModal /></Suspense>
+      {startupUpdate && (
+        <Suspense fallback={null}>
+          <UpdateModal info={startupUpdate} onClose={() => setStartupUpdate(null)} showSkip />
+        </Suspense>
+      )}
       <ToastHost />
     </>
   );

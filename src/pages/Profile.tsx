@@ -1,14 +1,15 @@
 import { Button } from "../components/ios/controls";
 import { Loader } from "../components/ios/effects";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { api, APP_VERSION, errorMessage, fmtTime, type UpdateInfo } from "../api";
 import type { Detail } from "../types";
 import { useStore } from "../store";
-import { Empty, Modal, Toggle } from "../components/ui";
+import { Avatar, Empty, Modal, Toggle } from "../components/ui";
 import { MediaCard } from "../components/cards";
-import ExportSheet from "../components/ExportSheet";
-import UpdateModal from "../components/UpdateModal";
 import { getAvailableUpdateInfo, getOtaRuntimeState, setAvailableUpdateInfo, subscribeAvailableUpdate, subscribeOtaRuntimeState, type OtaRuntimeState } from "../otaUpdater";
+
+const ExportSheet = lazy(() => import("../components/ExportSheet"));
+const UpdateModal = lazy(() => import("../components/UpdateModal"));
 import { registerOverlayBack } from "../back";
 import {
   IBack,
@@ -63,8 +64,9 @@ import {
   type DeviceStorageStats,
 } from "../offline/downloadService";
 import { getAndroidPermissionsStatus, type AndroidPermissionsStatus } from "../offline/exportService";
-import BatchDownloadSheet from "../components/BatchDownloadSheet";
-import { formatDramaTag, formatDramaTitle } from "../subtitles/dramaTranslator";
+import { formatDramaTag, formatDramaTitle } from "../dramaTranslator";
+
+const BatchDownloadSheet = lazy(() => import("../components/BatchDownloadSheet"));
 
 function ProfileThumb({
   src,
@@ -361,7 +363,6 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
         settings: {
           accent: readStorage(STORAGE_KEYS.accent) || "amber",
           language: readStorage(STORAGE_KEYS.lang) || "en",
-          subtitleMode: readStorage(STORAGE_KEYS.subtitleMode) || "en",
         },
       };
       const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
@@ -410,9 +411,6 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
       }
       if (parsed.settings?.language) {
         writeStorage(STORAGE_KEYS.lang, parsed.settings.language);
-      }
-      if (parsed.settings?.subtitleMode) {
-        writeStorage(STORAGE_KEYS.subtitleMode, parsed.settings.subtitleMode);
       }
       window.dispatchEvent(new CustomEvent("aurastream:storage-migrated"));
       toast(`Restored ${count} library items from backup`, "ok");
@@ -1200,11 +1198,12 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
             >
               <div className="relative shrink-0">
                 <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-[#1a73e8] to-[#38bdf8] flex items-center justify-center text-white shadow-sm overflow-hidden">
-                  {user?.avatar ? (
-                    <img src={user.avatar} alt={user.nickname || "User"} className="w-full h-full object-cover" />
-                  ) : (
-                    <IUser size={22} />
-                  )}
+                  <Avatar
+                    src={user?.avatar}
+                    name={user?.nickname || user?.username}
+                    icon={!user?.avatar ? <IUser size={22} /> : undefined}
+                    size={44}
+                  />
                 </div>
                 <span
                   className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-neutral-900 shadow-xs ${user ? "bg-[#38bdf8]" : "bg-[#22c55e]"}`}
@@ -2134,7 +2133,7 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
                       }`}
                     >
                       <ILayers size={12} />
-                      <span>Series</span>
+                      <span>Multi-Ep</span>
                     </button>
                   </div>
 
@@ -2422,11 +2421,17 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
             ) : (
               <div className="p-8 text-center flex flex-col items-center justify-center gap-2 bg-white/80 dark:bg-neutral-900/80 rounded-2xl border border-white/60 dark:border-white/10 shadow-xs">
                 <div className="text-[14px] font-bold text-[#0f172a] dark:text-neutral-100">
-                  {downloadSearchQuery.trim() ? "No matches found" : "No series available"}
+                  {downloadSearchQuery.trim()
+                    ? "No matches found"
+                    : downloadFilter === "series"
+                    ? "No multi-episode packs yet"
+                    : "No downloads yet"}
                 </div>
                 <div className="text-[12px] text-[#64748b] dark:text-neutral-400">
                   {downloadSearchQuery.trim()
                     ? `No downloaded shows match "${downloadSearchQuery}"`
+                    : downloadFilter === "series"
+                    ? "Download 2 or more episodes of a drama to filter multi-episode series here"
                     : "No downloads match the current filter"}
                 </div>
                 {downloadSearchQuery.trim() && (
@@ -3252,15 +3257,12 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
           <div className="flex items-center gap-3.5 p-3 rounded-2xl bg-s2/90 border border-edge/30 text-left">
             <div className="relative shrink-0">
               <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-[#1a73e8] to-[#38bdf8] flex items-center justify-center text-white font-bold text-lg shadow-sm overflow-hidden">
-                {user?.avatar ? (
-                  <img src={user.avatar} alt={user.nickname || "User"} className="w-full h-full object-cover" />
-                ) : user?.nickname ? (
-                  user.nickname.slice(0, 1).toUpperCase()
-                ) : user?.username ? (
-                  user.username.slice(0, 1).toUpperCase()
-                ) : (
-                  <IUser size={24} />
-                )}
+                <Avatar
+                  src={user?.avatar}
+                  name={user?.nickname || user?.username}
+                  icon={!user?.nickname && !user?.username ? <IUser size={24} /> : undefined}
+                  size={48}
+                />
               </div>
               <span
                 className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-s2 shadow-xs ${
@@ -3403,29 +3405,41 @@ export default function Profile({ wide, active = true }: { wide: boolean; active
       </Modal>
 
       {/* Export Sheet */}
-      <ExportSheet
-        isOpen={exportSheetState.isOpen}
-        onClose={() => setExportSheetState((s) => ({ ...s, isOpen: false }))}
-        videoId={exportSheetState.videoId}
-        episode={exportSheetState.episode}
-        title={exportSheetState.title}
-        batchEpisodes={exportSheetState.batchEpisodes}
-        batchItems={exportSheetState.batchItems}
-      />
+      {exportSheetState.isOpen && (
+        <Suspense fallback={null}>
+          <ExportSheet
+            isOpen={exportSheetState.isOpen}
+            onClose={() => setExportSheetState((s) => ({ ...s, isOpen: false }))}
+            videoId={exportSheetState.videoId}
+            episode={exportSheetState.episode}
+            title={exportSheetState.title}
+            batchEpisodes={exportSheetState.batchEpisodes}
+            batchItems={exportSheetState.batchItems}
+          />
+        </Suspense>
+      )}
 
       {/* Batch Downloader Sheet */}
-      <BatchDownloadSheet
-        isOpen={batchSheet.isOpen}
-        onClose={() => setBatchSheet((s) => ({ ...s, isOpen: false }))}
-        videoId={batchSheet.videoId}
-        title={batchSheet.title}
-        cover={batchSheet.cover}
-        totalEpisodes={batchSheet.totalEpisodes}
-        episodeNumbers={batchSheet.episodeNumbers}
-      />
+      {batchSheet.isOpen && (
+        <Suspense fallback={null}>
+          <BatchDownloadSheet
+            isOpen={batchSheet.isOpen}
+            onClose={() => setBatchSheet((s) => ({ ...s, isOpen: false }))}
+            videoId={batchSheet.videoId}
+            title={batchSheet.title}
+            cover={batchSheet.cover}
+            totalEpisodes={batchSheet.totalEpisodes}
+            episodeNumbers={batchSheet.episodeNumbers}
+          />
+        </Suspense>
+      )}
 
       {/* In-App Update Modal */}
-      <UpdateModal info={updateInfo} onClose={() => setUpdateInfo(null)} />
+      {updateInfo && (
+        <Suspense fallback={null}>
+          <UpdateModal info={updateInfo} onClose={() => setUpdateInfo(null)} />
+        </Suspense>
+      )}
     </div>
   );
 }

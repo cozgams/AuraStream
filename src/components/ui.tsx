@@ -1,5 +1,5 @@
 import { Button, Image, Surface } from "./ios/controls";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { cover, platform } from "../api";
 export { Sheet, Modal, DockPanel } from "./ios/overlays";
 import { useStore } from "../store";
@@ -175,20 +175,26 @@ export function CloseBtn({ onClick }: { onClick: () => void }) {
 export function Img({ src, alt = "", className = "", eager = false, raw = false }: {
   src: string; alt?: string; className?: string; eager?: boolean; raw?: boolean;
 }) {
+  const imgRef = useRef<HTMLImageElement | null>(null);
   const [ok, setOk] = useState(false);
   const [err, setErr] = useState(false);
   const url = raw ? src : cover(src);
 
   useEffect(() => {
-    setOk(false);
-    setErr(!url);
-  }, [url]);
-
-  const onImgRef = useCallback((node: HTMLImageElement | null) => {
-    if (node && node.complete && node.naturalWidth > 0) {
-      setOk(true);
+    if (!url) {
+      setOk(false);
+      setErr(true);
+      return;
     }
-  }, []);
+    const node = imgRef.current;
+    if (node && node.complete) {
+      setOk(node.naturalWidth > 0);
+      setErr(node.naturalWidth === 0);
+    } else {
+      setOk(false);
+      setErr(false);
+    }
+  }, [url]);
 
   return (
     <div className={`ios-image absolute inset-0 overflow-hidden ${className}`} data-ui="image-frame">
@@ -196,12 +202,23 @@ export function Img({ src, alt = "", className = "", eager = false, raw = false 
       {err && <div className="ios-image-error" role="img" aria-label={alt || "Cover unavailable"}>AS</div>}
       {url && (
         <Image
-          ref={onImgRef}
+          ref={imgRef}
           src={url}
           alt={alt}
           loading={eager ? "eager" : "lazy"}
-          onLoad={() => setOk(true)}
-          onError={() => setErr(true)}
+          onLoad={(e) => {
+            const img = e.currentTarget;
+            if (img.naturalWidth > 0) {
+              setOk(true);
+              setErr(false);
+            } else {
+              setErr(true);
+            }
+          }}
+          onError={() => {
+            setOk(false);
+            setErr(true);
+          }}
           className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${ok ? "opacity-100" : "opacity-0"}`}
           draggable={false}
         />

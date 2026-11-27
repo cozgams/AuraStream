@@ -8,7 +8,7 @@ import { Masonry } from "../components/cards";
 import { InplaceSearch } from "../components/InplaceSearch";
 import { Avatar, Empty } from "../components/ui";
 import { IBack, IGrid, ISearch, IUser } from "../icons";
-import { formatDramaAuthor, formatDramaDesc } from "../subtitles/dramaTranslator";
+import { formatDramaAuthor, formatDramaDesc } from "../dramaTranslator";
 import { localizeError } from "../i18n";
 
 /* ================= Following Feed ================= */

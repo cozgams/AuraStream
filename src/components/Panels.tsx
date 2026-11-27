@@ -1,6 +1,6 @@
 import { Button, Form, Image, Input } from "./ios/controls";
 import { Loader } from "./ios/effects";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fmt, cover as imageCover } from "../api";
 import { handleArticleClick, parseInternalVideoId, sanitizeHtml } from "../html";
 import type { Comment, CommentPage, Episode } from "../types";
@@ -8,11 +8,12 @@ import { useStore } from "../store";
 import { copyText } from "../clipboard";
 import { Avatar, Empty } from "./ui";
 import { IClose, ICommentF, IDownload, ISendF, IStar, IStarF, ITrash, IVertSwap } from "../icons";
-import { formatCommentText, formatDramaAuthor, formatDramaTitle } from "../subtitles/dramaTranslator";
+import { formatCommentText, formatDramaAuthor, formatDramaTitle } from "../dramaTranslator";
 import { commentText, formatRelativeTime } from "../commentText";
 import { isEpisodeDownloaded } from "../offline/downloadService";
 import { localizeError } from "../i18n";
-import BatchDownloadSheet from "./BatchDownloadSheet";
+
+const BatchDownloadSheet = lazy(() => import("./BatchDownloadSheet"));
 
 /* ================= Episode Selector ================= */
 export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bare = false, title, cover }: {
@@ -115,15 +116,19 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bar
         </div>
       )}
 
-      <BatchDownloadSheet
-        isOpen={batchOpen}
-        onClose={() => setBatchOpen(false)}
-        videoId={videoId}
-        title={title || `Series #${videoId}`}
-        cover={cover || ""}
-        totalEpisodes={epCount}
-        episodeNumbers={episodes?.map((e) => e.ep_num)}
-      />
+      {batchOpen && (
+        <Suspense fallback={null}>
+          <BatchDownloadSheet
+            isOpen={batchOpen}
+            onClose={() => setBatchOpen(false)}
+            videoId={videoId}
+            title={title || `Series #${videoId}`}
+            cover={cover || ""}
+            totalEpisodes={epCount}
+            episodeNumbers={episodes?.map((e) => e.ep_num)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

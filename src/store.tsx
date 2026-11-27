@@ -4,7 +4,6 @@ import { isStrictSecurity, setSiteOrigin, setStrictSecurity as setHtmlStrictSecu
 import type { User } from "./types";
 import { readStorage, removeStorage, writeStorage, STORAGE_KEYS } from "./storage";
 import { getTranslation, type Language, type TranslationKey } from "./i18n";
-import type { SubtitleMode, SubtitleSize } from "./subtitles/types";
 import {
   fetchCloudUserData,
   getCurrentAuthUid,
@@ -196,26 +195,6 @@ function readLanguagePreference(): Language {
   return "en";
 }
 
-function readSubtitleModePreference(): SubtitleMode {
-  try {
-    const saved = readStorage(STORAGE_KEYS.subtitleMode);
-    if (saved === "en") return "en";
-    return "off"; // Default to off
-  } catch {
-    return "off";
-  }
-}
-
-function readSubtitleSizePreference(): SubtitleSize {
-  try {
-    const saved = readStorage(STORAGE_KEYS.subtitleSize);
-    if (saved === "sm" || saved === "md" || saved === "lg" || saved === "xl") return saved;
-    return "md";
-  } catch {
-    return "md";
-  }
-}
-
 function resolveTheme(preference: ThemePreference): Theme {
   if (preference === "dark") return "dark";
   if (preference === "light") return "light";
@@ -317,10 +296,6 @@ type Store = {
   language: Language;
   setLanguage: (lang: Language) => void;
   t: (key: TranslationKey, params?: Record<string, string | number>) => string;
-  subtitleMode: SubtitleMode;
-  setSubtitleMode: (m: SubtitleMode) => void;
-  subtitleSize: SubtitleSize;
-  setSubtitleSize: (s: SubtitleSize) => void;
 };
 
 const Ctx = createContext<Store>(null as unknown as Store);
@@ -368,24 +343,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [securityPending, setSecurityPending] = useState(false);
   const [language, setLanguageState] = useState<Language>(readLanguagePreference);
   const [accent, setAccentState] = useState<AccentColor>(readAccentPreference);
-  const [subtitleMode, setSubtitleModeState] = useState<SubtitleMode>(readSubtitleModePreference);
-  const [subtitleSize, setSubtitleSizeState] = useState<SubtitleSize>(readSubtitleSizePreference);
   const toastSeq = useRef(0);
 
   const setLanguage = useCallback((next: Language) => {
     setLanguageState(next);
     writeStorage(STORAGE_KEYS.lang, next);
-  }, []);
-
-  const setSubtitleMode = useCallback((next: SubtitleMode) => {
-    const mode = next === "off" ? "off" : "en";
-    setSubtitleModeState(mode);
-    writeStorage(STORAGE_KEYS.subtitleMode, mode);
-  }, []);
-
-  const setSubtitleSize = useCallback((next: SubtitleSize) => {
-    setSubtitleSizeState(next);
-    writeStorage(STORAGE_KEYS.subtitleSize, next);
   }, []);
 
   const t = useCallback((key: TranslationKey, params?: Record<string, string | number>) => {
@@ -433,8 +395,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       applyAccent(nextAccent);
       setAccentState(nextAccent);
       setLanguageState(readLanguagePreference());
-      setSubtitleModeState(readSubtitleModePreference());
-      setSubtitleSizeState(readSubtitleSizePreference());
     };
     window.addEventListener("aurastream:storage-migrated", syncMigrated);
     return () => window.removeEventListener("aurastream:storage-migrated", syncMigrated);
@@ -893,12 +853,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     strictSecurity, strictSecurityReady, securityPending, cliRelaxed, setStrictSecurity,
     toasts, toast, lineEpoch,
     language, setLanguage, t,
-    subtitleMode, setSubtitleMode, subtitleSize, setSubtitleSize,
   }), [theme, themePreference, setTheme, accent, setAccent, tab, setTab, stack, push, pop, user, setUser, loginOpen, logout,
     p, toggleLikeLocal, toggleFavLocal, clearFavs, toggleWatchLaterLocal, clearWatchLater, toggleFollowLocal, addHistory, removeHistory, clearHistory, mergeCloudUserData, hydrateCloudForUid,
     setMuted, setMuteOnStartup, setSwipeEp, setPreferHevc, setVolume, addSearch, removeSearch, clearSearchHist, strictSecurity, strictSecurityReady, securityPending, cliRelaxed, setStrictSecurity,
     toasts, toast, lineEpoch, theater, setTheater, fs, setFs, clean, setClean,
-    language, setLanguage, t, subtitleMode, setSubtitleMode, subtitleSize, setSubtitleSize]);
+    language, setLanguage, t]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

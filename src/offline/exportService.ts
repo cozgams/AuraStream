@@ -1,15 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { LOCAL } from "../api";
-import { formatDramaTitle } from "../subtitles/dramaTranslator";
+import { formatDramaTitle } from "../dramaTranslator";
 import { getOfflineEpisodes } from "./downloadService";
-import {
-  exportToSrt,
-  exportToVtt,
-  getAICaptionConfig,
-  getSubtitlesForEpisode,
-  transcribeEpisodeWithAI,
-} from "../subtitles/aiSubtitleService";
-import { translateTrackToEnglish } from "../subtitles/translator";
 
 export interface StorageInfo {
   hasSdCard: boolean;
@@ -57,7 +49,6 @@ export interface NativeExportBridge {
   writeChunk(base64Chunk: string): boolean;
   finishExport(fileName: string, dramaTitle: string, action: string): string;
   exportLocalFile?(sourcePath: string, fileName: string, dramaTitle: string, action: string): string;
-  exportSubtitleText?(fileName: string, content: string, action: string): string;
   getLastExportedUri?(): string;
   openInGallery?(pathOrUri?: string): boolean;
   getDeviceAbi?(): string;
@@ -72,7 +63,6 @@ export interface NativeExportBridge {
   requestIgnoreBatteryOptimizations?(): boolean;
   requestLegacyStoragePermission?(): boolean;
   openAppSettings?(): boolean;
-  openCaptionSettings?(): boolean;
 }
 
 declare global {
@@ -93,117 +83,6 @@ export function getLastExportedUri(): string {
     return window.AuraNativeExport.getLastExportedUri() || "";
   }
   return "";
-}
-
-export async function processSubtitleExport(
-  videoId: number,
-  episode: number,
-  format: "srt" | "vtt" = "srt",
-  title?: string,
-  lang: "en" | "zh" = "en",
-  action: "save_movies" | "save_downloads" = "save_downloads",
-  streamUrl?: string,
-  fallbackCues?: { id: number; start: number; end: number; en?: string; zh?: string }[]
-): Promise<{ success: boolean; fileName: string; savedPath?: string; error?: string }> {
-  try {
-    let track = await getSubtitlesForEpisode(videoId, episode, title, undefined, streamUrl);
-    if ((!track?.cues?.length) && fallbackCues && fallbackCues.length > 0) {
-      track = {
-        videoId,
-        episode,
-        cues: fallbackCues.map((c, idx) => ({
-          id: c.id || idx + 1,
-          start: c.start,
-          end: c.end,
-          en: c.en || c.zh || "",
-          zh: c.zh || c.en || "",
-        })),
-        source: "native_track",
-        generatedAt: Date.now(),
-      };
-    }
-    // If no cues yet, and streamUrl is provided and AI caption provider is configured, attempt AI transcription
-    if ((!track?.cues?.length) && streamUrl) {
-      const aiConfig = getAICaptionConfig();
-      if (aiConfig.provider !== "none" || aiConfig.geminiKey || aiConfig.groqKey) {
-        try {
-          track = await transcribeEpisodeWithAI(videoId, episode, streamUrl);
-        } catch {
-          // ignore error
-        }
-      }
-    }
-    // If English export is requested and track has cues, translate foreign cues to English
-    if (track?.cues?.length && lang === "en") {
-      try {
-        track = await translateTrackToEnglish(track);
-      } catch {
-        // keep existing track
-      }
-    }
-    const cleanTitle = formatDramaTitle(title || `Episode_${episode}`);
-    const safeTitle = sanitizeFileName(cleanTitle);
-    const ext = format === "srt" ? "srt" : "vtt";
-    const fileName = `${safeTitle}_Ep${episode}.${ext}`;
-    if (!track?.cues?.length) {
-      return { success: false, fileName, error: "No subtitle track available for this episode" };
-    }
-    const content = format === "srt" ? exportToSrt(track, lang) : exportToVtt(track, lang);
-
-    if (isNativeExportSupported() && typeof window.AuraNativeExport?.exportSubtitleText === "function") {
-      const result = window.AuraNativeExport.exportSubtitleText(fileName, content, action);
-      if (result.startsWith("ERROR:")) {
-        return { success: false, fileName, error: result.replace("ERROR:", "") };
-      }
-      if (result === "UNKNOWN_ACTION") {
-        return { success: false, fileName, error: "Unsupported subtitle export action" };
-      }
-      let savedPath = result;
-      if (result.startsWith("SUCCESS:")) {
-        savedPath = result.replace("SUCCESS:", "");
-      } else if (result.startsWith("SAVED_LOCAL:")) {
-        savedPath = result.replace("SAVED_LOCAL:", "");
-      }
-      return { success: true, fileName, savedPath };
-    }
-
-    // Web / Desktop Fallback
-    const mime = format === "srt" ? "application/x-subrip" : "text/vtt";
-    const blob = new Blob([content], { type: `${mime};charset=utf-8` });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = fileName;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-
-    return { success: true, fileName, savedPath: `Downloads/${fileName}` };
-  } catch (e: any) {
-    return {
-      success: false,
-      fileName: `Episode_${episode}.${format}`,
-      error: e?.message || "Failed to export subtitle",
-    };
-  }
-}
-
-export function isAndroidCaptionSettingsSupported(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.AuraNativeExport?.openCaptionSettings === "function"
-  );
-}
-
-export function openAndroidCaptionSettings(): boolean {
-  if (
-    typeof window !== "undefined" &&
-    typeof window.AuraNativeExport?.openCaptionSettings === "function"
-  ) {
-    return window.AuraNativeExport.openCaptionSettings();
-  }
-  return false;
 }
 
 export function getDeviceStorageInfo(): StorageInfo {
@@ -742,7 +621,7 @@ export async function processEpisodeExport(
   episode: number,
   action: ExportAction,
   onProgress?: (progressPct: number) => void,
-  options?: { includeSubtitles?: boolean; subtitleFormat?: "srt" | "vtt"; signal?: AbortSignal }
+  options?: { signal?: AbortSignal }
 ): Promise<ExportResult> {
   const signal = options?.signal;
   if (signal?.aborted) {
@@ -751,9 +630,6 @@ export async function processEpisodeExport(
 
   const id = `${videoId}_${episode}`;
   const meta = getOfflineEpisodes().find((it) => it.id === id);
-  const shouldBundleSubtitles =
-    Boolean(options?.includeSubtitles) &&
-    (action === "save" || action === "save_movies" || action === "save_downloads" || action === "save_sdcard");
 
   // Fast zero-Base64-copy native path for episodes stored by Rust downloader on Android
   if (
@@ -777,21 +653,6 @@ export async function processEpisodeExport(
     const parsed = parseNativeExportResult(result, fileName);
     if (!parsed.ok) {
       return { success: false, fileName, action, error: parsed.error };
-    }
-
-    if (shouldBundleSubtitles) {
-      try {
-        await processSubtitleExport(
-          videoId,
-          episode,
-          options?.subtitleFormat || "srt",
-          cleanTitle,
-          "en",
-          "save_downloads"
-        );
-      } catch {
-        // non-fatal
-      }
     }
 
     return {
@@ -862,21 +723,6 @@ export async function processEpisodeExport(
       return { success: false, fileName, action, error: parsed.error };
     }
 
-    if (shouldBundleSubtitles) {
-      try {
-        await processSubtitleExport(
-          videoId,
-          episode,
-          options?.subtitleFormat || "srt",
-          title,
-          "en",
-          "save_downloads"
-        );
-      } catch {
-        // non-fatal
-      }
-    }
-
     return {
       success: true,
       fileName,
@@ -936,21 +782,6 @@ export async function processEpisodeExport(
   anchor.click();
   document.body.removeChild(anchor);
   setTimeout(() => URL.revokeObjectURL(url), 10000);
-
-  if (shouldBundleSubtitles) {
-    try {
-      await processSubtitleExport(
-        videoId,
-        episode,
-        options?.subtitleFormat || "srt",
-        title,
-        "en",
-        "save_downloads"
-      );
-    } catch {
-      // non-fatal
-    }
-  }
 
   onProgress?.(100);
   return {

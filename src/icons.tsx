@@ -136,23 +136,6 @@ export const IGlobe = S(
   </>,
 );
 
-export const ICaptions = S(
-  <>
-    <rect x="2.5" y="4.5" width="19" height="15" rx="3" />
-    <path d="M 10 9.2 H 8.2 A 2.8 2.8 0 0 0 5.4 12 A 2.8 2.8 0 0 0 8.2 14.8 H 10" />
-    <path d="M 17.5 9.2 H 15.7 A 2.8 2.8 0 0 0 12.9 12 A 2.8 2.8 0 0 0 15.7 14.8 H 17.5" />
-  </>
-);
-
-export const ICaptionsF = ({ size = 24, className = "", style, strokeWidth = 2 }: P) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={style}
-    strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <rect x="2.5" y="4.5" width="19" height="15" rx="3" fill="#ffffff" stroke="#ffffff" strokeWidth={strokeWidth} />
-    <path d="M 10 9.2 H 8.2 A 2.8 2.8 0 0 0 5.4 12 A 2.8 2.8 0 0 0 8.2 14.8 H 10" fill="none" stroke="#080c14" strokeWidth={2.4} />
-    <path d="M 17.5 9.2 H 15.7 A 2.8 2.8 0 0 0 12.9 12 A 2.8 2.8 0 0 0 15.7 14.8 H 17.5" fill="none" stroke="#080c14" strokeWidth={2.4} />
-  </svg>
-);
-
 export const IFolder = S(
   <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
 );

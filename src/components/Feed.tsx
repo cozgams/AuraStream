@@ -1,6 +1,6 @@
 import { Button, Image, SegmentedControl, Surface } from "./ios/controls";
 import { Loader } from "./ios/effects";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { api, cover, fmt, fmtTime, isMobile, logLine, platform } from "../api";
 import type { Detail, Episode, Post, VideoCard } from "../types";
@@ -9,8 +9,6 @@ import { Avatar, Img, Sheet } from "./ui";
 import VideoSurface, { type VideoHandle } from "./VideoSurface";
 import PlayerControls from "./PlayerControls";
 import PlaybackLock from "./PlaybackLock";
-import SubtitleOverlay from "./SubtitleOverlay";
-import SubtitleSheet from "./SubtitleSheet";
 import LinePicker from "./LinePicker";
 import { ArticlePanel, CommentsPanel, EpisodesPanel } from "./Panels";
 import { RowCard } from "./cards";
@@ -19,11 +17,11 @@ import { copyText } from "../clipboard";
 import { flushNativeStateSync } from "../storage";
 import { tracePlayback } from "../playbackDiagnostics";
 import { createPlaybackClock } from "../playbackClock";
-import ExportSheet from "./ExportSheet";
-import BatchDownloadSheet from "./BatchDownloadSheet";
-import DownloadChoiceSheet from "./DownloadChoiceSheet";
-import { formatDramaAuthor, formatDramaDesc, formatDramaTitle } from "../subtitles/dramaTranslator";
-import type { SubtitleTrackStatus } from "../subtitles/types";
+import { formatDramaAuthor, formatDramaDesc, formatDramaTitle } from "../dramaTranslator";
+
+const ExportSheet = lazy(() => import("./ExportSheet"));
+const BatchDownloadSheet = lazy(() => import("./BatchDownloadSheet"));
+const DownloadChoiceSheet = lazy(() => import("./DownloadChoiceSheet"));
 import {
   ensureOfflineSyncReady,
   isEpisodeDownloaded,
@@ -54,7 +52,7 @@ import {
 import { processEpisodeExport } from "../offline/exportService";
 import { useMediaSession } from "../useMediaSession";
 import {
-  IBack, IBoltF, ICaptions, ICaptionsF, ICheck, IChevR, IChevronDown, IChevronUp, IClock, IClose, ICommentF, ICompress, IDownload, IEye, IExpand, IFileText,
+  IBack, IBoltF, ICheck, IChevR, IChevronDown, IChevronUp, IClock, IClose, ICommentF, ICompress, IDownload, IEye, IExpand, IFileText,
   IFastForwardF, ILink, IList, ILockF, IMore, IPauseF, IPlayF, IRewindF, IStar, IStarF, ISun, IVertSwap, IVol, IVolMute,
 } from "../icons";
 
@@ -127,8 +125,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [err, setErr] = useState("");
   const [panel, setPanel] = useState<"episodes" | "comments" | "article" | "detail" | "more" | null>(null);
   const [lineOpen, setLineOpen] = useState(false);
-  const [subtitleSheetOpen, setSubtitleSheetOpen] = useState(false);
-  const [subtitleTrackInfo, setSubtitleTrackInfo] = useState<SubtitleTrackStatus | undefined>(undefined);
   const [descOpen, setDescOpen] = useState(false);
   const [audioDuck, setAudioDuck] = useState(false);
   const [cancelAutoNext, setCancelAutoNext] = useState(false);
@@ -1811,24 +1807,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         }} />
                     </div>
                   </div>
-                  {active && (
-                    <SubtitleOverlay
-                      videoId={curId}
-                      episode={curEp}
-                      title={dramaTitle}
-                      streamUrl={playUrl}
-                      mode={store.subtitleMode}
-                      size={store.subtitleSize}
-                      playbackClock={playbackClock}
-                      isDesktop={isDesktop}
-                      clean={clean}
-                      fs={fs}
-                      rotated={rotated}
-                      bottomOffset={bottomInset}
-                      videoEl={activeVideoEl}
-                      onTrackStatus={setSubtitleTrackInfo}
-                    />
-                  )}
 
                   {/* Double-tap Seek & Tap Play/Pause Ripple HUD */}
                   {seekRipple && (
@@ -1930,7 +1908,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                   </div>
                 </div>
               )}
-              {/* Mobile action rail (Star / Comments / Captions / Download / More) */}
+              {/* Mobile action rail (Star / Comments / Download / More) */}
               {!fs && !clean && !isDesktop && !panel && (
                 <div className="absolute right-2.5 z-30 flex flex-col items-center gap-[12px] pointer-events-auto"
                   style={{ bottom: `calc(var(--sab, 48px) + ${bottomInset + 18}px)` }}
@@ -1964,25 +1942,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     <span className="text-[11px] hg-ink-2 hg-ov-shadow font-medium tabular-nums">{fmt(meta.comment) || t("player.comments")}</span>
                   </Button>
 
-                  {/* 3. Captions / Subtitles */}
-                  <Button
-                    type="button"
-                    onClick={() => setSubtitleSheetOpen(true)}
-                    style={{ touchAction: "manipulation" }}
-                    className="relative flex flex-col items-center justify-center min-w-[50px] min-h-[50px] gap-0.5 pressable cursor-pointer select-none active:scale-95 transition-transform"
-                    aria-label="Subtitles & Captions"
-                  >
-                    {store.subtitleMode !== "off" ? (
-                      <ICaptionsF size={25} className={subtitleTrackInfo?.hasTrack ? "text-amber-400 drop-shadow-[0_2px_8px_rgba(251,191,36,0.45)]" : "hg-ink hg-ov-shadow"} />
-                    ) : (
-                      <ICaptions size={25} className="hg-ink hg-ov-shadow" />
-                    )}
-                    <span className="text-[11px] hg-ink-2 hg-ov-shadow font-medium">
-                      {store.subtitleMode === "off" ? "CC Off" : "Captions"}
-                    </span>
-                  </Button>
-
-                  {/* 4. Offline Download */}
+                  {/* 3. Offline Download */}
                   <Button
                     type="button"
                     onClick={() => setDownloadChoiceOpen(true)}
@@ -3154,15 +3114,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
             top: rotated ? 12 : "calc(var(--sat, 0px) + 8px)",
             right: fs ? (rotated ? "calc(var(--sab, 0px) + 60px)" : "calc(var(--sar, 0px) + 60px)") : undefined,
           }}>
-          {fs && (
-            <Button
-              onClick={() => setSubtitleSheetOpen(true)}
-              aria-label="Subtitles & Captions"
-              className="hg-chip w-10 h-10 rounded-full flex items-center justify-center pressable elev-1"
-            >
-              {store.subtitleMode !== "off" ? <ICaptionsF size={17} className="text-amber-400" /> : <ICaptions size={17} />}
-            </Button>
-          )}
           {!fs && !clean && <Button onClick={() => setMuted(m => !m)} aria-label={muted ? "Unmute" : "Mute"}
             className="hg-chip w-10 h-10 rounded-full flex items-center justify-center pressable elev-1">
             {muted ? <IVolMute size={17} /> : <IVol size={17} />}
@@ -3193,8 +3144,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           ? episodes.map((e) => e.ep_num)
           : Array.from({ length: resolvedTotalEpisodes }, (_, idx) => idx + 1);
         return (
-          <>
-      <DownloadChoiceSheet
+          <Suspense fallback={null}>
+      {downloadChoiceOpen && <DownloadChoiceSheet
         isOpen={downloadChoiceOpen}
         onClose={() => setDownloadChoiceOpen(false)}
         videoId={curId}
@@ -3251,8 +3202,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           setTargetExportEpisode(targetEp || curEp);
           setExportModalOpen(true);
         }}
-      />
-      <ExportSheet
+      />}
+      {exportModalOpen && <ExportSheet
         isOpen={exportModalOpen}
         onClose={() => {
           setExportModalOpen(false);
@@ -3261,8 +3212,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         videoId={curId}
         episode={targetExportEpisode || curEp}
         title={formatDramaTitle(meta?.title) || formatDramaTitle(detail?.title) || formatDramaTitle(title) || `Series #${curId}`}
-      />
-      <BatchDownloadSheet
+      />}
+      {batchDownloadOpen && <BatchDownloadSheet
         isOpen={batchDownloadOpen}
         onClose={() => {
           setBatchDownloadOpen(false);
@@ -3274,24 +3225,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         totalEpisodes={resolvedTotalEpisodes}
         episodeNumbers={resolvedEpisodeNumbers}
         preselectAll={batchPreselectAll}
-      />
-          </>
+      />}
+          </Suspense>
         );
       })()}
       <LinePicker open={lineOpen} onClose={() => setLineOpen(false)} />
-      <SubtitleSheet
-        open={subtitleSheetOpen}
-        onClose={() => setSubtitleSheetOpen(false)}
-        mode={store.subtitleMode}
-        onModeChange={store.setSubtitleMode}
-        size={store.subtitleSize}
-        onSizeChange={store.setSubtitleSize}
-        videoId={curId}
-        episode={curEp}
-        title={dramaTitle}
-        streamUrl={playUrl}
-        trackInfo={subtitleTrackInfo}
-      />
       {controlsLocked && <PlaybackLock active={active} onUnlock={() => { setControlsLocked(false); wake(); }} />}
     </div>
   );
